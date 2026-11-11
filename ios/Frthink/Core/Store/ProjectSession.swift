@@ -284,6 +284,10 @@ final class ProjectSession {
 
     // MARK: - 落盘
 
+    /// 落盘失败时通知外层。`AppStore` 在创建会话时接到全局错误条：
+    /// 磁盘满/写入失败不能静默把「保存中」熄掉，让用户误以为已保存。
+    @ObservationIgnored var onSaveError: ((String) -> Void)?
+
     /// 正文是否已解密进内存。
     var isManuscriptLoaded: Bool { bodyLoaded }
 
@@ -470,37 +474,50 @@ final class ProjectSession {
         let previousManuscript = lastSavedManuscript
         // 先保留 dirty，等编码真正结束再清；期间界面显示“保存中”是对的。
         Task.detached(priority: .utility) { [weak self] in
-            try? store.saveProject(projectSnapshot)
+            var firstError: Error?
+            do { try store.saveProject(projectSnapshot) } catch {
+                firstError = firstError ?? error
+            }
             var savedBody = false
             var savedMeta: FileStore.BodyMeta?
             if let windowSnapshot {
-                if (try? store.saveBodyWindow(
-                    windowSnapshot.text,
-                    startPage: windowSnapshot.startPage,
-                    windowStart: windowSnapshot.start,
-                    prefixCharacterCount: windowSnapshot.prefixCharacterCount,
-                    chapters: payloadSnapshot.chapters,
-                    projectID: projectSnapshot.id
-                )) != nil {
+                do {
+                    try store.saveBodyWindow(
+                        windowSnapshot.text,
+                        startPage: windowSnapshot.startPage,
+                        windowStart: windowSnapshot.start,
+                        prefixCharacterCount: windowSnapshot.prefixCharacterCount,
+                        chapters: payloadSnapshot.chapters,
+                        projectID: projectSnapshot.id
+                    )
                     savedBody = true
                     savedMeta = store.loadBodyMeta(projectSnapshot.id)
+                } catch {
+                    firstError = firstError ?? error
                 }
             } else if let bodySnapshot {
                 let fromPage = Self.changedPageIndex(
                     previous: previousManuscript,
                     current: bodySnapshot
                 )
-                if (try? store.saveBody(
-                    bodySnapshot,
-                    chapters: payloadSnapshot.chapters,
-                    projectID: projectSnapshot.id,
-                    changedFromPage: fromPage
-                )) != nil {
+                do {
+                    try store.saveBody(
+                        bodySnapshot,
+                        chapters: payloadSnapshot.chapters,
+                        projectID: projectSnapshot.id,
+                        changedFromPage: fromPage
+                    )
                     savedBody = true
+                } catch {
+                    firstError = firstError ?? error
                 }
             }
             if kind == .all {
-                try? store.savePayload(payloadSnapshot, projectID: projectSnapshot.id)
+                do {
+                    try store.savePayload(payloadSnapshot, projectID: projectSnapshot.id)
+                } catch {
+                    firstError = firstError ?? error
+                }
             }
             await MainActor.run {
                 guard let self else { return }
@@ -513,6 +530,13 @@ final class ProjectSession {
                 }
                 self.saveInFlight = false
                 self.resumeSaveWaiters()
+                if let firstError {
+                    // 保持 dirty，但不再自动重试：磁盘满时每 2 秒重试只会更糟。
+                    self.isDirty = true
+                    self.queuedSaveKind = nil
+                    self.onSaveError?("保存失败：\(firstError.localizedDescription)")
+                    return
+                }
                 if self.savesQuiesced {
                     // 导入正在替换磁盘内容：旧快照不能再写回去。
                     self.queuedSaveKind = nil
@@ -531,12 +555,20 @@ final class ProjectSession {
 
     func saveSource() {
         guard !isReadOnly else { return }
-        try? store.saveSource(sourceText, projectID: project.id)
+        do {
+            try store.saveSource(sourceText, projectID: project.id)
+        } catch {
+            onSaveError?("原文保存失败：\(error.localizedDescription)")
+        }
     }
 
     func saveTranslations() {
         guard !isReadOnly else { return }
-        try? store.saveTranslations(translations, projectID: project.id)
+        do {
+            try store.saveTranslations(translations, projectID: project.id)
+        } catch {
+            onSaveError?("译文保存失败：\(error.localizedDescription)")
+        }
     }
 
     // MARK: - 生成状态

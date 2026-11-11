@@ -50,6 +50,13 @@ enum FrthinkArchive {
     /// 当前时间戳（epoch 毫秒）。信封里的 `createdAt` 用这个单位。
     static var nowMillis: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
+    /// 归档 JSON 里的日期串，与 `jsonEncoder` 的 `.iso8601` 保持一致。
+    static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     // MARK: - 信封
 
     /// 最外层信封，字段名照抄原版（`I1\M`）。
@@ -146,14 +153,73 @@ enum FrthinkArchive {
             projectId = (try? c.decode(String.self, forKey: .projectId)) ?? ""
             title = (try? c.decode(String.self, forKey: .title)) ?? ""
             synopsis = (try? c.decode(String.self, forKey: .synopsis)) ?? ""
-            snapshot = (try? c.decode(ArchivedSnapshot.self, forKey: .snapshot))
-                ?? ArchivedSnapshot()
+            // snapshot 是书稿本体：解不出来必须整本失败，不能静默换成空快照，
+            // 否则覆盖导入会用空书替换掉本机同名书。
+            guard let decodedSnapshot = try? c.decode(
+                ArchivedSnapshot.self,
+                forKey: .snapshot
+            ) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .snapshot,
+                    in: c,
+                    debugDescription: "snapshot 缺失或无法解析"
+                )
+            }
+            snapshot = decodedSnapshot
             // 原版没有顶层 sourceText：原文在 snapshot.localSourceDocuments 里，
             // 已经由 ArchivedSnapshot 解出来了，这里回填。
             let ownSource = (try? c.decode(String.self, forKey: .sourceText)) ?? ""
             sourceText = ownSource.isEmpty ? snapshot.sourceText : ownSource
-            translations = (try? c.decode([TranslationSegment].self, forKey: .translations)) ?? []
-            universeEntries = (try? c.decode([UniverseEntry].self, forKey: .universeEntries)) ?? []
+            translations = {
+                let iosShape =
+                    (try? c.decode([TranslationSegment].self, forKey: .translations)) ?? []
+                if !iosShape.isEmpty { return iosShape }
+                // Android 存档的 translations 是 TranslationRecord 列表
+                // （target/sourceHash/index/text/chunkHash），没有 owner/project；
+                // 解成 iOS 模型时先留空，由 restore 按本机 owner 重打归属。
+                let androidShape =
+                    (try? c.decode([ArchivedTranslationJSON].self, forKey: .translations)) ?? []
+                return androidShape.compactMap { raw in
+                    guard let index = raw.index,
+                          let text = raw.text,
+                          !text.isEmpty,
+                          let sourceHash = raw.sourceHash,
+                          !sourceHash.isEmpty
+                    else { return nil }
+                    return TranslationSegment(
+                        owner: "",
+                        project: "",
+                        target: TranslationSegment.defaultTarget,
+                        sourceHash: sourceHash,
+                        segment: index,
+                        payload: text
+                    )
+                }
+            }()
+            // Android 的项目级共享世界书是 WorldbookEntry（正文键是 `content`），
+            // iOS 自己写的是 UniverseEntry（`body`/`kind`）。两套形状都读，
+            // 只解出一堆空 body 时按 Android 形状重映射。
+            let iosEntries =
+                (try? c.decode([UniverseEntry].self, forKey: .universeEntries)) ?? []
+            let rawBooks =
+                (try? c.decode([ArchivedUniverseJSON].self, forKey: .universeEntries)) ?? []
+            if !rawBooks.isEmpty, iosEntries.allSatisfy({ $0.body.isEmpty }) {
+                universeEntries = rawBooks.compactMap { raw in
+                    guard let title = raw.title, !title.isEmpty else { return nil }
+                    let content = raw.content ?? ""
+                    guard !content.isEmpty else { return nil }
+                    return UniverseEntry(
+                        id: raw.id ?? UUID().uuidString,
+                        title: title,
+                        body: content,
+                        kind: .worldbook,
+                        enabled: raw.enabled ?? true,
+                        updatedAt: Date()
+                    )
+                }
+            } else {
+                universeEntries = iosEntries
+            }
             coverImageBase64 = (try? c.decode(String.self, forKey: .coverImageBase64)) ?? ""
             branchRootId = (try? c.decode(String.self, forKey: .branchRootId)) ?? ""
             branchOrder = (try? c.decode(Int.self, forKey: .branchOrder)) ?? 0
@@ -170,7 +236,19 @@ enum FrthinkArchive {
             try c.encode(snapshot, forKey: .snapshot)
             try c.encode(sourceText, forKey: .sourceText)
             try c.encode(translations, forKey: .translations)
-            try c.encode(universeEntries, forKey: .universeEntries)
+            // 同时写 iOS 的 body/kind 和 Android 的 content：两端各取所需。
+            let universeJSON: [[String: Any]] = universeEntries.map { entry in
+                [
+                    "id": entry.id,
+                    "title": entry.title,
+                    "body": entry.body,
+                    "kind": entry.kind.rawValue,
+                    "content": entry.body,
+                    "enabled": entry.enabled,
+                    "updatedAt": FrthinkArchive.iso8601.string(from: entry.updatedAt),
+                ]
+            }
+            try encodeAny(universeJSON, key: .universeEntries, into: &c)
             try c.encode(coverImageBase64, forKey: .coverImageBase64)
             try c.encode(branchRootId, forKey: .branchRootId)
             try c.encode(branchOrder, forKey: .branchOrder)
@@ -240,7 +318,7 @@ enum FrthinkArchive {
             assistantSupplement: String = "",
             sourceText: String = "",
             bodyPromptSendWhole: Bool = false,
-            bodyPromptTailCodePoints: Int = 5000,
+            bodyPromptTailCodePoints: Int = ProjectPayload.defaultBodyPromptTailCodePoints,
             readerOffset: Int = 0,
             readerBookmarkOffset: Int = 0,
             enabledUniverseEntryIDs: [String] = [],
@@ -334,7 +412,8 @@ enum FrthinkArchive {
         bodyPromptSendWhole =
             (try? c.decode(Bool.self, forKey: .bodyPromptSendWhole)) ?? false
         bodyPromptTailCodePoints =
-            (try? c.decode(Int.self, forKey: .bodyPromptTailCodePoints)) ?? 5000
+            (try? c.decode(Int.self, forKey: .bodyPromptTailCodePoints))
+                ?? ProjectPayload.defaultBodyPromptTailCodePoints
         readerOffset = (try? c.decode(Int.self, forKey: .readerOffset)) ?? 0
         readerBookmarkOffset =
             (try? c.decode(Int.self, forKey: .readerBookmarkOffset)) ?? 0
@@ -459,14 +538,20 @@ enum FrthinkArchive {
             )
         }
 
-        let groups: [CharacterGroup] = (worldJSON?.characterGroups ?? []).compactMap { raw in
-            guard let name = raw.name, !name.isEmpty else { return nil }
-            return CharacterGroup(
-                id: raw.id ?? UUID().uuidString,
-                name: name,
-                enabled: raw.enabled ?? true
-            )
-        }
+        let groups: [CharacterGroup] = {
+            // Android 把 characterGroups 放在 snapshot 顶层；旧 iOS 存档写在 world 里，
+            // 两处都读，顶层优先。
+            let topLevel = (try? c.decode([GroupJSON].self, forKey: .characterGroups)) ?? []
+            let source = topLevel.isEmpty ? (worldJSON?.characterGroups ?? []) : topLevel
+            return source.compactMap { raw in
+                guard let name = raw.name, !name.isEmpty else { return nil }
+                return CharacterGroup(
+                    id: raw.id ?? UUID().uuidString,
+                    name: name,
+                    enabled: raw.enabled ?? true
+                )
+            }
+        }()
 
         world = WorldBook(
             currentState: worldJSON?.currentState ?? "",
@@ -646,6 +731,12 @@ enum FrthinkArchive {
         ]
         try encodeAny(worldDict, key: .world, into: &c)
 
+        // Android 在 snapshot 顶层读 characterGroups；world 里的那份留给旧 iOS 存档。
+        let groupJSON: [[String: Any]] = world.characterGroups.map { group in
+            ["id": group.id, "name": group.name, "enabled": group.enabled]
+        }
+        try encodeAny(groupJSON, key: .characterGroups, into: &c)
+
         // 原版键格式是 `user:<id>:<sha256>`；旧 iOS 数据只有消息 id 时现补。
         let contentByID = Dictionary(
             messages.map { ($0.id, $0.content) },
@@ -785,6 +876,7 @@ enum FrthinkArchive {
         case bodyAppendReceipts
         case lastBodyAppendUndo
         case characterAnalysisCheckpoint
+        case characterGroups
     }
 
     private struct SnapshotWorld: Decodable {
@@ -845,6 +937,26 @@ enum FrthinkArchive {
         var id: String?
         var name: String?
         var enabled: Bool?
+    }
+
+    /// Android `List<WorldbookEntry>` 形状的共享世界书。
+    private struct ArchivedUniverseJSON: Decodable {
+        var id: String?
+        var title: String?
+        var content: String?
+        var enabled: Bool?
+        var keywords: String?
+        var dynamic: Bool?
+    }
+
+    /// Android 存档里的 `TranslationRecord`（12 字段里只映射 iOS 用得上的）。
+    private struct ArchivedTranslationJSON: Decodable {
+        var target: String?
+        var sourceHash: String?
+        var index: Int?
+        var chunkHash: String?
+        var text: String?
+        var model: String?
     }
 
     private struct CharacterJSON: Decodable {
@@ -1443,7 +1555,10 @@ enum FrthinkArchive {
 
     /// 组一个书项目存档（整份文件的 UTF-8 字节）。
     static func makeProjectArchive(_ backups: [ProjectBackup]) throws -> Data {
-        try makeEnvelope(format: projectFormat, payload: ProjectArchivePayload(projects: backups))
+        try makeEnvelope(
+            format: projectFormat,
+            payload: ProjectArchivePayload(projects: normalizedTranslations(backups))
+        )
     }
 
     /// 组一个全量存档。
@@ -1454,10 +1569,26 @@ enum FrthinkArchive {
     ) throws -> Data {
         let payload = FullBackupPayload(
             settings: settings,
-            projects: projects,
+            projects: normalizedTranslations(projects),
             activeProjectID: activeProjectID
         )
         return try makeEnvelope(format: fullFormat, payload: payload)
+    }
+
+    /// 导出前统一译文归属。译文主键是 `(owner, project, target, segment)`，
+    /// 分支复制或旧数据可能留下别的 project id，导出的备份会被导入校验判重复。
+    private static func normalizedTranslations(
+        _ backups: [ProjectBackup]
+    ) -> [ProjectBackup] {
+        backups.map { backup in
+            var normalized = backup
+            normalized.translations = backup.translations.map { segment in
+                var copy = segment
+                copy.project = backup.projectId
+                return copy
+            }
+            return normalized
+        }
     }
 
     /// JSON → gzip → base64 塞进信封。任何一步失败都按「无法创建存档」处理。

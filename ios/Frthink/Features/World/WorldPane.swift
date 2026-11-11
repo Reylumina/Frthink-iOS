@@ -233,6 +233,20 @@ struct WorldPane: View {
 
     // MARK: - 世界刷新
 
+    /// 启动一个可在切书时统一取消的世界任务。
+    ///
+    /// 任务登记到 `AppStore`，切书时由根视图取消；只靠视图 `@State` 的话，
+    /// 视图销毁后任务还在对已经被驱逐的会话落盘。
+    private func startTrackedTask(_ work: @escaping @MainActor () async -> Void) {
+        let task = Task { @MainActor in
+            await work()
+            self.worldTask = nil
+            self.store.finishWorldTask(for: self.session.project.id)
+        }
+        worldTask = task
+        store.registerWorldTask(task, for: session.project.id)
+    }
+
     private func startWorldRefresh(forceFull: Bool) {
         guard busy == nil else {
             statusMessage = "当前任务还没结束，请稍候。"
@@ -241,9 +255,8 @@ struct WorldPane: View {
         busy = .refreshingWorld
         progressText = "正在准备正文…"
         statusMessage = nil
-        worldTask = Task { @MainActor in
+        startTrackedTask {
             await self.runWorldRefresh(forceFull: forceFull)
-            self.worldTask = nil
         }
     }
 
@@ -280,9 +293,8 @@ struct WorldPane: View {
         busy = .extractingEvents
         progressText = ""
         statusMessage = nil
-        worldTask = Task { @MainActor in
+        startTrackedTask {
             await self.runEventExtraction()
-            self.worldTask = nil
         }
     }
 
@@ -312,9 +324,8 @@ struct WorldPane: View {
         busy = .extractingStyleNotes
         progressText = ""
         statusMessage = nil
-        worldTask = Task { @MainActor in
+        startTrackedTask {
             await self.runStyleNoteExtraction()
-            self.worldTask = nil
         }
     }
 
@@ -344,9 +355,8 @@ struct WorldPane: View {
         busy = .updatingRules
         progressText = ""
         statusMessage = nil
-        worldTask = Task { @MainActor in
+        startTrackedTask {
             await self.runLongTermRuleUpdate()
-            self.worldTask = nil
         }
     }
 

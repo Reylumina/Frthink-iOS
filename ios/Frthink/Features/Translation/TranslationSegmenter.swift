@@ -8,7 +8,7 @@ import Foundation
 enum TranslationSegmenter {
 
     /// 目标语言固定 zh-CN（Android 端目前只有这一种）。
-    static let target = "zh-CN"
+    static let target = TranslationSegment.defaultTarget
 
     /// 一个待翻译单元。`hash` 是 `ContentHash.of(text)`，缓存命中和落盘都用它。
     struct PlannedSegment: Identifiable, Hashable {

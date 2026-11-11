@@ -27,6 +27,12 @@ final class AppStore {
     /// 钥匙串内容变化的可观察计数。缓存本身不参与观察，界面上只读这个数来刷新。
     private(set) var apiKeyRevision = 0
 
+    /// 世界刷新/事件/文风/长期规则任务，按书项目登记。
+    ///
+    /// 任务句柄原本只挂在 `WorldPane` 的 `@State` 上；切书后视图销毁、任务还在跑，
+    /// 被驱逐的旧会话继续写同一个 `payload.json`。切书时这里统一取消。
+    @ObservationIgnored private var worldTasks: [String: Task<Void, Never>] = [:]
+
     init(fileStore: FileStore = FileStore()) {
         self.fileStore = fileStore
         self.settings = fileStore.loadSettings()
@@ -72,6 +78,25 @@ final class AppStore {
         }
     }
 
+    // MARK: - 世界任务
+
+    /// 登记正在跑的世界任务；同一本书同时只允许一个。
+    func registerWorldTask(_ task: Task<Void, Never>, for projectID: String) {
+        worldTasks[projectID]?.cancel()
+        worldTasks[projectID] = task
+    }
+
+    /// 任务正常结束或失败时清掉登记。
+    func finishWorldTask(for projectID: String) {
+        worldTasks[projectID] = nil
+    }
+
+    /// 切书/删书时取消该项目在跑的世界任务。
+    func cancelWorldTask(for projectID: String) {
+        worldTasks[projectID]?.cancel()
+        worldTasks[projectID] = nil
+    }
+
     // MARK: - 书架
 
     func reload() {
@@ -95,13 +120,14 @@ final class AppStore {
             let payload = ProjectPayload()
             try fileStore.savePayload(payload, projectID: p.id)
             reload()
-            sessions[p.id] = ProjectSession(
+            let session = attachSaveErrorHandler(ProjectSession(
                 project: p,
                 payload: payload,
                 source: "",
                 translations: [],
                 store: fileStore
-            )
+            ))
+            sessions[p.id] = session
             return p
         } catch {
             errorMessage = "创建失败：\(error.localizedDescription)"
@@ -117,14 +143,14 @@ final class AppStore {
             fileStore.loadPayloadState(project.id),
             project: project
         )
-        let session = ProjectSession(
+        let session = attachSaveErrorHandler(ProjectSession(
             project: project,
             payload: decoded.payload,
             source: fileStore.loadSource(project.id),
             translations: fileStore.loadTranslations(project.id),
             store: fileStore,
             readOnly: decoded.readOnly
-        )
+        ))
         sessions[project.id] = session
         return session
     }
@@ -156,15 +182,23 @@ final class AppStore {
             return existing
         }
         let decoded = decodedPayload(loaded.0, project: project)
-        let session = ProjectSession(
+        let session = attachSaveErrorHandler(ProjectSession(
             project: project,
             payload: decoded.payload,
             source: loaded.1,
             translations: loaded.2,
             store: fileStore,
             readOnly: decoded.readOnly
-        )
+        ))
         sessions[project.id] = session
+        return session
+    }
+
+    /// 会话落盘失败统一冒泡到全局错误条。
+    private func attachSaveErrorHandler(_ session: ProjectSession) -> ProjectSession {
+        session.onSaveError = { [weak self] message in
+            self?.errorMessage = message
+        }
         return session
     }
 
@@ -184,13 +218,12 @@ final class AppStore {
         }
     }
 
-    func touch(_ project: Project) {
-        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
+    func touch(_ project: Project) {        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
         var p = projects[idx]
         p.updatedAt = Date()
         p.revision += 1
         projects[idx] = p
-        try? fileStore.saveProject(p)
+        persistProject(p)
     }
 
     func rename(_ project: Project, to title: String) {
@@ -200,7 +233,7 @@ final class AppStore {
         p.updatedAt = Date()
         p.revision += 1
         projects[idx] = p
-        try? fileStore.saveProject(p)
+        persistProject(p)
         sessions[p.id]?.project = p
     }
 
@@ -210,16 +243,17 @@ final class AppStore {
         p.synopsis = text
         p.updatedAt = Date()
         projects[idx] = p
-        try? fileStore.saveProject(p)
+        persistProject(p)
     }
 
     /// 回收站。Android 端是 `trashedAt` 时间戳，不是立即删除。
     func trash(_ project: Project) {
         guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
+        cancelWorldTask(for: project.id)
         var p = projects[idx]
         p.trashedAt = Date()
         projects[idx] = p
-        try? fileStore.saveProject(p)
+        persistProject(p)
         sessions[project.id] = nil
     }
 
@@ -228,13 +262,27 @@ final class AppStore {
         var p = projects[idx]
         p.trashedAt = nil
         projects[idx] = p
-        try? fileStore.saveProject(p)
+        persistProject(p)
     }
 
     func deleteForever(_ project: Project) {
-        try? fileStore.deleteProject(project.id)
+        cancelWorldTask(for: project.id)
+        do {
+            try fileStore.deleteProject(project.id)
+        } catch {
+            errorMessage = "删除失败：\(error.localizedDescription)"
+            return
+        }
         sessions[project.id] = nil
         reload()
+    }
+
+    private func persistProject(_ project: Project) {
+        do {
+            try fileStore.saveProject(project)
+        } catch {
+            errorMessage = "保存失败：\(error.localizedDescription)"
+        }
     }
 
     /// 创建分支：复制成一个新项目，不是在同一项目内建树。
@@ -268,12 +316,17 @@ final class AppStore {
         payload.chapters = []
         payload.continuationAnchor = nil
 
-        var translations: [TranslationSegment] = []
+        // 译文主键含 project：分支复制必须重打归属，否则两本书译文主键重合，
+        // 导出的备份会被自己的重复校验拒收。
+        let translations = session.translations.map { segment in
+            var normalized = segment
+            normalized.project = copy.id
+            return normalized
+        }
         do {
             try fileStore.saveProject(copy)
             try fileStore.savePayload(payload, projectID: copy.id)
             try fileStore.saveSource(session.sourceText, projectID: copy.id)
-            translations = session.translations
             try fileStore.saveTranslations(translations, projectID: copy.id)
             reload()
             return copy

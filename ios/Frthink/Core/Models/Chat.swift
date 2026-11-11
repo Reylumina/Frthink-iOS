@@ -58,6 +58,10 @@ struct ChatMessage: Identifiable, Codable, Hashable {
 ///
 /// `sourceHash` 是原文分段内容的哈希，原文没变就命中缓存，不再请求 LLM。
 struct TranslationSegment: Identifiable, Codable, Hashable {
+    /// iOS 的目标语言标记。Android 的 TranslationRecord 把正文译文记成 `body`，
+    /// 存档导入时会映射到这个值。
+    static let defaultTarget = "zh-CN"
+
     var id: String
     /// 设备/账号归属，Android 端用 `owner` 区分同一台机器上的多用户隔离。
     var owner: String

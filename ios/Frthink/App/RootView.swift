@@ -138,6 +138,12 @@ struct RootView: View {
             session = loaded
             store.trimSessionCache(keeping: [project.id])
         }
+        .onChange(of: activeProjectID) { oldValue, newValue in
+            // 切书：旧书在跑的世界任务必须停，否则它会继续对已被驱逐的会话落盘。
+            if let oldValue, oldValue != newValue {
+                store.cancelWorldTask(for: oldValue)
+            }
+        }
         .onChange(of: activeProject?.id) { _, newValue in
             // 当前书被移进回收站/彻底删除时，task(id:) 不会因为同一 id 重跑。
             guard newValue == nil, activeProjectID != nil else { return }

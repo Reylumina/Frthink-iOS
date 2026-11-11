@@ -152,6 +152,9 @@ struct ProjectPayload: Codable {
     var bodyPromptSendWhole: Bool
     /// 只发末尾时取多少个码点。原版 `bodyPromptTailCodePoints`，实测默认 5000。
     var bodyPromptTailCodePoints: Int
+
+    /// 新建书与存档导入共用的默认值，避免两处写死不同数字。
+    static let defaultBodyPromptTailCodePoints = 5_000
     /// 阅读页滚动位置（UTF-16 偏移）。
     var readerOffset: Int
     /// 阅读书签位置。
@@ -187,7 +190,7 @@ struct ProjectPayload: Codable {
         continuationAnchor: Int? = nil,
         assistantSupplement: String = "",
         bodyPromptSendWhole: Bool = false,
-        bodyPromptTailCodePoints: Int = 8000,
+        bodyPromptTailCodePoints: Int = ProjectPayload.defaultBodyPromptTailCodePoints,
         readerOffset: Int = 0,
         readerBookmarkOffset: Int = 0,
         enabledUniverseEntryIDs: [String] = [],
@@ -233,7 +236,8 @@ struct ProjectPayload: Codable {
         assistantSupplement = (try? c.decode(String.self, forKey: .assistantSupplement)) ?? ""
         bodyPromptSendWhole = (try? c.decode(Bool.self, forKey: .bodyPromptSendWhole)) ?? false
         bodyPromptTailCodePoints =
-            (try? c.decode(Int.self, forKey: .bodyPromptTailCodePoints)) ?? 8000
+            (try? c.decode(Int.self, forKey: .bodyPromptTailCodePoints))
+                ?? ProjectPayload.defaultBodyPromptTailCodePoints
         readerOffset = (try? c.decode(Int.self, forKey: .readerOffset)) ?? 0
         readerBookmarkOffset = (try? c.decode(Int.self, forKey: .readerBookmarkOffset)) ?? 0
         enabledUniverseEntryIDs =

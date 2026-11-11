@@ -419,6 +419,122 @@ enum SelfCheck {
             throw Failure(message: "带路径穿越的项目 id 没有被拒绝")
         }
 
+        // 分支复制带的译文必须重打 project，否则导出后被自己的重复校验拒收
+        check("archive.branchTranslations") {
+            func project(_ id: String) -> Project {
+                Project(id: id, title: "分支-\(id)")
+            }
+            func segment(_ index: Int, staleProject: String) -> TranslationSegment {
+                TranslationSegment(
+                    owner: "self",
+                    project: staleProject,
+                    sourceHash: "hash-\(index)",
+                    segment: index,
+                    payload: "译文 \(index)"
+                )
+            }
+            let first = FrthinkArchive.ProjectBackup(
+                project: project("branch-a"),
+                payload: ProjectPayload(manuscript: "甲"),
+                sourceText: "",
+                translations: [segment(0, staleProject: "root-book")],
+                universeEntries: []
+            )
+            let second = FrthinkArchive.ProjectBackup(
+                project: project("branch-b"),
+                payload: ProjectPayload(manuscript: "乙"),
+                sourceText: "",
+                translations: [segment(0, staleProject: "root-book")],
+                universeEntries: []
+            )
+            let data = try FrthinkArchive.makeFullArchive(
+                settings: AppSettings(),
+                projects: [first, second]
+            )
+            let reopened = try FrthinkArchive.readFullBackup(data)
+            for backup in reopened.projects {
+                try expect(
+                    backup.translations.allSatisfy { $0.project == backup.projectId },
+                    "译文 project 没有重打：\(backup.translations.map(\.project))"
+                )
+            }
+            return "2 本书译文归属 ok"
+        }
+
+        // snapshot 解不出来必须整本失败，不能静默用空快照覆盖同名书
+        check("archive.rejectBrokenSnapshot") {
+            var payload = ArchiveFixture.payload()
+            var projects = payload["projects"] as? [[String: Any]] ?? []
+            projects[0]["snapshot"] = NSNull()
+            payload["projects"] = projects
+            let data = try ArchiveFixture.envelope(payload: payload)
+            do {
+                _ = try FrthinkArchive.openAny(data)
+            } catch let error as FrthinkArchiveError {
+                let text = error.errorDescription ?? ""
+                try expect(
+                    text.contains("snapshot") || text.contains("无法解析"),
+                    "错误文案没有指出 snapshot：\(text)"
+                )
+                return "坏 snapshot 被拒绝"
+            }
+            throw Failure(message: "snapshot 为 null 时仍然导入成功")
+        }
+
+        // Android 形状的译文、共享世界书与顶层人物分组要能映射进 iOS 模型
+        check("archive.androidShapes") {
+            var payload = ArchiveFixture.payload()
+            var projects = payload["projects"] as? [[String: Any]] ?? []
+            projects[0]["translations"] = [
+                [
+                    "target": "body",
+                    "sourceHash": String(repeating: "a", count: 64),
+                    "index": 0,
+                    "chunkHash": String(repeating: "b", count: 64),
+                    "text": "译文内容",
+                    "model": "deepseek-chat",
+                ],
+            ]
+            projects[0]["universeEntries"] = [
+                [
+                    "id": "shared-1",
+                    "title": "共享设定",
+                    "content": "共享正文",
+                    "enabled": true,
+                    "keywords": "",
+                    "dynamic": false,
+                ],
+            ]
+            var snapshot = projects[0]["snapshot"] as? [String: Any] ?? [:]
+            snapshot["characterGroups"] = [
+                ["id": "group-1", "name": "主角组", "enabled": true],
+            ]
+            projects[0]["snapshot"] = snapshot
+            payload["projects"] = projects
+            let data = try ArchiveFixture.envelope(payload: payload)
+            let archive = try FrthinkArchive.openAny(data)
+            guard case .full(let backup) = archive else {
+                throw Failure(message: "fixture 应被识别为全量备份")
+            }
+            let first = backup.projects[0]
+            try expect(first.translations.count == 1, "译文没有映射进来")
+            try expect(
+                first.translations[0].payload == "译文内容"
+                    && first.translations[0].segment == 0
+                    && first.translations[0].target == TranslationSegment.defaultTarget,
+                "译文映射字段不对：\(first.translations[0])"
+            )
+            try expect(
+                first.universeEntries.first?.body == "共享正文",
+                "共享世界书正文没有映射：\(first.universeEntries.first?.body ?? "nil")"
+            )
+            try expect(
+                first.snapshot.projectPayload.world.characterGroups.first?.name == "主角组",
+                "顶层人物分组没有映射"
+            )
+            return "译文 / 共享世界书 / 分组 ok"
+        }
+
         // Android 备份没有 providers 键：导入后必须保留本机供应方与外观偏好
         check("archive.fullRestoreKeepsLocalSettings") {
             var local = AppSettings(
