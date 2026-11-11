@@ -37,7 +37,7 @@ struct WorldSettingSection: View {
                     onRefreshFull()
                 } label: {
                     Label(
-                        "从头整理人物卡（本轮最多 \(WorldDigest.maxChunksPerRun) 段）",
+                        "从头整理人物卡（重新分析全部正文）",
                         systemImage: "arrow.counterclockwise"
                     )
                 }
@@ -50,11 +50,16 @@ struct WorldSettingSection: View {
                             .font(Font.footnote)
                             .foregroundStyle(Theme.accent)
                     }
-                    Text(refreshStatusLine)
-                        .font(Font.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("刷新人物卡")
+                            .font(Font.body)
+                            .foregroundStyle(.primary)
+                        Text(refreshStatusLine)
+                            .font(Font.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                     Spacer(minLength: Theme.Spacing.s)
                     if !isActionDisabled {
                         Image(systemName: "chevron.up.chevron.down")
@@ -68,7 +73,7 @@ struct WorldSettingSection: View {
             .disabled(isActionDisabled)
             .accessibilityLabel("刷新人物卡")
         } header: {
-            AppSectionHeader(title: "刷新人物卡")
+            AppSectionHeader(title: "人物卡整理")
         }
     }
 

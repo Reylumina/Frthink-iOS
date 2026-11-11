@@ -141,6 +141,11 @@ struct WriterPane: View {
             .onChange(of: controller.isGenerating) { _, active in
                 if active { exitSelection() }
             }
+            .onChange(of: controller.instructionToRestore) { _, _ in
+                // 裁剪重试失败不丢指令：控制器把原文交回来，这里放回输入框。
+                guard let text = controller.consumeInstructionToRestore() else { return }
+                composer.text = text
+            }
         .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
         .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
         .toolbar {
@@ -326,6 +331,15 @@ struct WriterPane: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10).onChanged { value in
+                    // 手指向下拖 = 回看更早的内容。生成中也让用户停在自己
+                    // 看的位置，不要每 60ms 被跟随器拽回底部。
+                    if value.translation.height > 10, isAtBottom {
+                        isAtBottom = false
+                    }
+                }
+            )
             .modifier(
                 WriterStreamingFollower(
                     controller: controller,
@@ -359,6 +373,13 @@ struct WriterPane: View {
                 isAtBottom = true
                 Task { @MainActor in
                     await Task.yield()
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
+                    }
+                    // 正式气泡还要再排一次版（Markdown、动态字体、行距），
+                    // 只滚一次会按旧高度落点，底部留白。
+                    try? await Task.sleep(for: .milliseconds(60))
+                    guard !Task.isCancelled else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
                         proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
                     }

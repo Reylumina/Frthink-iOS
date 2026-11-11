@@ -277,7 +277,7 @@ struct WriterStreamingBubble: View {
                     .font(Font.caption.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                 ProgressView().controlSize(.mini)
-                Text(controller.streamingText.isEmpty ? "思考中…" : "正在生成")
+                Text(statusText)
                     .font(Font.caption)
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
@@ -286,25 +286,35 @@ struct WriterStreamingBubble: View {
                     .foregroundStyle(.tertiary)
             }
 
-            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                DisclosureGroup(isExpanded: $reasoningExpanded) {
-                    Text(reasoning)
-                        .font(Theme.numeric)
+            if controller.streamingText.isEmpty {
+                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                    // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
+                    // 时页面不能只挂一个转圈，看起来像卡死。
+                    Text(Self.recentLines(reasoning, limit: 6))
+                        .font(Theme.reply)
                         .foregroundStyle(.secondary)
+                        .lineLimit(6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                } label: {
-                    Text("思考过程 · \(reasoning.count.formatted()) 字")
-                        .font(Font.caption.weight(.semibold))
+                } else {
+                    Text("……")
+                        .font(Theme.reply)
                         .foregroundStyle(.tertiary)
                 }
-            }
-
-            if controller.streamingText.isEmpty {
-                Text("……")
-                    .font(Theme.reply)
-                    .foregroundStyle(.tertiary)
             } else {
+                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                    DisclosureGroup(isExpanded: $reasoningExpanded) {
+                        Text(reasoning)
+                            .font(Theme.numeric)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    } label: {
+                        Text("思考过程 · \(reasoning.count.formatted()) 字")
+                            .font(Font.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
                 // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
                 StreamingTextView(
                     text: controller.streamingText,
@@ -319,6 +329,21 @@ struct WriterStreamingBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
+    }
+
+    private var statusText: String {
+        guard controller.streamingText.isEmpty else { return "正在生成" }
+        let count = controller.streamingReasoningCharacterCount
+        return count > 0 ? "思考中 · \(count.formatted()) 字" : "思考中…"
+    }
+
+    /// 思考过程只显示末尾几行；全文仍留在展开区里。
+    private static func recentLines(_ text: String, limit: Int) -> String {
+        let lines = text.split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let recent = lines.suffix(limit)
+        return recent.isEmpty ? String(text.suffix(240)) : recent.joined(separator: "\n")
     }
 }
 

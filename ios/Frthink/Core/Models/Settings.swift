@@ -358,8 +358,10 @@ struct AppSettings: Codable {
     /// 解码旧版本设置文件时补齐新增字段。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        providers = (try? c.decode([ProviderSetting].self, forKey: .providers))
-            ?? ProviderKind.selectableCases.map { ProviderSetting(kind: $0) }
+        // 存档里没有 providers（Android 备份）时解成空数组，交给
+        // `FrthinkArchive.mergeSettings` 保留本机列表；在这里造默认供应方
+        // 会产生新 UUID，Keychain 里的 Key 再也对不上。
+        providers = (try? c.decode([ProviderSetting].self, forKey: .providers)) ?? []
         activeProviderID = (try? c.decode(String.self, forKey: .activeProviderID)) ?? ""
         corpusEnabled = (try? c.decode(Bool.self, forKey: .corpusEnabled)) ?? false
         ownerID = (try? c.decode(String.self, forKey: .ownerID)) ?? UUID().uuidString

@@ -13,6 +13,7 @@ struct CorpusEntryEditor: View {
     @State private var category: String
     @State private var tagText: String
     @State private var source: String
+    @State private var confirmingDiscard = false
 
     /// 原版提示词要求每条 2–3000 字；手填时给 UI 一个上限提示。
     static let maxTextLength = 3000
@@ -43,6 +44,14 @@ struct CorpusEntryEditor: View {
 
     private var canSave: Bool {
         !trimmedTitle.isEmpty && !trimmedText.isEmpty && text.count <= Self.maxTextLength
+    }
+
+    private var hasChanges: Bool {
+        trimmedTitle != entry.title
+            || text != entry.text
+            || category.trimmingCharacters(in: .whitespacesAndNewlines) != entry.category
+            || parseTags(tagText) != entry.tags
+            || source.trimmingCharacters(in: .whitespacesAndNewlines) != entry.source
     }
 
     var body: some View {
@@ -101,9 +110,16 @@ struct CorpusEntryEditor: View {
             .keyboardDismissOnScroll()
             .navigationTitle(isNew ? "新增语料" : "编辑语料")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasChanges {
+                            confirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -118,6 +134,14 @@ struct CorpusEntryEditor: View {
                     }
                     .disabled(!canSave)
                 }
+            }
+            .confirmationDialog(
+                "放弃未保存的修改？",
+                isPresented: $confirmingDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("放弃修改", role: .destructive) { dismiss() }
+                Button("继续编辑", role: .cancel) {}
             }
         }
     }

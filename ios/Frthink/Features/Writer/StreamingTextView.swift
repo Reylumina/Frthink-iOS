@@ -7,6 +7,11 @@ struct StreamingTextView: UIViewRepresentable {
     var text: String
     /// 与「外观 → 正文字号」一致。
     var fontSize: CGFloat = 18
+    /// 与普通气泡的 `Text.lineSpacing(3)` 保持一致。
+    ///
+    /// 两处不一致时，生成结束换成普通气泡的那一刻整段会突然变高几百点，
+    /// 视口还停在旧高度上，底部就露出一片空白。
+    var lineSpacing: CGFloat = 3.0
 
 
     func makeUIView(context: Context) -> UITextView {
@@ -21,20 +26,31 @@ struct StreamingTextView: UIViewRepresentable {
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
         let rendered = context.coordinator.window.rendered(text).text
-        view.attributedText = Self.attributed(rendered, fontSize: fontSize)
+        view.attributedText = Self.attributed(
+            rendered,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing
+        )
         context.coordinator.appliedText = rendered
-        context.coordinator.fontSignature = Self.signature(fontSize: fontSize)
+        context.coordinator.fontSignature = Self.signature(
+            fontSize: fontSize,
+            lineSpacing: lineSpacing
+        )
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         let coordinator = context.coordinator
-        let signature = Self.signature(fontSize: fontSize)
+        let signature = Self.signature(fontSize: fontSize, lineSpacing: lineSpacing)
         if coordinator.fontSignature != signature {
             coordinator.fontSignature = signature
             coordinator.window = StreamingTextWindow()
             let rendered = coordinator.window.rendered(text).text
-            uiView.attributedText = Self.attributed(rendered, fontSize: fontSize)
+            uiView.attributedText = Self.attributed(
+                rendered,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing
+            )
             coordinator.appliedText = rendered
             uiView.invalidateIntrinsicContentSize()
             return
@@ -44,14 +60,21 @@ struct StreamingTextView: UIViewRepresentable {
         let rendered = result.text
         guard coordinator.appliedText != rendered else { return }
 
-        let old = coordinator.appliedText
-        if !result.reset, rendered.hasPrefix(old) {
-            let suffix = String(rendered.dropFirst(old.count))
+        if !result.reset, rendered.hasPrefix(coordinator.appliedText) {
+            let suffix = String(rendered.dropFirst(coordinator.appliedText.count))
             if !suffix.isEmpty {
-                uiView.textStorage.append(Self.attributed(suffix, fontSize: fontSize))
+                uiView.textStorage.append(Self.attributed(
+                    suffix,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing
+                ))
             }
         } else {
-            uiView.attributedText = Self.attributed(rendered, fontSize: fontSize)
+            uiView.attributedText = Self.attributed(
+                rendered,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing
+            )
         }
         coordinator.appliedText = rendered
         uiView.invalidateIntrinsicContentSize()
@@ -81,16 +104,23 @@ struct StreamingTextView: UIViewRepresentable {
 
     // MARK: - 排版
 
-    private static func signature(fontSize: CGFloat) -> String {
-        "\(fontSize)"
+    private static func signature(fontSize: CGFloat, lineSpacing: CGFloat) -> String {
+        "\(fontSize)-\(lineSpacing)"
     }
 
-    private static func attributed(_ text: String, fontSize: CGFloat) -> NSAttributedString {
-        NSAttributedString(
+    private static func attributed(
+        _ text: String,
+        fontSize: CGFloat,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        return NSAttributedString(
             string: text,
             attributes: [
                 .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
                 .foregroundColor: UIColor.label,
+                .paragraphStyle: paragraph,
             ]
         )
     }

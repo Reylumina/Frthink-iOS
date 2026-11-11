@@ -419,6 +419,55 @@ enum SelfCheck {
             throw Failure(message: "带路径穿越的项目 id 没有被拒绝")
         }
 
+        // Android 备份没有 providers 键：导入后必须保留本机供应方与外观偏好
+        check("archive.fullRestoreKeepsLocalSettings") {
+            var local = AppSettings(
+                providers: [ProviderSetting(kind: .deepseek)]
+            )
+            local.theme = .dark
+            local.bodyFontSize = 22
+            var imported = AppSettings(providers: [])
+            imported.theme = .system
+            imported.bodyFontSize = 18
+            let merged = FrthinkArchive.mergeSettings(imported, into: local)
+            try expect(
+                merged.providers.map(\.id) == local.providers.map(\.id),
+                "导入后供应方 id 变了，Keychain 里的 Key 会失联"
+            )
+            try expect(merged.theme == .dark, "主题被存档默认值覆盖")
+            try expect(merged.bodyFontSize == 22, "正文字号被存档默认值覆盖")
+            return "供应方与外观偏好保留 ok"
+        }
+
+        // 分段要带正确的码点范围：P27/P28/P29 靠它告诉模型本段在全文的位置
+        check("world.chunkRanges") {
+            let line = "第一卷 雨夜\n她把伞收起来，走进书店。\n\n"
+            let source = String(repeating: line, count: 12)
+            let chunks = WorldDigest.chunks(of: source, tokenBudget: 24, overlapTokens: 6)
+            try expect(chunks.count > 1, "测试正文应被切成多段")
+            let scalars = Array(source.unicodeScalars)
+            for chunk in chunks {
+                try expect(
+                    chunk.startCodePoint >= 0
+                        && chunk.endCodePoint <= scalars.count
+                        && chunk.startCodePoint < chunk.endCodePoint,
+                    "码点范围越界：\(chunk.startCodePoint)..<\(chunk.endCodePoint)"
+                )
+                var view = String.UnicodeScalarView()
+                for scalar in scalars[chunk.startCodePoint..<chunk.endCodePoint] {
+                    view.append(scalar)
+                }
+                let slice = String(view)
+                try expect(slice == chunk.text, "码点范围与段文本不一致")
+            }
+            try expect(chunks.first?.startCodePoint == 0, "首段起点应为 0")
+            try expect(
+                chunks.last?.endCodePoint == scalars.count,
+                "末段终点应为全文字数"
+            )
+            return "\(chunks.count) 段范围 ok"
+        }
+
         // 哈希字段用完整 SHA-256（64 hex），与 Android sourceSha256 对齐
         check("hash.sha256") {
             let hash = ContentHash.of("abc")

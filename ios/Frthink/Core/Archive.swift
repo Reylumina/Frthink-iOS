@@ -125,7 +125,7 @@ enum FrthinkArchive {
             self.projectId = project.id
             self.title = project.title
             self.synopsis = project.synopsis
-            self.snapshot = ArchivedSnapshot(payload: payload)
+            self.snapshot = ArchivedSnapshot(payload: payload, sourceText: sourceText)
             self.sourceText = sourceText
             self.translations = translations
             self.universeEntries = universeEntries
@@ -1790,9 +1790,14 @@ enum FrthinkArchive {
         return restored
     }
 
-    /// 全量存档里的设置并进本机：整份替换，但保留本机身份（译文 `owner`）。
+    /// 全量存档里的设置并进本机。
     ///
-    /// API Key 不在存档里，所以替换设置不会丢 Key；供应方列表为空时保留本机的。
+    /// 规则：
+    /// - 本机身份（译文 `owner`）不换；
+    /// - 存档没有供应方（Android 备份只有 `credentials`）时保留本机供应方，
+    ///   API Key 存在 Keychain、按供应方 id 取，换 id 等于把 Key 弄丢；
+    /// - 宇宙条目按 id 合并，不删本机条目；
+    /// - 外观类本机偏好（主题、正文字号、动效、触感）保留本机值。
     static func mergeSettings(_ imported: AppSettings, into local: AppSettings) -> AppSettings {
         var result = imported
         result.ownerID = local.ownerID
@@ -1803,6 +1808,14 @@ enum FrthinkArchive {
         if !result.providers.contains(where: { $0.id == activeID }) {
             result.activeProviderID = result.providers.first?.id ?? ""
         }
+        result.universeEntries = mergedUniverseEntries(
+            imported.universeEntries,
+            with: local.universeEntries
+        )
+        result.theme = local.theme
+        result.bodyFontSize = local.bodyFontSize
+        result.limitAnimationFrameRate = local.limitAnimationFrameRate
+        result.hapticsEnabled = local.hapticsEnabled
         return result
     }
 

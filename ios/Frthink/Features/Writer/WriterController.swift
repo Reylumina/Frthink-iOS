@@ -38,6 +38,9 @@ final class WriterController {
 
     /// 本次请求的思考过程。
     private(set) var streamingReasoning: String?
+    /// 已收到的思考字符数。流式期间只靠它判断要不要刷新思考区，
+    /// 不必每 60ms 比较一次长字符串。
+    private(set) var streamingReasoningCharacterCount = 0
 
     /// 自动摘要进行中，避免并发重复请求。
     private var autoSummarizing = false
@@ -45,12 +48,22 @@ final class WriterController {
     /// 非 nil 时弹上下文预算提示；由视图观察后弹 alert。
     private(set) var budgetAlert: BudgetAlert?
 
+    /// 「裁剪后重试」失败时把用户指令放回输入框，不要求重打。
+    private(set) var instructionToRestore: String?
+
+    /// 视图取走指令后清空，避免重复回填。
+    func consumeInstructionToRestore() -> String? {
+        defer { instructionToRestore = nil }
+        return instructionToRestore
+    }
+
     // MARK: - 内部状态
 
     private var task: Task<Void, Never>?
     /// 还没写进 session 的增量。攒着，按 `flushInterval` 批量落。
     private var pendingDelta = ""
     private var reasoningBuffer = ""
+    private var reasoningBufferCharacterCount = 0
     private var flushTask: Task<Void, Never>?
     /// 还没显示到气泡上的增量。按 `displayInterval` 刷新，避免一个 token 一帧。
     private var displayBuffer = ""
@@ -213,7 +226,8 @@ final class WriterController {
             bodyRange: .full
         ) else {
             budgetAlert = nil
-            pending = nil
+            restoreFailedRetry(action, store: store)
+            store.errorMessage = "上下文预算信息已过期，请重新发送。"
             return
         }
 
@@ -222,10 +236,9 @@ final class WriterController {
         let manuscriptBudget = max(512, TokenEstimator.estimate(manuscript) - max(excess, 0))
         let trimmed = WriterBudgeting.trimTail(manuscript, toTokens: manuscriptBudget)
 
-        budgetAlert = nil
-        pending = nil
-
         guard !trimmed.isEmpty, trimmed != manuscript else {
+            budgetAlert = nil
+            restoreFailedRetry(action, store: store)
             store.errorMessage = "上下文放不下：裁剪正文后仍然超出模型上下文窗。可以先回退几轮对话、精简正文，或在设置里调小输出上限。"
             return
         }
@@ -241,9 +254,14 @@ final class WriterController {
             bodyRange: trimmedRange
         ),
             TokenEstimator.estimate(messages: nextMessages) <= limit else {
+            budgetAlert = nil
+            restoreFailedRetry(action, store: store)
             store.errorMessage = "上下文放不下：只保留正文末尾 \(trimmed.count) 字仍然超出模型上下文窗，请在设置里调小输出上限。"
             return
         }
+
+        budgetAlert = nil
+        pending = nil
 
         switch action {
         case .send(let instruction):
@@ -270,6 +288,14 @@ final class WriterController {
                 bodyRange: trimmedRange
             )
         }
+    }
+
+    /// 重试失败时把指令还给输入框（只有「发送」有可恢复的文本）。
+    private func restoreFailedRetry(_ action: PendingAction, store: AppStore) {
+        if case .send(let text) = action {
+            instructionToRestore = text
+        }
+        pending = nil
     }
 
     // MARK: - 三个入口的实现
@@ -411,13 +437,15 @@ final class WriterController {
     /// 提示词和原版不一致，长书还会把上下文撑爆。
     private func effectiveBody(
         _ session: ProjectSession,
+        manuscript: String,
         fallbackRange: PromptLibrary.BodyRange
     ) -> (text: String, range: PromptLibrary.BodyRange) {
-        // 调用方显式给了裁剪范围（预算重试）就尊重它。
+        // 调用方显式给了裁剪范围（预算重试）就尊重它，正文也用调用方传进来的
+        // 那一份；这里再读 session.manuscript 会把裁剪结果丢掉。
         if fallbackRange != .full {
-            return (session.manuscript, fallbackRange)
+            return (manuscript, fallbackRange)
         }
-        let whole = session.manuscript
+        let whole = manuscript
         if let anchor = session.payload.continuationAnchor,
            anchor > 0, anchor <= (whole as NSString).length {
             let prefix = (whole as NSString).substring(to: anchor)
@@ -435,7 +463,11 @@ final class WriterController {
         bodyRange: PromptLibrary.BodyRange
     ) -> PromptAssembly {
         // 真正发出去的正文按原版 bodyPrompt* 收口，不是调用方传进来的整篇。
-        let effective = effectiveBody(session, fallbackRange: bodyRange)
+        let effective = effectiveBody(
+            session,
+            manuscript: manuscript,
+            fallbackRange: bodyRange
+        )
         return PromptAssembly.from(
             world: session.payload.world,
             manuscript: effective.text,
@@ -654,10 +686,12 @@ final class WriterController {
         streamingText = ""
         streamingCharacterCount = 0
         streamingReasoning = nil
+        streamingReasoningCharacterCount = 0
         streamFlushTick = 0
         displayTick = 0
         pendingDelta = ""
         reasoningBuffer = ""
+        reasoningBufferCharacterCount = 0
         displayBuffer = ""
         displayCharacterCount = 0
         flushTask?.cancel()
@@ -717,6 +751,8 @@ final class WriterController {
                             }
                         case .reasoning(let text):
                             self.reasoningBuffer += text
+                            self.reasoningBufferCharacterCount += text.count
+                            self.scheduleStreamingDisplay()
                         case .finished:
                             break
                         }
@@ -759,6 +795,9 @@ final class WriterController {
     }
 
     /// 安排一次气泡刷新。按设备状态合并到 60–160ms 一次。
+    ///
+    /// 思考过程也在这里上屏：DeepSeek 开启思考时，正文可能几十秒为空，
+    /// 只在 3 秒落盘时更新思考区会让界面看起来卡住。
     private func scheduleStreamingDisplay() {
         guard displayTask == nil else { return }
         let interval = displayInterval
@@ -766,10 +805,7 @@ final class WriterController {
             try? await Task.sleep(for: interval)
             guard let self, !Task.isCancelled else { return }
             self.displayTask = nil
-            guard self.streamingText != self.displayBuffer else { return }
-            self.streamingText = self.displayBuffer
-            self.streamingCharacterCount = self.displayCharacterCount
-            self.displayTick &+= 1
+            self.syncStreamingDisplay()
         }
     }
 
@@ -777,9 +813,23 @@ final class WriterController {
     private func flushStreamingDisplay() {
         displayTask?.cancel()
         displayTask = nil
-        guard streamingText != displayBuffer else { return }
-        streamingText = displayBuffer
-        streamingCharacterCount = displayCharacterCount
+        syncStreamingDisplay()
+    }
+
+    /// 文本与思考过程共用一次显示刷新。
+    private func syncStreamingDisplay() {
+        let textChanged = streamingText != displayBuffer
+        let reasoningChanged =
+            streamingReasoningCharacterCount != reasoningBufferCharacterCount
+        guard textChanged || reasoningChanged else { return }
+        if reasoningChanged {
+            streamingReasoning = reasoningBuffer
+            streamingReasoningCharacterCount = reasoningBufferCharacterCount
+        }
+        if textChanged {
+            streamingText = displayBuffer
+            streamingCharacterCount = displayCharacterCount
+        }
         displayTick &+= 1
     }
 
@@ -788,8 +838,10 @@ final class WriterController {
         // 生成期间**不**把增量写进 session：appendDelta 不会落盘，却会让
         // `payload` 变化、整个写作台（正文 + 15 条气泡）重算。写回只在
         // finish(...) 里做一次，既少整页刷新，也少一次 JSON 编码前的状态抖动。
-        if !reasoningBuffer.isEmpty, streamingReasoning != reasoningBuffer {
+        if !reasoningBuffer.isEmpty,
+           streamingReasoningCharacterCount != reasoningBufferCharacterCount {
             streamingReasoning = reasoningBuffer
+            streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
         streamFlushTick += 1
         // 每次落盘（约 3 秒）都把已收内容并回会话；进程被杀最多丢这一段。
@@ -862,6 +914,10 @@ final class WriterController {
             streamingText = displayBuffer
             streamingCharacterCount = displayCharacterCount
         }
+        if reasoningBufferCharacterCount != streamingReasoningCharacterCount {
+            streamingReasoning = reasoningBuffer
+            streamingReasoningCharacterCount = reasoningBufferCharacterCount
+        }
         // 生成期间没有写 session，结束前必须把最后一段增量并回去。
         persistPendingDelta(session: session, messageID: messageID)
         flushStreaming(session: session, messageID: messageID)
@@ -871,10 +927,12 @@ final class WriterController {
         isGenerating = false
         streamingMessageID = nil
         streamingReasoning = nil
+        streamingReasoningCharacterCount = 0
         streamingText = ""
         streamingCharacterCount = 0
         pendingDelta = ""
         reasoningBuffer = ""
+        reasoningBufferCharacterCount = 0
         displayBuffer = ""
         displayCharacterCount = 0
         stopRequested = false

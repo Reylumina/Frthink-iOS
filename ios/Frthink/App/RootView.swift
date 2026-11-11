@@ -5,6 +5,9 @@ import SwiftUI
 /// 原版把书架做成一层的弹层（`projectPickerVisible`），而不是根页面——
 /// 所以这里也把 `LibraryView` 当 sheet 用，Tab 上只显示当前书稿和切换入口。
 struct RootView: View {
+    /// 上次打开的书。冷启动直接回到它，不再先给一屏「请选择书稿」。
+    private static let activeProjectKey = "root.activeProjectID"
+
     /// 从启动参数里读初始 Tab。
     static var launchDestination: AppDestination {
         let args = ProcessInfo.processInfo.arguments
@@ -13,17 +16,28 @@ struct RootView: View {
         return AppDestination(rawValue: args[index + 1]) ?? .compose
     }
 
+    /// 启动时先按上次打开的书落位；演示数据要另选主书，留给 onAppear。
+    static var launchProjectID: String? {
+        guard !DemoSeed.isRequested else { return nil }
+        let id = UserDefaults.standard.string(forKey: activeProjectKey) ?? ""
+        return id.isEmpty ? nil : id
+    }
+
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
 
     /// 启动参数 `-initialTab 世界` 可以直接落到某个 Tab。CI 的截图流水线靠它
     /// 逐个 Tab 出图；正常启动没有这个参数，行为和以前一样。
     @State private var destination: AppDestination = RootView.launchDestination
-    @State private var activeProjectID: String?
+    @State private var activeProjectID: String? = RootView.launchProjectID
     @State private var session: ProjectSession?
-    @State private var loadingSession = false
     @State private var libraryVisible = false
     @State private var translationVisible = false
+
+    /// 书已选中但会话还没解码完。此时不能先闪空态，否则每开一本书都像被清空。
+    private var openingBook: Bool {
+        activeProject != nil && session == nil
+    }
 
     private var activeProject: Project? {
         guard let id = activeProjectID else { return nil }
@@ -79,43 +93,56 @@ struct RootView: View {
         .tint(Theme.accent)
         .onAppear {
             // 截图流水线会带 -seedDemo：铺一份演示数据，否则截出来全是空状态。
-            guard DemoSeed.isRequested else { return }
-            DemoSeed.seedIfNeeded(store: store)
+            if DemoSeed.isRequested {
+                DemoSeed.seedIfNeeded(store: store)
+                if activeProjectID == nil {
+                    // 演示数据里还有分支和回收站项目，按更新时间排序时不一定是正文那本；
+                    // 截图统一落到主书，保证写作/阅读/世界各页都有内容。
+                    activeProjectID = store.projects
+                        .first(where: { $0.title == DemoSeed.primaryTitle && !$0.isTrashed })?
+                        .id
+                        ?? store.activeProjects.first?.id
+                }
+                #if DEBUG
+                // 书架截图：直接打开书稿选择器（可再带 -openTrash 进回收站）。
+                if ProcessInfo.processInfo.arguments.contains("-openLibrary") {
+                    libraryVisible = true
+                }
+                #endif
+                return
+            }
+            // 没有上次记录（首次安装）或那本书已被删除：落到最近编辑的一本。
             if activeProjectID == nil {
-                // 演示数据里还有分支和回收站项目，按更新时间排序时不一定是正文那本；
-                // 截图统一落到主书，保证写作/阅读/世界各页都有内容。
-                activeProjectID = store.projects
-                    .first(where: { $0.title == DemoSeed.primaryTitle && !$0.isTrashed })?
-                    .id
-                    ?? store.activeProjects.first?.id
+                activeProjectID = store.activeProjects.first?.id
             }
-            #if DEBUG
-            // 书架截图：直接打开书稿选择器（可再带 -openTrash 进回收站）。
-            if ProcessInfo.processInfo.arguments.contains("-openLibrary") {
-                libraryVisible = true
-            }
-            #endif
         }
         .task(id: activeProjectID) {
             guard let project = activeProject else {
                 session = nil
-                loadingSession = false
                 store.trimSessionCache(keeping: [])
+                // 上次打开的书被删除或放进回收站：落到最近一本，不留空白页。
+                if let fallback = store.activeProjects.first, activeProjectID != fallback.id {
+                    activeProjectID = fallback.id
+                }
                 return
             }
+            UserDefaults.standard.set(project.id, forKey: Self.activeProjectKey)
             if let cached = store.cachedSession(for: project.id) {
                 session = cached
-                loadingSession = false
                 store.trimSessionCache(keeping: [project.id])
                 return
             }
             session = nil
-            loadingSession = true
             let loaded = await store.openSessionAsync(for: project)
             guard !Task.isCancelled else { return }
             session = loaded
-            loadingSession = false
             store.trimSessionCache(keeping: [project.id])
+        }
+        .onChange(of: activeProject?.id) { _, newValue in
+            // 当前书被移进回收站/彻底删除时，task(id:) 不会因为同一 id 重跑。
+            guard newValue == nil, activeProjectID != nil else { return }
+            session = nil
+            activeProjectID = store.activeProjects.first?.id
         }
         .preferredColorScheme(store.settings.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
@@ -166,7 +193,7 @@ struct RootView: View {
             }
         }
         .overlay {
-            if loadingSession {
+            if openingBook {
                 ProgressView("正在打开书稿…")
                     .font(Font.subheadline)
                     .padding(.horizontal, Theme.Spacing.xl)
@@ -218,6 +245,8 @@ struct RootView: View {
             WriterPane(session: session)
                 // 切书时重置创作页状态，避免沿用上一本的可见窗口/输入态。
                 .id(session.project.id)
+        } else if openingBook {
+            openingPlaceholder
         } else {
             EmptyStateView(
                 symbol: "square.and.pencil",
@@ -233,6 +262,8 @@ struct RootView: View {
             ReaderPane(session: session)
                 // 切书重置阅读页状态，避免沿用上一本的滚动位置与面板。
                 .id(session.project.id)
+        } else if openingBook {
+            openingPlaceholder
         } else {
             EmptyStateView(
                 symbol: "book",
@@ -260,6 +291,8 @@ struct RootView: View {
             WorldPane(session: session)
                 // 切书重置世界页状态：刷新任务、状态行、打开的编辑器都属于上一本。
                 .id(session.project.id)
+        } else if openingBook {
+            openingPlaceholder
         } else {
             EmptyStateView(
                 symbol: "point.3.connected.trianglepath.dotted",
@@ -267,6 +300,17 @@ struct RootView: View {
                 message: "世界书、人物卡、事件卡都挂在某一本书下面。"
             )
         }
+    }
+
+    /// 选中书稿后、会话解码完成前的占位：先显示加载，不先闪空态。
+    private var openingPlaceholder: some View {
+        VStack(spacing: Theme.Spacing.s) {
+            ProgressView()
+            Text("正在打开书稿…")
+                .font(Font.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - 工具栏

@@ -16,7 +16,10 @@ struct LibraryInputSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var text: String
+    @State private var confirmingDiscard = false
     @FocusState private var focused: Bool
+    /// 打开时的原文，用来判断有没有未提交的输入。
+    private let initialText: String
 
     init(
         navTitle: String,
@@ -32,10 +35,16 @@ struct LibraryInputSheet: View {
         self.confirmLabel = confirmLabel
         self.multiline = multiline
         self.allowsEmpty = allowsEmpty
+        self.initialText = initialText
         self.onCommit = onCommit
         _text = State(initialValue: initialText)
         // `@FocusState` 在自定义 init 里要显式建好，避免漏初始化。
         _focused = FocusState<Bool>()
+    }
+
+    private var hasChanges: Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            != initialText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -72,9 +81,16 @@ struct LibraryInputSheet: View {
             .pageBackground()
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasChanges {
+                            confirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -84,6 +100,14 @@ struct LibraryInputSheet: View {
                     }
                     .disabled(!canCommit)
                 }
+            }
+            .confirmationDialog(
+                "放弃未保存的输入？",
+                isPresented: $confirmingDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("放弃输入", role: .destructive) { dismiss() }
+                Button("继续编辑", role: .cancel) {}
             }
             .presentationDetents([.medium, .large])
         }

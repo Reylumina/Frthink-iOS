@@ -354,6 +354,21 @@ final class ProjectSession {
         flushSave()
     }
 
+    /// 落盘并等写盘真正结束。
+    ///
+    /// `saveNow()` 只负责起后台写盘；导出、退后台、切书这些「接下来要读磁盘」
+    /// 的路径必须等它落完，否则会读到上一版内容。
+    func saveNowAndWait() async {
+        guard !isReadOnly, !savesQuiesced else { return }
+        nextSaveKind = .all
+        flushSave()
+        // 写盘期间可能又排了下一轮（编辑仍在继续）：最多再等两轮。
+        for _ in 0..<3 {
+            await waitForSaveCompletion()
+            if !saveInFlight { break }
+        }
+    }
+
     /// 导入覆盖同名书之前调用：停掉挂起保存，等正在进行的写盘结束。
     ///
     /// 返回后没有挂起保存、也没有进行中的写盘。在 `resumeSaving()` 或
@@ -760,6 +775,7 @@ final class ProjectSession {
         resumeSaveWaiters()
         queuedSaveKind = nil
         nextSaveKind = .all
+        isReadOnly = false
         bodyLoaded = false
         bodyDirty = false
         lastSavedManuscript = nil

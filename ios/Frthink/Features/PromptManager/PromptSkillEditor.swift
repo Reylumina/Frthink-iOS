@@ -12,7 +12,12 @@ struct PromptSkillEditor: View {
     @State private var name: String
     @State private var content: String
     @State private var enabled: Bool
-    @State private var confirmingDelete = false
+    @State private var pendingAction: PendingAction?
+
+    private enum PendingAction {
+        case discard
+        case delete
+    }
 
     init(
         skill: Skill,
@@ -31,6 +36,26 @@ struct PromptSkillEditor: View {
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 有未保存的改动时禁止下滑关闭，点取消也要确认。
+    private var hasChanges: Bool {
+        trimmedName != skill.name || content != skill.content || enabled != skill.enabled
+    }
+
+    private var pendingTitle: String {
+        switch pendingAction {
+        case .discard: return "放弃未保存的修改？"
+        case .delete: return deleteTitle
+        case nil: return ""
+        }
+    }
+
+    private var pendingBinding: Binding<Bool> {
+        Binding(
+            get: { pendingAction != nil },
+            set: { if !$0 { pendingAction = nil } }
+        )
     }
 
     private var deleteTitle: String {
@@ -65,7 +90,7 @@ struct PromptSkillEditor: View {
                 if !isNew, onDelete != nil {
                     Section {
                         DestructiveActionRow(title: "删除技能") {
-                            confirmingDelete = true
+                            pendingAction = .delete
                         }
                     }
                 }
@@ -75,9 +100,16 @@ struct PromptSkillEditor: View {
             .keyboardDismissOnScroll()
             .navigationTitle(isNew ? "新建技能" : "编辑技能")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasChanges {
+                            pendingAction = .discard
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -92,15 +124,23 @@ struct PromptSkillEditor: View {
                 }
             }
             .confirmationDialog(
-                deleteTitle,
-                isPresented: $confirmingDelete,
+                pendingTitle,
+                isPresented: pendingBinding,
                 titleVisibility: .visible
             ) {
-                Button("删除", role: .destructive) {
-                    onDelete?()
-                    dismiss()
+                switch pendingAction {
+                case .discard:
+                    Button("放弃修改", role: .destructive) { dismiss() }
+                    Button("继续编辑", role: .cancel) {}
+                case .delete:
+                    Button("删除", role: .destructive) {
+                        onDelete?()
+                        dismiss()
+                    }
+                    Button("取消", role: .cancel) {}
+                case nil:
+                    Button("取消", role: .cancel) {}
                 }
-                Button("取消", role: .cancel) {}
             }
         }
         .presentationDetents([.large])

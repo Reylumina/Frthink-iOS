@@ -83,16 +83,18 @@ struct SettingsProjectArchiveSection: View {
             return
         }
         isPreparingExport = true
-        // 挂起的编辑先落盘，再从磁盘读全文：不在主线程拼几十万字，也不丢最近一笔改动。
-        store.cachedSession(for: project.id)?.saveNow()
+        // 挂起的编辑先落盘，并等真正的写盘结束，再从磁盘读全文：
+        // 不在主线程拼几十万字，也不丢最近一笔改动。
+        let session = store.cachedSession(for: project.id)
         let files = store.fileStore
         let universeEntries = store.settings.universeEntries
         Task { @MainActor in
             do {
+                await session?.saveNowAndWait()
                 let data = try await Task.detached(priority: .userInitiated) {
                     let backup = FrthinkArchive.ProjectBackup(
                         project: project,
-                        payload: files.loadFullPayload(project.id),
+                        payload: try files.loadVerifiedFullPayload(project.id),
                         sourceText: files.loadSource(project.id),
                         translations: files.loadTranslations(project.id),
                         universeEntries: universeEntries
@@ -186,20 +188,22 @@ struct SettingsFullArchiveSection: View {
         }
         isPreparingExport = true
         let projects = store.projects
-        // 全量导出走磁盘：已打开的会话有 2 秒防抖，先落盘，避免把所有项目常驻内存。
-        for project in projects {
-            store.cachedSession(for: project.id)?.saveNow()
-        }
+        // 全量导出走磁盘：先落盘并等写盘结束，避免把所有项目常驻内存，
+        // 也避免导出读到上一版内容。
+        let sessions = projects.compactMap { store.cachedSession(for: $0.id) }
         let files = store.fileStore
         let settings = store.settings
         let universeEntries = store.settings.universeEntries
         Task { @MainActor in
             do {
+                for session in sessions {
+                    await session.saveNowAndWait()
+                }
                 let data = try await Task.detached(priority: .userInitiated) {
-                    let backups = projects.map { project in
+                    let backups = try projects.map { project in
                         FrthinkArchive.ProjectBackup(
                             project: project,
-                            payload: files.loadFullPayload(project.id),
+                            payload: try files.loadVerifiedFullPayload(project.id),
                             sourceText: files.loadSource(project.id),
                             translations: files.loadTranslations(project.id),
                             universeEntries: universeEntries

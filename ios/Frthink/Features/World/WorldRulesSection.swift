@@ -60,7 +60,12 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .styleNotes:
             return "\(WorldRuleTextKind.lineCount(of: world.styleNotes)) 行"
-        case .plotOutline, .styleTemplate, .longTermRules:
+        case .plotOutline:
+            if !world.events.isEmpty { return "由事件卡渲染" }
+            let count = world.plotOutline
+                .trimmingCharacters(in: .whitespacesAndNewlines).count
+            return count == 0 ? "未建立" : "\(count) 字"
+        case .styleTemplate, .longTermRules:
             let count = text(in: world)
                 .trimmingCharacters(in: .whitespacesAndNewlines).count
             return count == 0 ? "未建立" : "\(count) 字"
@@ -199,11 +204,15 @@ private struct WorldRuleEditorPage: View {
     @State private var receipt: String?
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: String
+    /// 打开页面时的原文。用来区分「用户改过」与「后台 AI 更新过」。
+    @State private var baseline: String
 
     init(session: ProjectSession, kind: WorldRuleTextKind) {
         self.session = session
         self.kind = kind
-        _draft = State(initialValue: kind.text(in: session.payload.world))
+        let initial = kind.text(in: session.payload.world)
+        _draft = State(initialValue: initial)
+        _baseline = State(initialValue: initial)
     }
 
     var body: some View {
@@ -215,6 +224,15 @@ private struct WorldRuleEditorPage: View {
                 expands: true
             )
             .padding(Theme.Spacing.l)
+
+            if kind == .plotOutline, !session.payload.world.events.isEmpty {
+                AppStatusLine(
+                    kind: .info,
+                    text: "已有 \(session.payload.world.events.count) 张事件卡；写作提示词由事件卡渲染，本页文本仅在无事件卡时生效。"
+                )
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.s)
+            }
 
             if kind == .styleNotes {
                 mergeBar
@@ -247,13 +265,26 @@ private struct WorldRuleEditorPage: View {
     // MARK: - 草稿
 
     private func commitDraft() {
-        guard draft != kind.text(in: session.payload.world) else { return }
+        // 用户没动过就什么都不写：后台 AI 可能在编辑期间更新过同一字段，
+        // 拿打开时的旧草稿回写会把新结果覆盖掉。
+        guard draft != baseline else { return }
         switch kind {
-        case .plotOutline: session.payload.world.plotOutline = draft
-        case .styleNotes: session.payload.world.styleNotes = draft
-        case .styleTemplate: session.payload.world.styleTemplate = draft
-        case .longTermRules: session.payload.world.longTermRules = draft
+        case .plotOutline:
+            session.payload.world.plotOutline = draft
+        case .styleNotes:
+            session.payload.world.styleNotes = draft
+        case .styleTemplate:
+            session.payload.world.styleTemplate = draft
+        case .longTermRules:
+            // 和设置页共用摘要写入口：记录历史版本与 updatedAt，恢复上一版才有依据。
+            let now = Int64(Date().timeIntervalSince1970 * 1000)
+            _ = session.payload.world.applySummaryUpdate(
+                content: draft,
+                newKeys: [],
+                now: now
+            )
         }
+        baseline = draft
         session.scheduleSave()
     }
 

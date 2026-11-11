@@ -19,7 +19,7 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | 项目 | 状态 |
 |---|---|
 | 编译与打包 | 通过。CI 生成未签名 IPA |
-| 运行时自检 | 36 项通过。仓库内 fixture 通过 `Real Archive Verify` 执行真实备份导入、导出、落盘与读回 |
+| 运行时自检 | 38 项通过。仓库内 fixture 通过 `Real Archive Verify` 执行真实备份导入、导出、落盘与读回 |
 | 真实存档导入与导出 | 模拟器运行时验证通过。真机文件选择器未验证 |
 | 联网功能 | 未在真机验证，详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | 加密存储 | `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 落盘 AES-256-GCM，主密钥在 Keychain，导出保持原版明文 |

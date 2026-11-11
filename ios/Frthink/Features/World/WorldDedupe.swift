@@ -113,7 +113,10 @@ enum WorldDedupe {
         var seen = Set<Int>()
         var merged = 0
         var removed = 0
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        let existingByID = Dictionary(
+            existing.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         // 循环不变量：候选里出现过的所有称呼。每组都重算会变成 O(组 × 卡)。
         let candidateNames = Set(cards.flatMap { [$0.name] + $0.aliases })
 

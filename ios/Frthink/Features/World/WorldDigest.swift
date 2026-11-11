@@ -11,11 +11,20 @@ enum WorldDigest {
     /// 段间重叠，避免跨段的人名/因果被切断（Android 96 token）。
     static let overlapTokens = 96
 
-    /// 一次点击最多处理多少段。长书不一次跑几十个请求，剩余部分下次刷新继续。
-    static let maxChunksPerRun = 8
-
     /// 大书阈值：码点 ≥ 50 万时原版改成「整篇一次性分析」，一次只取上下文放得下的前缀。
     static let wholeTextCodePointThreshold = 500_000
+
+    /// 一个正文分段：文本 + 在全文里的码点范围。
+    ///
+    /// 范围要进 P27/P28/P29（「第 n/m 段，范围 a–b」），只在提示词里写段号、
+    /// 不带范围，模型就不知道这一段在全文的哪个位置。
+    struct Chunk: Hashable {
+        let text: String
+        /// 0-based 起点。
+        let startCodePoint: Int
+        /// 0-based 终点，开区间。
+        let endCodePoint: Int
+    }
 
     /// 是否走大书模式。原版按 `codePointCount` 比较，不是 UTF-16 长度。
     static func usesWholeTextPass(_ text: String) -> Bool {
@@ -51,11 +60,12 @@ enum WorldDigest {
         of text: String,
         tokenBudget: Int,
         overlapTokens: Int = overlapTokens
-    ) -> [String] {
+    ) -> [Chunk] {
         guard !text.isEmpty, tokenBudget > 0 else { return [] }
 
-        var result: [String] = []
+        var result: [Chunk] = []
         var start = text.startIndex
+        var startCodePoint = 0
 
         while start < text.endIndex {
             var cursor = start
@@ -88,7 +98,13 @@ enum WorldDigest {
                 end = newlineBreak
             }
 
-            result.append(String(text[start..<end]))
+            let chunkText = String(text[start..<end])
+            let endCodePoint = startCodePoint + chunkText.unicodeScalars.count
+            result.append(Chunk(
+                text: chunkText,
+                startCodePoint: startCodePoint,
+                endCodePoint: endCodePoint
+            ))
             if end == text.endIndex { break }
 
             // 从段尾回退约 96 token 作为下一段起点；能落在换行后更好。
@@ -105,7 +121,14 @@ enum WorldDigest {
             if let newline = text[back..<end].firstIndex(of: "\n") {
                 back = text.index(after: newline)
             }
-            start = back > start ? back : end
+            if back > start {
+                startCodePoint = endCodePoint
+                    - String(text[back..<end]).unicodeScalars.count
+                start = back
+            } else {
+                startCodePoint = endCodePoint
+                start = end
+            }
         }
 
         return result

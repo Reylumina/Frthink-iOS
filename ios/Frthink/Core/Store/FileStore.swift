@@ -265,6 +265,56 @@ struct FileStore {
         return payload
     }
 
+    /// 导出用：拼回全文并校验页数与 UTF-16 长度。
+    ///
+    /// `loadFullPayload` 缺页时只返回 `nil` 再静默留下空正文；导出如果照此打包，
+    /// 用户会拿到一份「成功」但没有正文的备份。这里把缺页和长度不符报出来。
+    func loadVerifiedFullPayload(_ projectID: String) throws -> ProjectPayload {
+        var payload = loadPayload(projectID)
+        guard let meta = loadBodyMeta(projectID),
+              let count = meta.pageCount,
+              count > 0
+        else {
+            if let legacy = loadLegacyBody(projectID) {
+                payload.manuscript = legacy.text
+                payload.chapters = legacy.chapters
+            }
+            return payload
+        }
+        var text = ""
+        text.reserveCapacity(meta.utf16Length)
+        for index in 0..<count {
+            guard let page = loadBodyPage(projectID, index: index) else {
+                throw BodyLoadError.missingPage(index)
+            }
+            text += page
+        }
+        let actualLength = (text as NSString).length
+        guard actualLength == meta.utf16Length else {
+            throw BodyLoadError.lengthMismatch(
+                expected: meta.utf16Length,
+                actual: actualLength
+            )
+        }
+        payload.manuscript = text
+        payload.chapters = meta.chapters
+        return payload
+    }
+
+    enum BodyLoadError: LocalizedError {
+        case missingPage(Int)
+        case lengthMismatch(expected: Int, actual: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingPage(let index):
+                return "正文第 \(index + 1) 页文件缺失，无法导出完整备份。"
+            case .lengthMismatch(let expected, let actual):
+                return "正文拼回长度不一致（应为 \(expected)，实际 \(actual)），无法导出完整备份。"
+            }
+        }
+    }
+
     // MARK: - 正文
 
     /// 单页 UTF-16 长度。56 万字约 18 页，编辑器/阅读器只需解密用到的页。

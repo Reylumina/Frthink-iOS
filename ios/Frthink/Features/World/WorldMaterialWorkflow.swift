@@ -52,6 +52,7 @@ enum WorldMaterialWorkflow {
         let allChunks = await Task.detached(priority: .userInitiated) {
             // 原版剧情素材从已归纳偏移继续，3000 token、无重叠，最多 256 段。
             WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
+                .map(\.text)
         }.value
         let chunks = Array(allChunks.prefix(256))
         guard !chunks.isEmpty else {
@@ -134,6 +135,7 @@ enum WorldMaterialWorkflow {
         let allChunks = await Task.detached(priority: .userInitiated) {
             // 原版素材归纳从已归纳偏移继续，3000 token、无重叠，最多 256 段。
             WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
+                .map(\.text)
         }.value
         let chunks = Array(allChunks.prefix(256))
         guard !chunks.isEmpty else {
@@ -141,6 +143,9 @@ enum WorldMaterialWorkflow {
         }
 
         let context = try WorldRequestContext.make(store: store)
+        // 合并基准取本轮开始前的笔记：循环里逐段追加只是中途兜底，
+        // 最终结果要从旧内容出发，否则合成稿会把已追加的原段落再叠一遍。
+        let before = session.payload.world.styleNotes
         var notes: [String] = []
         var consumed = 0
         for chunk in chunks {
@@ -202,9 +207,7 @@ enum WorldMaterialWorkflow {
             return NotesOutcome(updated: false)
         }
 
-        let before = session.payload.world.styleNotes
         let merged = WorldMerge.appendStyleNotes(existing: before, incoming: incoming)
-
         // P42/P43 首次建模板；已有模板走 P44/P45，只追加新增规则。
         let templateBefore = session.payload.world.styleTemplate
         let templateRaw: String

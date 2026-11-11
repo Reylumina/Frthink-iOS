@@ -21,7 +21,8 @@ enum WorldWorkflow {
         let addedCharacters: Int
         let updatedCharacters: Int
         let processedChunks: Int
-        let totalChunks: Int
+        /// 本次跑完后仍未整理的段数（取消、失败或大书截断之外的剩余）。
+        let remainingChunks: Int
         /// 人物去重是可选步骤，失败时的提示挂在这里。
         var dedupeNote: String? = nil
         /// 大书模式只分析了上下文放得下的前缀，剩余部分留给下一次点击。
@@ -39,14 +40,14 @@ enum WorldWorkflow {
                 if let dedupeNote { text += " " + dedupeNote }
                 return text
             }
-            if totalChunks == 0 {
+            if processedChunks == 0, remainingChunks == 0 {
                 return "当前正文已完成世界刷新。"
             }
             var text = parts.isEmpty
                 ? "世界刷新完成：本轮没有新增。"
                 : "世界刷新完成：" + parts.joined(separator: "，") + "。"
-            if processedChunks < totalChunks {
-                text += " 还有 \(totalChunks - processedChunks) 段未整理，再次点击刷新会继续。"
+            if remainingChunks > 0 {
+                text += " 还有 \(remainingChunks) 段未整理，再次点击刷新会继续。"
             }
             if let dedupeNote { text += " " + dedupeNote }
             return text
@@ -125,11 +126,8 @@ enum WorldWorkflow {
             session.payload.world.analysisMergedCards = []
             session.payload.world.analysisWorldRefreshComplete = false
         }
-        let pendingIndexes = Array(
-            (0..<allSegments.count)
-                .filter { !session.payload.world.completedAnalysisSegments.contains($0) }
-                .prefix(WorldDigest.maxChunksPerRun)
-        )
+        let pendingIndexes = (0..<allSegments.count)
+            .filter { !session.payload.world.completedAnalysisSegments.contains($0) }
         let chunks = pendingIndexes.map { allSegments[$0] }
 
         guard !chunks.isEmpty else {
@@ -143,7 +141,7 @@ enum WorldWorkflow {
                     addedCharacters: finalized.added,
                     updatedCharacters: finalized.updated,
                     processedChunks: 0,
-                    totalChunks: allSegments.count,
+                    remainingChunks: 0,
                     dedupeNote: finalized.note
                 )
             }
@@ -151,7 +149,7 @@ enum WorldWorkflow {
                 addedCharacters: 0,
                 updatedCharacters: 0,
                 processedChunks: 0,
-                totalChunks: 0
+                remainingChunks: 0
             )
         }
 
@@ -162,12 +160,20 @@ enum WorldWorkflow {
         for (index, chunk) in chunks.enumerated() {
             try Task.checkCancellation()
             progress(index + 1, chunks.count)
+            let segmentIndex = pendingIndexes[index]
 
             let messages = PromptComposer.worldRefreshMessages(
                 existingCharacters: session.payload.world.characters,
                 existingStyleTemplate: session.payload.world.styleTemplate,
-                digest: chunk,
+                digest: chunk.text,
                 incremental: incremental,
+                // P27/P28/P29 都要带段序号与码点范围；大书模式没有分段。
+                segment: PromptLibrary.Segment(
+                    index: segmentIndex + 1,
+                    total: allSegments.count,
+                    start: chunk.startCodePoint + 1,
+                    end: chunk.endCodePoint
+                ),
                 // 设置里「世界建立」改写过 P18 就用用户的版本。
                 worldBuildInstruction: store.settings.worldBuildInstruction.isEmpty
                     ? nil
@@ -202,15 +208,12 @@ enum WorldWorkflow {
             }
 
             // 这一段做完了：记进断点，中途失败下次接着跑。
-            if let done = chunks.firstIndex(where: { $0 == chunk }) {
-                let segmentIndex = pendingIndexes[done]
-                if !session.payload.world.completedAnalysisSegments.contains(segmentIndex) {
-                    session.payload.world.completedAnalysisSegments.append(segmentIndex)
-                }
+            if !session.payload.world.completedAnalysisSegments.contains(segmentIndex) {
+                session.payload.world.completedAnalysisSegments.append(segmentIndex)
             }
             session.payload.world.refreshedUpTo =
                 session.payload.world.completedAnalysisSegments
-                    .reduce(0) { $0 + (allSegments[$1].count) }
+                    .reduce(0) { $0 + (allSegments[$1].text.count) }
             session.payload.world.lastRefreshedAt = Date()
             session.scheduleSave()
         }
@@ -226,11 +229,15 @@ enum WorldWorkflow {
             dedupeNote = finalized.note
         }
 
+        let validCompleted = Set(
+            session.payload.world.completedAnalysisSegments
+                .filter { $0 >= 0 && $0 < allSegments.count }
+        )
         return RefreshOutcome(
             addedCharacters: addedCharacters,
             updatedCharacters: updatedCharacters,
             processedChunks: chunks.count,
-            totalChunks: allSegments.count,
+            remainingChunks: max(0, allSegments.count - validCompleted.count),
             dedupeNote: dedupeNote
         )
     }
@@ -292,7 +299,7 @@ enum WorldWorkflow {
                 addedCharacters: 0,
                 updatedCharacters: 0,
                 processedChunks: 0,
-                totalChunks: 0
+                remainingChunks: 0
             )
         }
 
@@ -369,7 +376,7 @@ enum WorldWorkflow {
             addedCharacters: committed.added,
             updatedCharacters: committed.updated,
             processedChunks: 1,
-            totalChunks: 1,
+            remainingChunks: 0,
             dedupeNote: committed.note,
             truncationNote: complete
                 ? nil

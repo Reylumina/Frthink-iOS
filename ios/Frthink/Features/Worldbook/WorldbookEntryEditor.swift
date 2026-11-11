@@ -11,6 +11,7 @@ struct WorldbookEntryEditor: View {
     @State private var title: String
     @State private var bodyText: String
     @State private var enabled: Bool
+    @State private var confirmingDiscard = false
 
     init(entry: WorldbookEntry, isNew: Bool, onSave: @escaping (WorldbookEntry) -> Void) {
         self.entry = entry
@@ -31,6 +32,10 @@ struct WorldbookEntryEditor: View {
 
     private var canSave: Bool {
         !trimmedTitle.isEmpty && !trimmedBody.isEmpty
+    }
+
+    private var hasChanges: Bool {
+        trimmedTitle != entry.title || bodyText != entry.body || enabled != entry.enabled
     }
 
     var body: some View {
@@ -62,9 +67,16 @@ struct WorldbookEntryEditor: View {
             .groupedPageBackground()
             .navigationTitle(isNew ? "新建世界书词条" : "编辑世界书词条")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasChanges {
+                            confirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
@@ -78,6 +90,14 @@ struct WorldbookEntryEditor: View {
                     }
                     .disabled(!canSave)
                 }
+            }
+            .confirmationDialog(
+                "放弃未保存的修改？",
+                isPresented: $confirmingDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("放弃修改", role: .destructive) { dismiss() }
+                Button("继续编辑", role: .cancel) {}
             }
         }
     }

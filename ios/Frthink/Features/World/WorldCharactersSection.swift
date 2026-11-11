@@ -183,7 +183,7 @@ struct WorldCharactersSection: View {
                 onRefreshFull?()
             } label: {
                 Label(
-                    "从头整理（本轮最多 \(WorldDigest.maxChunksPerRun) 段）",
+                    "从头整理（重新分析全部正文）",
                     systemImage: "arrow.counterclockwise"
                 )
             }
