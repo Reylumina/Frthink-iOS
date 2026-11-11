@@ -46,7 +46,7 @@ final class AppStore {
             Task { @MainActor in
                 // 当前会话由 RootView 强引用，从缓存移除不会丢对象；
                 // 这样内存警告时能把整份 payload 的额外缓存释放掉。
-                self?.trimSessionCache(keeping: [])
+                await self?.trimSessionCache(keeping: [])
             }
         }
     }
@@ -60,19 +60,21 @@ final class AppStore {
     /// 退到后台/失去活跃前，把防抖窗口里的编辑立刻落盘。
     ///
     /// iOS 进入后台后可能直接终止进程；2 秒防抖等不到就会丢最后一段输入。
-    func flushDirtySessions() {
+    /// 这里等写盘真正结束再返回，给系统留出落盘时间。
+    func flushDirtySessions() async {
         for session in sessions.values where session.isDirty {
-            session.saveNow()
+            await session.saveNowAndWait()
         }
     }
 
     /// 只保留当前书稿的会话缓存。切书时调用；非当前书先落盘再释放，
-    /// 避免多本 56 万字书同时驻留内存。
-    func trimSessionCache(keeping keepIDs: Set<String>) {        let evicted = sessions.keys.filter { !keepIDs.contains($0) }
+    /// 避免多本 56 万字书同时驻留内存，也避免旧会话的挂起保存盖住新书。
+    func trimSessionCache(keeping keepIDs: Set<String>) async {
+        let evicted = sessions.keys.filter { !keepIDs.contains($0) }
         for id in evicted {
             guard let session = sessions[id] else { continue }
             if session.isDirty {
-                session.saveNow()
+                await session.saveNowAndWait()
             }
             sessions.removeValue(forKey: id)
         }

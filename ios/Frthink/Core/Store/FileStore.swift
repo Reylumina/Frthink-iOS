@@ -270,7 +270,16 @@ struct FileStore {
     /// `loadFullPayload` 缺页时只返回 `nil` 再静默留下空正文；导出如果照此打包，
     /// 用户会拿到一份「成功」但没有正文的备份。这里把缺页和长度不符报出来。
     func loadVerifiedFullPayload(_ projectID: String) throws -> ProjectPayload {
-        var payload = loadPayload(projectID)
+        let state = loadPayloadState(projectID)
+        var payload: ProjectPayload
+        switch state {
+        case .loaded(let loaded):
+            payload = loaded
+        case .missing:
+            throw BodyLoadError.payloadUnavailable("payload.json 不存在")
+        case .corrupted:
+            throw BodyLoadError.payloadUnavailable("payload.json 无法解密或解析")
+        }
         guard let meta = loadBodyMeta(projectID),
               let count = meta.pageCount,
               count > 0
@@ -302,11 +311,14 @@ struct FileStore {
     }
 
     enum BodyLoadError: LocalizedError {
+        case payloadUnavailable(String)
         case missingPage(Int)
         case lengthMismatch(expected: Int, actual: Int)
 
         var errorDescription: String? {
             switch self {
+            case .payloadUnavailable(let detail):
+                return "对话与世界数据不可用（\(detail)），无法导出完整备份。"
             case .missingPage(let index):
                 return "正文第 \(index + 1) 页文件缺失，无法导出完整备份。"
             case .lengthMismatch(let expected, let actual):

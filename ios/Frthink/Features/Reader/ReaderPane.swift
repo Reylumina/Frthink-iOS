@@ -88,7 +88,9 @@ struct ReaderPane: View {
             searchTask?.cancel()
             searchTask = nil
         }
-        .onChange(of: session.payload.manuscript) { _, _ in
+        // 结构改动（插入/撤销/导入/覆盖恢复）才需要重排；逐字编辑走正文编辑器，
+        // 不用在这里比一遍 56 万字的字符串。
+        .onChange(of: session.manuscriptRevision) { _, _ in
             if isVisible { scheduleRebuild() }
         }
         .onChange(of: session.translations) { _, _ in

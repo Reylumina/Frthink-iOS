@@ -237,18 +237,20 @@ enum FrthinkArchive {
             try c.encode(sourceText, forKey: .sourceText)
             try c.encode(translations, forKey: .translations)
             // 同时写 iOS 的 body/kind 和 Android 的 content：两端各取所需。
-            let universeJSON: [[String: Any]] = universeEntries.map { entry in
-                [
-                    "id": entry.id,
-                    "title": entry.title,
-                    "body": entry.body,
-                    "kind": entry.kind.rawValue,
-                    "content": entry.body,
-                    "enabled": entry.enabled,
-                    "updatedAt": FrthinkArchive.iso8601.string(from: entry.updatedAt),
-                ]
-            }
-            try encodeAny(universeJSON, key: .universeEntries, into: &c)
+            try c.encode(
+                universeEntries.map { entry in
+                    ArchivedUniverseEntry(
+                        id: entry.id,
+                        title: entry.title,
+                        body: entry.body,
+                        kind: entry.kind.rawValue,
+                        content: entry.body,
+                        enabled: entry.enabled,
+                        updatedAt: FrthinkArchive.iso8601.string(from: entry.updatedAt)
+                    )
+                },
+                forKey: .universeEntries
+            )
             try c.encode(coverImageBase64, forKey: .coverImageBase64)
             try c.encode(branchRootId, forKey: .branchRootId)
             try c.encode(branchOrder, forKey: .branchOrder)
@@ -949,6 +951,17 @@ enum FrthinkArchive {
         var dynamic: Bool?
     }
 
+    /// 导出时的共享世界书：iOS 与 Android 字段同时存在。
+    private struct ArchivedUniverseEntry: Encodable {
+        var id: String
+        var title: String
+        var body: String
+        var kind: String
+        var content: String
+        var enabled: Bool
+        var updatedAt: String
+    }
+
     /// Android 存档里的 `TranslationRecord`（12 字段里只映射 iOS 用得上的）。
     private struct ArchivedTranslationJSON: Decodable {
         var target: String?
@@ -1632,7 +1645,10 @@ enum FrthinkArchive {
 
     /// 读书项目存档：解信封 → 解压 → 解载荷 → 语义校验。
     static func readProjectArchive(_ data: Data) throws -> ProjectArchivePayload {
-        let json = try openEnvelope(data, kind: .project)
+        try decodeProjectArchive(openEnvelope(data, kind: .project))
+    }
+
+    private static func decodeProjectArchive(_ json: Data) throws -> ProjectArchivePayload {
         let payload: ProjectArchivePayload
         do {
             payload = try jsonDecoder.decode(ProjectArchivePayload.self, from: json)
@@ -1651,24 +1667,30 @@ enum FrthinkArchive {
     /// 原版是两个导入入口（书项目存档 / 全量存档），格式白名单不同。用户拿到
     /// 一个 `chapleap-full-backup` 却点了书项目导入，只会得到「不是有效存档」——
     /// 那不是用户的错。这里先按格式判定，再分派。
+    ///
+    /// 两种格式的白名单有交集（`writing-workspace-backup`），旧实现先试全量、
+    /// 失败再试书项目，同一份文件要解压 + 解析两遍。现在内层 JSON 只解一次，
+    /// 两个解码器共用它。
     static func openAny(_ data: Data) throws -> FrthinkArchive.AnyArchive {
         let envelope = try? jsonDecoder.decode(Envelope.self, from: data)
         let looksFull = envelope.map { isAcceptedFormat($0.format, kind: .full) } ?? false
         let looksProject = envelope.map { isAcceptedFormat($0.format, kind: .project) } ?? false
+        // 两种都接受时按全量口径解压（错误文案更贴合「可能是全量备份」）。
+        let json = try openEnvelope(
+            data,
+            kind: looksFull ? .full : .project
+        )
 
         // 先按信封里的 format 走对应读取器；失败则记住它的错误，
         // 两个都失败时把最有信息量的那条抛出去——「不是有效文件」太笼统。
         var lastError: Error?
         if looksFull {
-            do { return .full(try readFullBackup(data)) } catch { lastError = error }
+            do { return .full(try decodeFullBackup(json)) } catch { lastError = error }
         }
         if looksProject {
-            do { return .projects(try readProjectArchive(data)) } catch { lastError = error }
-        }
-        do { return .full(try readFullBackup(data)) } catch { lastError = error }
-        do { return .projects(try readProjectArchive(data)) } catch {
-            // 书项目读取器的错误更具体时用它。
-            if lastError == nil { lastError = error }
+            do { return .projects(try decodeProjectArchive(json)) } catch {
+                if lastError == nil { lastError = error }
+            }
         }
         throw lastError ?? FrthinkArchiveError.notAnArchive(isFull: true)
     }
@@ -1688,7 +1710,10 @@ enum FrthinkArchive {
 
     /// 读全量存档。
     static func readFullBackup(_ data: Data) throws -> FullBackupPayload {
-        let json = try openEnvelope(data, kind: .full)
+        try decodeFullBackup(openEnvelope(data, kind: .full))
+    }
+
+    private static func decodeFullBackup(_ json: Data) throws -> FullBackupPayload {
         let payload: FullBackupPayload
         do {
             payload = try jsonDecoder.decode(FullBackupPayload.self, from: json)
@@ -1935,8 +1960,13 @@ enum FrthinkArchive {
         if result.providers.isEmpty {
             result.providers = local.providers
         }
-        let activeID = result.activeProviderID
-        if !result.providers.contains(where: { $0.id == activeID }) {
+        // 存档里没有 activeProviderID（Android 备份）时保留本机选中的供应方；
+        // 不能退化成 providers.first，否则用户可能被切到没填 Key 的那条。
+        if result.providers.contains(where: { $0.id == result.activeProviderID }) {
+            // 存档自带的选择有效，保留。
+        } else if result.providers.contains(where: { $0.id == local.activeProviderID }) {
+            result.activeProviderID = local.activeProviderID
+        } else {
             result.activeProviderID = result.providers.first?.id ?? ""
         }
         result.universeEntries = mergedUniverseEntries(

@@ -119,7 +119,7 @@ struct RootView: View {
         .task(id: activeProjectID) {
             guard let project = activeProject else {
                 session = nil
-                store.trimSessionCache(keeping: [])
+                await store.trimSessionCache(keeping: [])
                 // 上次打开的书被删除或放进回收站：落到最近一本，不留空白页。
                 if let fallback = store.activeProjects.first, activeProjectID != fallback.id {
                     activeProjectID = fallback.id
@@ -129,14 +129,14 @@ struct RootView: View {
             UserDefaults.standard.set(project.id, forKey: Self.activeProjectKey)
             if let cached = store.cachedSession(for: project.id) {
                 session = cached
-                store.trimSessionCache(keeping: [project.id])
+                await store.trimSessionCache(keeping: [project.id])
                 return
             }
             session = nil
             let loaded = await store.openSessionAsync(for: project)
             guard !Task.isCancelled else { return }
             session = loaded
-            store.trimSessionCache(keeping: [project.id])
+            await store.trimSessionCache(keeping: [project.id])
         }
         .onChange(of: activeProjectID) { oldValue, newValue in
             // 切书：旧书在跑的世界任务必须停，否则它会继续对已被驱逐的会话落盘。
@@ -154,7 +154,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // 切后台、控制中心下拉、来电都会先变 inactive；这时先把挂起编辑写盘。
             if phase != .active {
-                store.flushDirtySessions()
+                Task { await store.flushDirtySessions() }
             }
         }
         // 「界面动画帧率」开关：关掉后这次事务里的所有动画都不播，
