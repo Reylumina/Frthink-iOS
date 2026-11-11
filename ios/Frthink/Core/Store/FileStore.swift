@@ -66,19 +66,82 @@ struct FileStore {
     // MARK: - 原子写
 
     /// 先写临时文件再 `replaceItemAt`，避免中途崩溃留下半个 JSON。
+    ///
+    /// 临时文件名带 UUID：会话自动保存和导入写盘可能同时写同一个目标
+    /// （例如覆盖导入时旧会话的挂起保存），固定名会让两个写者互相覆盖临时文件，
+    /// 一路传成「文件不存在」或写到对方的内容。
     func write(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
+            at: directory,
             withIntermediateDirectories: true
         )
-        let tmp = url.deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).tmp")
-        try data.write(to: tmp, options: .atomic)
-        if FileManager.default.fileExists(atPath: url.path) {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
-        } else {
-            try FileManager.default.moveItem(at: tmp, to: url)
+        let tmp = directory.appendingPathComponent(
+            ".\(url.lastPathComponent).\(UUID().uuidString).tmp"
+        )
+        do {
+            try data.write(to: tmp, options: .atomic)
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+            } else {
+                try FileManager.default.moveItem(at: tmp, to: url)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tmp)
+            throw error
         }
+    }
+
+    // MARK: - 导入暂存
+
+    /// 导入时先写这一份暂存根目录，成功后才整体换进 `projects/`。
+    ///
+    /// 直接往正式目录写，任何一步失败都会让「恢复存档」变成「删掉旧书再留一堆
+    /// 半个文件」；覆盖导入尤其致命，旧稿已经没了，新稿又没写完。
+    func makeImportStagingRoot() throws -> URL {
+        let root = self.root
+            .appendingPathComponent("staging", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    /// 用暂存目录整体替换（或新建）一个书项目目录。
+    ///
+    /// `replaceItemAt` 在同一卷上做目录级替换，失败时旧目录仍在；文件系统不支持
+    /// 目录替换时退回「旧目录改名备份 → 新目录改名到位 → 删备份」，后两步失败会把
+    /// 旧目录改回来。
+    func commitStagedProject(projectID: String, stagingRoot: URL) throws {
+        let staged = FileStore(root: stagingRoot).projectDirectory(projectID)
+        let destination = projectDirectory(projectID)
+        let parent = destination.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+
+        guard FileManager.default.fileExists(atPath: destination.path) else {
+            try FileManager.default.moveItem(at: staged, to: destination)
+            return
+        }
+        do {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
+        } catch {
+            let backup = parent.appendingPathComponent(
+                ".\(projectID).\(UUID().uuidString).bak",
+                isDirectory: true
+            )
+            try FileManager.default.moveItem(at: destination, to: backup)
+            do {
+                try FileManager.default.moveItem(at: staged, to: destination)
+            } catch {
+                try? FileManager.default.moveItem(at: backup, to: destination)
+                throw error
+            }
+            try? FileManager.default.removeItem(at: backup)
+        }
+    }
+
+    /// 导入结束（成功、失败或取消）都要清掉暂存目录。
+    func discardImportStagingRoot(_ stagingRoot: URL) {
+        try? FileManager.default.removeItem(at: stagingRoot)
     }
 
     // MARK: - 加密读写

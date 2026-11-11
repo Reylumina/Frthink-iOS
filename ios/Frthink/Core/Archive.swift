@@ -1665,11 +1665,25 @@ enum FrthinkArchive {
             guard !backup.projectId.isEmpty else {
                 throw FrthinkArchiveError.corrupted(isFull: isFull)
             }
+            guard isSafeProjectID(backup.projectId) else {
+                throw FrthinkArchiveError.invalidProjectID(backup.projectId)
+            }
             guard projectIDs.insert(backup.projectId).inserted else {
                 throw FrthinkArchiveError.duplicateProjects(isFull: isFull)
             }
         }
         try validateTranslations(projects)
+    }
+
+    /// 项目 id 直接当目录名用。只挡住真正的路径问题，不限制 id 的字符集：
+    /// 旧存档里可能有非 UUID 的 id，字符集收紧会把能导入的备份判死。
+    private static func isSafeProjectID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128 else { return false }
+        guard id != ".", id != ".." else { return false }
+        guard !id.contains("/"), !id.contains("\\"), !id.contains("\0") else {
+            return false
+        }
+        return !id.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
     }
 
     /// 译文分段的主键是 `(owner, project, target, segment)`。
@@ -1697,13 +1711,25 @@ enum FrthinkArchive {
     /// 同 id 的项目被覆盖（「恢复存档」语义），其余项目不动——原版导入也不
     /// 清空现有数据。译文按本机 `ownerID` 重打归属：Android 的 `owner` 是设备/
     /// 账号标识，跨端带过来会触发「存档项目归属不匹配」。
+    ///
+    /// 每本书先写进 UUID 暂存目录，全部文件成功后才整体换进正式目录；
+    /// `beforeCommit` 只给自检注入失败用，正常导入传 nil。
     @discardableResult
     static func restore(
         _ backups: [ProjectBackup],
         into files: FileStore,
-        ownerID: String
+        ownerID: String,
+        beforeCommit: (() throws -> Void)? = nil
     ) throws -> [Project] {
         var restored: [Project] = []
+        let stagingRoot: URL
+        do {
+            stagingRoot = try files.makeImportStagingRoot()
+        } catch {
+            throw FrthinkArchiveError.writeFailed(error.localizedDescription)
+        }
+        defer { files.discardImportStagingRoot(stagingRoot) }
+        let stagedFiles = FileStore(root: stagingRoot)
         for backup in backups {
             let project = Project(
                 id: backup.projectId,
@@ -1741,17 +1767,21 @@ enum FrthinkArchive {
             }
 
             do {
-                try files.saveProject(project)
-                try files.savePayload(payload, projectID: project.id)
+                try stagedFiles.saveProject(project)
+                try stagedFiles.savePayload(payload, projectID: project.id)
                 // payload.json 里的正文只是兜底；正文实际由分页文件承载。
                 // 覆盖导入时必须一并重写，否则旧 body.pages 会盖住新正文。
-                try files.saveBody(
+                try stagedFiles.saveBody(
                     payload.manuscript,
                     chapters: payload.chapters,
                     projectID: project.id
                 )
-                try files.saveSource(backup.sourceText, projectID: project.id)
-                try files.saveTranslations(translations, projectID: project.id)
+                try stagedFiles.saveSource(backup.sourceText, projectID: project.id)
+                try stagedFiles.saveTranslations(translations, projectID: project.id)
+                try beforeCommit?()
+                // 一本书的所有文件写成功后才整体换进正式目录。失败或取消时
+                // 暂存目录被清掉，旧稿原样保留，不会出现「一半新一半旧」。
+                try files.commitStagedProject(projectID: project.id, stagingRoot: stagingRoot)
             } catch {
                 throw FrthinkArchiveError.writeFailed(error.localizedDescription)
             }

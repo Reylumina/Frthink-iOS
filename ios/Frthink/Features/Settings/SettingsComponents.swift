@@ -41,23 +41,6 @@ extension AppTheme {
     }
 }
 
-/// 覆盖导入后，把可能还挂在内存里的会话换成刚写盘的内容。
-///
-/// `AppStore` 只在 `openSession` 时读盘：导入覆盖同名项目后，写作台里那个会话
-/// 还拿着旧稿，它 2 秒的防抖保存随时会把导入的正文盖回去。这里只替换**已缓存**
-/// 的会话，并且复位正文分页缓存/编辑器窗口，避免用旧状态再写盘。
-///
-/// 只对导入前就存在的项目 id 调用，新建的 id 不可能有会话。
-@MainActor
-func settingsRefreshSessions(_ store: AppStore, projectIDs: Set<String>) {
-    guard !projectIDs.isEmpty else { return }
-    for id in projectIDs {
-        guard let project = store.projects.first(where: { $0.id == id }),
-              let session = store.cachedSession(for: id) else { continue }
-        session.replaceLoadedState(project: project, fileStore: store.fileStore)
-    }
-}
-
 /// 文件面板被取消时也会走 failure；这不是错误，直接吞掉。
 func settingsIsUserCancelled(_ error: Error) -> Bool {
     guard let cocoa = error as? CocoaError else { return false }

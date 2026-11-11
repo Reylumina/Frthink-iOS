@@ -44,6 +44,13 @@ final class ProjectSession {
     }
 
     private var saveInFlight = false
+    /// 外部要整体替换磁盘内容（导入覆盖）期间暂停一切保存。
+    ///
+    /// 只在 `quiesceSaves()` 里置位：内存里的旧稿和磁盘上的新稿同时存在时，
+    /// 任何一次防抖保存都会把导入结果盖回去。
+    @ObservationIgnored private var savesQuiesced = false
+    /// 等当前写盘结束的调用方（导入覆盖前必须等它落完）。
+    @ObservationIgnored private var saveCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     /// 下一次落盘的范围；打字默认只写正文。
     private var nextSaveKind: SaveKind = .all
     /// 当前写盘结束后要补写的内容；没有就是 nil。
@@ -317,19 +324,20 @@ final class ProjectSession {
     }
 
     func scheduleSave() {
-        guard !isReadOnly else { return }
+        guard !isReadOnly, !savesQuiesced else { return }
         nextSaveKind = .all
         scheduleSaveTask()
     }
 
     /// 只保存正文/章节，不重写 payload.json。逐字编辑走这里。
     private func scheduleBodySave() {
-        guard !isReadOnly else { return }
+        guard !isReadOnly, !savesQuiesced else { return }
         // 如果已经排了一次全量保存，不能被降级成只写正文。
         scheduleSaveTask()
     }
 
     private func scheduleSaveTask() {
+        guard !savesQuiesced else { return }
         isDirty = true
         saveTask?.cancel()
         saveTask = Task { [weak self] in
@@ -341,9 +349,48 @@ final class ProjectSession {
     }
 
     func saveNow() {
-        guard !isReadOnly else { return }
+        guard !isReadOnly, !savesQuiesced else { return }
         nextSaveKind = .all
         flushSave()
+    }
+
+    /// 导入覆盖同名书之前调用：停掉挂起保存，等正在进行的写盘结束。
+    ///
+    /// 返回后没有挂起保存、也没有进行中的写盘。在 `resumeSaving()` 或
+    /// `replaceLoadedState(...)` 之前，任何编辑都只留在内存，不落盘。
+    /// 挂起的编辑会先落一次盘：导入失败时用户刚打的字不能丢。
+    func quiesceSaves() async {
+        saveTask?.cancel()
+        saveTask = nil
+        await waitForSaveCompletion()
+        if !isReadOnly, isDirty {
+            nextSaveKind = .all
+            flushSave()
+            await waitForSaveCompletion()
+        }
+        savesQuiesced = true
+        queuedSaveKind = nil
+        nextSaveKind = .bodyOnly
+        isDirty = false
+    }
+
+    private func waitForSaveCompletion() async {
+        guard saveInFlight else { return }
+        await withCheckedContinuation { continuation in
+            saveCompletionWaiters.append(continuation)
+        }
+    }
+
+    /// 这本书没有被导入覆盖（或写盘失败回滚）时恢复保存。
+    func resumeSaving() {
+        savesQuiesced = false
+    }
+
+    private func resumeSaveWaiters() {
+        guard !saveCompletionWaiters.isEmpty else { return }
+        let waiters = saveCompletionWaiters
+        saveCompletionWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     private static func merge(_ lhs: SaveKind?, _ rhs: SaveKind) -> SaveKind {
@@ -368,7 +415,7 @@ final class ProjectSession {
     }
 
     private func flushSave() {
-        guard !isReadOnly else { return }
+        guard !isReadOnly, !savesQuiesced else { return }
         saveTask?.cancel()
         saveTask = nil
 
@@ -450,7 +497,12 @@ final class ProjectSession {
                     self.manuscriptCharacterCount = savedMeta.characterCount
                 }
                 self.saveInFlight = false
-                if let queued = self.queuedSaveKind {
+                self.resumeSaveWaiters()
+                if self.savesQuiesced {
+                    // 导入正在替换磁盘内容：旧快照不能再写回去。
+                    self.queuedSaveKind = nil
+                    self.isDirty = false
+                } else if let queued = self.queuedSaveKind {
                     self.queuedSaveKind = nil
                     self.nextSaveKind = Self.merge(self.nextSaveKind, queued)
                     // 快照之后 payload 又变了：用最新内容再写一次。
@@ -704,6 +756,8 @@ final class ProjectSession {
         chapterScanTask?.cancel()
         chapterScanTask = nil
         saveInFlight = false
+        savesQuiesced = false
+        resumeSaveWaiters()
         queuedSaveKind = nil
         nextSaveKind = .all
         bodyLoaded = false
@@ -847,7 +901,11 @@ final class ProjectSession {
         scheduleSave()
     }
 
-    /// 记录一次请求快照（「提示词回看」）。只留最近 30 条，避免 payload 无限膨胀。
+    /// 记录一次请求快照（「提示词回看」）。
+    ///
+    /// 只按条数保留 30 条不够：一次发送 56 万字正文的快照就能让 `payload.json`
+    /// 膨胀几十 MB，之后的每次写盘都要编码这些历史。这里再加一道 token 上限
+    /// （中文约 3 字节/token），至少保留最新一条。
     func recordRequestSnapshot(
         model: String,
         messages: [LLMMessage],
@@ -869,10 +927,22 @@ final class ProjectSession {
             omittedHistoryMessages: omittedHistoryMessages
         )
         payload.requestSnapshots.append(snapshot)
-        if payload.requestSnapshots.count > 30 {
-            payload.requestSnapshots.removeFirst(payload.requestSnapshots.count - 30)
-        }
+        trimRequestSnapshots()
         scheduleSave()
+    }
+
+    /// 提示词回看的总量上限（估算 token）。约 60 万中文字，够回看最近几次请求。
+    private static let requestSnapshotTokenBudget = 200_000
+
+    private func trimRequestSnapshots() {
+        var totalTokens = payload.requestSnapshots.reduce(0) {
+            $0 + $1.estimatedInputTokens
+        }
+        while payload.requestSnapshots.count > 30
+            || (totalTokens > Self.requestSnapshotTokenBudget
+                && payload.requestSnapshots.count > 1) {
+            totalTokens -= payload.requestSnapshots.removeFirst().estimatedInputTokens
+        }
     }
 
     /// 删除单条/多条回看记录。只清审计日志，不影响后续请求。

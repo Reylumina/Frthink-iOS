@@ -69,8 +69,6 @@ struct WorldSettingSection: View {
             .accessibilityLabel("刷新人物卡")
         } header: {
             AppSectionHeader(title: "刷新人物卡")
-        } footer: {
-            Text("只从正文整理人物卡。事件卡、剧情梗概、文风笔记和仿写模板在各自分栏单独更新。")
         }
     }
 
@@ -114,10 +112,14 @@ struct WorldSettingSection: View {
                 symbol: "doc.text",
                 tab: .rules
             )
+            materialRow(
+                "长期写作规则",
+                value: WorldRuleTextKind.longTermRules.valueLabel(in: session.payload.world),
+                symbol: "list.bullet",
+                tab: .rules
+            )
         } header: {
             AppSectionHeader(title: "这本书的资料")
-        } footer: {
-            Text("事件卡用「从正文抽取」，文风笔记用「从正文提炼」，长期规则用「用最近对话更新」。")
         }
     }
 

@@ -47,7 +47,7 @@ Apple HIG 的规则是内容层不用 Liquid Glass。玻璃只属于导航和控
 
 全部使用 `Font.TextStyle`，跟随 Dynamic Type，最小 `.caption`（12pt）。
 
-例外：作品正文和码字机气泡用外观设置里的字号基数（默认 18pt，13–28 可调），这是产品需求；固定点数不随 Dynamic Type 放大，后续应改用 `@ScaledMetric` / `UIFontMetrics` 把设置值当基数。
+例外：作品正文和码字机气泡用外观设置里的字号基数（默认 18pt，13–28 可调），这是产品需求；实际尺寸经 `UIFontMetrics` 跟随 Dynamic Type，见 `Core/Design/DynamicTypeFont.swift`。流式气泡、正文编辑器、阅读页和设置预览共用同一套换算。
 
 | 用途 | token |
 |---|---|

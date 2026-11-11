@@ -185,11 +185,17 @@ struct SettingsContextBudgetPage: View {
 struct SettingsAppearanceSection: View {
     let store: AppStore
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var fontSize: Double
 
     init(store: AppStore) {
         self.store = store
         _fontSize = State(initialValue: min(28, max(13, store.settings.bodyFontSize)))
+    }
+
+    /// 预览要和正文页用同一套换算，否则设置页看着合适、正文却更大。
+    private var previewFontSize: CGFloat {
+        DynamicTypeFont.bodySize(fontSize, dynamicTypeSize: dynamicTypeSize)
     }
 
     var body: some View {
@@ -223,8 +229,8 @@ struct SettingsAppearanceSection: View {
 
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Text("夜色像被谁拧暗了一格，走廊尽头的灯还亮着。")
-                    .font(.system(size: fontSize))
-                    .lineSpacing(max(0, fontSize * 0.55))
+                    .font(.system(size: previewFontSize))
+                    .lineSpacing(max(0, previewFontSize * 0.55))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

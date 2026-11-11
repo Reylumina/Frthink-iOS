@@ -1,13 +1,14 @@
 // 「模板与规则」分栏：剧情梗概、文风笔记、仿写模板、长期写作规则。
 //
-// 主列表只做概览（一句预览 + 字数）；正文都进整页编辑器，三个动作
-// （提炼文风笔记、并入仿写模板、更新长期规则）跟着各自的正文走。
+// 主列表只做概览（一句预览 + 字数）和模型更新入口；正文进推入页编辑，
+// 长文编辑不再打包在 sheet 里。更新动作跟着正文分栏走，用户不用先点进
+// 编辑器再找按钮。
 
 import SwiftUI
 import Foundation
 
 /// 模板与规则的四个文本字段。主列表和编辑器共用这份枚举，避免两边写串。
-enum WorldRuleTextKind: String, CaseIterable, Identifiable {
+enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
     case plotOutline
     case styleNotes
     case styleTemplate
@@ -60,7 +61,9 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable {
         case .styleNotes:
             return "\(WorldRuleTextKind.lineCount(of: world.styleNotes)) 行"
         case .plotOutline, .styleTemplate, .longTermRules:
-            return "\(text(in: world).count) 字"
+            let count = text(in: world)
+                .trimmingCharacters(in: .whitespacesAndNewlines).count
+            return count == 0 ? "未建立" : "\(count) 字"
         }
     }
 
@@ -73,7 +76,8 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable {
 
 struct WorldRulesSection: View {
     @Bindable var session: ProjectSession
-    var isBusy: Bool
+    /// 当前运行中的世界任务；只有本分栏的任务显示进度。
+    var busy: WorldBusy?
     /// 任何世界任务在跑时都禁用 AI 入口，避免点了没反馈。
     var isActionDisabled: Bool = false
     var onExtractStyleNotes: () -> Void
@@ -100,19 +104,29 @@ struct WorldRulesSection: View {
             } header: {
                 AppSectionHeader(title: "模板与规则")
             }
+
+            Section {
+                updateRow(
+                    title: "从正文提炼文风笔记",
+                    symbol: "text.magnifyingglass",
+                    kind: .extractingStyleNotes,
+                    action: onExtractStyleNotes
+                )
+                updateRow(
+                    title: "用最近对话更新长期规则",
+                    symbol: "arrow.triangle.2.circlepath",
+                    kind: .updatingRules,
+                    action: onUpdateRules
+                )
+            } header: {
+                AppSectionHeader(title: "从正文更新")
+            }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
-        .sheet(item: $editing) { kind in
-            WorldRuleEditorSheet(
-                session: session,
-                kind: kind,
-                isBusy: isBusy,
-                isActionDisabled: isActionDisabled,
-                onExtractStyleNotes: onExtractStyleNotes,
-                onUpdateRules: onUpdateRules
-            )
+        .navigationDestination(item: $editing) { kind in
+            WorldRuleEditorPage(session: session, kind: kind)
         }
         .onChange(of: ruleTexts) { _, _ in
             session.scheduleSave()
@@ -143,16 +157,42 @@ struct WorldRulesSection: View {
         }
         .buttonStyle(.plain)
     }
+
+    /// 模型更新入口放在列表上，点正文行只负责编辑，两个动作不互相打岔。
+    private func updateRow(
+        title: String,
+        symbol: String,
+        kind: WorldBusy,
+        action: @escaping () -> Void
+    ) -> some View {
+        let running = busy == kind
+        return Button(action: action) {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: symbol)
+                    .font(Font.footnote)
+                    .foregroundStyle(running ? Color.secondary : Theme.accent)
+                    .frame(width: 20)
+                Text(title)
+                    .font(Font.body)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: Theme.Spacing.s)
+                if running {
+                    ProgressView().controlSize(.mini)
+                }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isActionDisabled)
+        .accessibilityValue(running ? "进行中" : "")
+    }
 }
 
-/// 模板与规则的整页编辑器：正文自动保存，模型动作跟着字段走。
-private struct WorldRuleEditorSheet: View {
+/// 模板与规则的整页编辑器：正文在离开或点完成时一次写回，模型动作不在这里。
+private struct WorldRuleEditorPage: View {
     @Bindable var session: ProjectSession
     let kind: WorldRuleTextKind
-    var isBusy: Bool
-    var isActionDisabled: Bool
-    var onExtractStyleNotes: () -> Void
-    var onUpdateRules: () -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingMerge = false
@@ -160,67 +200,47 @@ private struct WorldRuleEditorSheet: View {
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: String
 
-    init(
-        session: ProjectSession,
-        kind: WorldRuleTextKind,
-        isBusy: Bool,
-        isActionDisabled: Bool,
-        onExtractStyleNotes: @escaping () -> Void,
-        onUpdateRules: @escaping () -> Void
-    ) {
+    init(session: ProjectSession, kind: WorldRuleTextKind) {
         self.session = session
         self.kind = kind
-        self.isBusy = isBusy
-        self.isActionDisabled = isActionDisabled
-        self.onExtractStyleNotes = onExtractStyleNotes
-        self.onUpdateRules = onUpdateRules
         _draft = State(initialValue: kind.text(in: session.payload.world))
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                AppTextEditor(
-                    text: $draft,
-                    placeholder: kind.placeholder,
-                    minHeight: 180,
-                    expands: true
-                )
-                .padding(Theme.Spacing.l)
+        VStack(spacing: 0) {
+            AppTextEditor(
+                text: $draft,
+                placeholder: kind.placeholder,
+                minHeight: 180,
+                expands: true
+            )
+            .padding(Theme.Spacing.l)
 
-                if showsBottomBar {
-                    bottomBar
+            if kind == .styleNotes {
+                mergeBar
+            }
+        }
+        .groupedPageBackground()
+        .navigationTitle(kind.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("完成") {
+                    commitDraft()
+                    dismiss()
                 }
             }
-            .groupedPageBackground()
-            .navigationTitle(kind.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
-                        commitDraft()
-                        dismiss()
-                    }
-                }
-            }
-            .confirmationDialog(
-                "并入仿写模板？",
-                isPresented: $confirmingMerge,
-                titleVisibility: .visible
-            ) {
-                Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
-                Button("取消", role: .cancel) {}
-            }
-            .onDisappear {
-                commitDraft()
-            }
-            .onChange(of: session.payload.world.styleNotes) { _, newValue in
-                // 并入后笔记区清空，回执先留着；一旦又开始记新笔记，就把回执收掉。
-                guard kind == .styleNotes else { return }
-                if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    receipt = nil
-                }
-            }
+        }
+        .confirmationDialog(
+            "并入仿写模板？",
+            isPresented: $confirmingMerge,
+            titleVisibility: .visible
+        ) {
+            Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
+            Button("取消", role: .cancel) {}
+        }
+        .onDisappear {
+            commitDraft()
         }
     }
 
@@ -237,101 +257,29 @@ private struct WorldRuleEditorSheet: View {
         session.scheduleSave()
     }
 
-    private var hasNotes: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+    // MARK: - 并入仿写模板
 
-    // MARK: - 底部
-
-    private var showsBottomBar: Bool {
-        kind == .styleNotes || kind == .longTermRules
-    }
-
-    @ViewBuilder
-    private var bottomBar: some View {
+    private var mergeBar: some View {
         VStack(spacing: Theme.Spacing.s) {
-            actions
+            SecondaryActionButton(
+                title: "并入仿写模板",
+                systemImage: "arrow.down.doc",
+                isEnabled: hasNotes
+            ) {
+                confirmingMerge = true
+            }
 
             if let receipt {
                 AppStatusLine(kind: .success, text: receipt)
-            } else if isBusy, let busyText {
-                AppStatusLine(kind: .progress, text: busyText)
-            } else if !sideLabel.isEmpty {
-                HStack(spacing: Theme.Spacing.s) {
-                    Text(sideLabel)
-                        .font(Font.footnote)
-                        .foregroundStyle(.tertiary)
-                    Spacer(minLength: 0)
-                }
             }
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.bottom, Theme.Spacing.m)
     }
 
-    @ViewBuilder
-    private var actions: some View {
-        switch kind {
-        case .styleNotes:
-            HStack(spacing: Theme.Spacing.s) {
-                SecondaryActionButton(
-                    title: "从正文提炼",
-                    systemImage: "text.magnifyingglass",
-                    isEnabled: !isActionDisabled
-                ) {
-                    commitDraft()
-                    onExtractStyleNotes()
-                }
-                SecondaryActionButton(
-                    title: "并入仿写模板",
-                    systemImage: "arrow.down.doc",
-                    isEnabled: hasNotes
-                ) {
-                    confirmingMerge = true
-                }
-            }
-        case .longTermRules:
-            SecondaryActionButton(
-                title: "用最近对话更新",
-                systemImage: "arrow.triangle.2.circlepath",
-                isEnabled: !isActionDisabled
-            ) {
-                commitDraft()
-                onUpdateRules()
-            }
-        case .plotOutline, .styleTemplate:
-            EmptyView()
-        }
+    private var hasNotes: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-
-    private var sideLabel: String {
-        switch kind {
-        case .plotOutline, .styleTemplate:
-            return ""
-        case .styleNotes:
-            return "\(WorldRuleTextKind.lineCount(of: session.payload.world.styleNotes)) 行"
-        case .longTermRules:
-            return "码字机用户消息 \(recentUserMessageCount) 条"
-        }
-    }
-
-    /// 模型动作在弹层里排队时，进度就地显示，不必退出去看分栏上方的状态条。
-    private var busyText: String? {
-        switch kind {
-        case .styleNotes:
-            return WorldBusy.extractingStyleNotes.label
-        case .longTermRules:
-            return WorldBusy.updatingRules.label
-        case .plotOutline, .styleTemplate:
-            return nil
-        }
-    }
-
-    private var recentUserMessageCount: Int {
-        session.payload.messages.filter { $0.role == .user }.count
-    }
-
-    // MARK: - 并入
 
     private func mergeNotesIntoTemplate() {
         commitDraft()

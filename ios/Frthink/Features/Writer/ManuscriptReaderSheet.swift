@@ -9,6 +9,7 @@ import UIKit
 struct ManuscriptReaderSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @Bindable var session: ProjectSession
     @Binding var cursor: Int
@@ -38,7 +39,10 @@ struct ManuscriptReaderSheet: View {
                     ),
                     cursor: editorCursor,
                     scrollRequest: scrollRequest,
-                    fontSize: CGFloat(store.settings.bodyFontSize),
+                    fontSize: DynamicTypeFont.bodySize(
+                        store.settings.bodyFontSize,
+                        dynamicTypeSize: dynamicTypeSize
+                    ),
                     revision: session.manuscriptRevision,
                     isEditable: editing,
                     onCursorInteraction: onCursorInteraction,

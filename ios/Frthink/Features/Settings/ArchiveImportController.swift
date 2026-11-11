@@ -314,33 +314,52 @@ final class ArchiveImportController {
     }
 
     /// 逐本写盘。每本之间在主线程刷一次进度。
+    ///
+    /// 每本书先写进 UUID 暂存目录，全部写成功后才整体换进正式目录：
+    /// - 写盘失败或取消不会把旧稿换成半个新项目；
+    /// - 覆盖同名项目前先让旧会话停手（等当前写盘结束、暂停防抖保存），
+    ///   写成功后立刻把内存会话换成新内容，旧会话不会再把旧稿写回去；
+    /// - 取消时已经完整写进去的书保留，书架立即刷新。
     private func restore(_ backups: [FrthinkArchive.ProjectBackup]) async throws {
         guard !backups.isEmpty else {
             throw FrthinkArchiveError.emptyProjectArchive
         }
         let files = store.fileStore
         let ownerID = store.settings.ownerID
-        var restored: [Project] = []
+        // 成功、失败、取消都要刷新书架：已完整写入的书不能等下次启动才出现。
+        defer { store.reload() }
         for (index, backup) in backups.enumerated() {
             try Task.checkCancellation()
             stage = .restoring(index: index, total: backups.count, title: backup.title)
-            let project = try await Task.detached(priority: .userInitiated) {
-                try FrthinkArchive.restore(
-                    [backup],
-                    into: files,
-                    ownerID: ownerID
-                ).first
-            }.value
-            if let project { restored.append(project) }
+            let existingSession = store.cachedSession(for: backup.projectId)
+            await existingSession?.quiesceSaves()
+
+            let restoredProject: Project?
+            do {
+                restoredProject = try await Task.detached(priority: .userInitiated) {
+                    try FrthinkArchive.restore(
+                        [backup],
+                        into: files,
+                        ownerID: ownerID
+                    ).first
+                }.value
+            } catch {
+                existingSession?.resumeSaving()
+                throw error
+            }
+
+            if let project = restoredProject {
+                // 磁盘已经是新稿：内存会话必须跟着换，否则它还显示旧稿，
+                // 下一次编辑会把旧内容盖回导入结果。
+                existingSession?.replaceLoadedState(project: project, fileStore: files)
+            } else {
+                existingSession?.resumeSaving()
+            }
+            // 取消发生在写盘中途时，这本书要么完整换上了（上一段已处理），
+            // 要么根本没动；两种状态都不会留下半个项目。
+            try Task.checkCancellation()
         }
-        try Task.checkCancellation()
         stage = .mergingSettings
-        // 先刷新书架，再刷新缓存会话；顺序反了会用导入前的旧 Project 覆盖新元数据。
-        store.reload()
-        settingsRefreshSessions(
-            store,
-            projectIDs: Set(restored.map(\.id)).intersection(existingIDs)
-        )
         mergeUniverseEntries(backups)
         outcome = ArchiveImportOutcome(
             isFull: false,

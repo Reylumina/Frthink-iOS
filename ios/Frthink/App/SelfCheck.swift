@@ -358,6 +358,67 @@ enum SelfCheck {
             return "覆盖导入重写正文页 ok"
         }
 
+        // 导入失败必须回滚：旧稿还在，暂存目录不留垃圾
+        check("archive.importFailureRollsBack") {
+            struct InjectedFailure: Error {}
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-rollback-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let project = Project(id: "rollback-book", title: "回滚测试")
+            func backup(_ text: String) -> FrthinkArchive.ProjectBackup {
+                FrthinkArchive.ProjectBackup(
+                    project: project,
+                    payload: ProjectPayload(manuscript: text),
+                    sourceText: "",
+                    translations: [],
+                    universeEntries: []
+                )
+            }
+            _ = try FrthinkArchive.restore([backup("旧稿正文")], into: files, ownerID: "self")
+
+            var didFail = false
+            do {
+                _ = try FrthinkArchive.restore(
+                    [backup("新稿正文")],
+                    into: files,
+                    ownerID: "self"
+                ) {
+                    throw InjectedFailure()
+                }
+            } catch let error as FrthinkArchiveError {
+                guard case .writeFailed = error else { throw error }
+                didFail = true
+            }
+            try expect(didFail, "注入写盘失败后 restore 没有报错")
+            let kept = files.loadFullPayload(project.id).manuscript
+            try expect(kept == "旧稿正文", "导入失败后旧正文被改坏：\(kept)")
+            let staging = root.appendingPathComponent("staging", isDirectory: true)
+            let leftovers = (try? FileManager.default.contentsOfDirectory(
+                atPath: staging.path
+            )) ?? []
+            try expect(leftovers.isEmpty, "暂存目录没有清理：\(leftovers)")
+            return "失败回滚并清理暂存 ok"
+        }
+
+        // 项目 id 会被当成目录名，存档里的路径穿越必须直接拒绝
+        check("archive.rejectUnsafeProjectID") {
+            var payload = ArchiveFixture.payload()
+            var projects = payload["projects"] as? [[String: Any]] ?? []
+            projects[0]["projectId"] = "../escape"
+            payload["projects"] = projects
+            let data = try ArchiveFixture.envelope(payload: payload)
+            do {
+                _ = try FrthinkArchive.openAny(data)
+            } catch let error as FrthinkArchiveError {
+                guard case .invalidProjectID = error else {
+                    throw Failure(message: "错误类型不对：\(error)")
+                }
+                return "拒绝 ../escape"
+            }
+            throw Failure(message: "带路径穿越的项目 id 没有被拒绝")
+        }
+
         // 哈希字段用完整 SHA-256（64 hex），与 Android sourceSha256 对齐
         check("hash.sha256") {
             let hash = ContentHash.of("abc")
@@ -1120,6 +1181,54 @@ enum SelfCheck {
             let blocks = BodyBlockIndex.blocks(from: "第一段\n\n第二段")
             try expect(blocks.count == 2, "块数不对：应 2，实际 \(blocks.count)")
             return "跨页切片 / 块索引 ok"
+        }
+
+        // 提示词回看：大快照按 token 总量封顶，小快照仍按 30 条封顶
+        check("writer.snapshotBudget") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-snapshot-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let project = Project(id: "snapshot-book", title: "快照测试")
+            let session = ProjectSession(
+                project: project,
+                payload: ProjectPayload(),
+                source: "",
+                translations: [],
+                store: files
+            )
+            let big = String(repeating: "字", count: 120_000)
+            for _ in 0..<4 {
+                session.recordRequestSnapshot(
+                    model: "deepseek-chat",
+                    messages: [.user(big)],
+                    sourceIds: [],
+                    omittedHistoryMessages: 0,
+                    maxTokens: 4_096,
+                    inputBudgetTokens: 32_768,
+                    contextWindow: 64_000
+                )
+            }
+            try expect(
+                session.payload.requestSnapshots.count <= 2,
+                "大快照没有按 token 上限裁剪：\(session.payload.requestSnapshots.count)"
+            )
+            for index in 0..<40 {
+                session.recordRequestSnapshot(
+                    model: "deepseek-chat",
+                    messages: [.user("短消息 \(index)")],
+                    sourceIds: [],
+                    omittedHistoryMessages: 0,
+                    maxTokens: 4_096,
+                    inputBudgetTokens: 32_768,
+                    contextWindow: 64_000
+                )
+            }
+            try expect(
+                session.payload.requestSnapshots.count <= 30,
+                "小快照没有按条数封顶：\(session.payload.requestSnapshots.count)"
+            )
+            return "\(session.payload.requestSnapshots.count) 条快照 ok"
         }
 
         lines.append("=== \(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ===")

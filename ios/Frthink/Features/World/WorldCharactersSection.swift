@@ -17,6 +17,11 @@ enum WorldCharacterSort: Hashable {
 
 struct WorldCharactersSection: View {
     @Bindable var session: ProjectSession
+    /// 人物卡由世界刷新流程写入；入口放在卡片列表上，不必回概览找。
+    var isRefreshing: Bool = false
+    var isActionDisabled: Bool = false
+    var onRefresh: (() -> Void)? = nil
+    var onRefreshFull: (() -> Void)? = nil
 
     @State private var searchText = ""
     @State private var sortMode: WorldCharacterSort = .name
@@ -91,6 +96,9 @@ struct WorldCharactersSection: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if onRefresh != nil {
+                    refreshMenu
+                }
                 groupMenu
             }
         }
@@ -161,6 +169,39 @@ struct WorldCharactersSection: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("新建人物")
+    }
+
+    /// 从正文整理人物卡：增量与从头两种，和概览里是同一组动作。
+    private var refreshMenu: some View {
+        Menu {
+            Button {
+                onRefresh?()
+            } label: {
+                Label("增量刷新", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button {
+                onRefreshFull?()
+            } label: {
+                Label(
+                    "从头整理（本轮最多 \(WorldDigest.maxChunksPerRun) 段）",
+                    systemImage: "arrow.counterclockwise"
+                )
+            }
+        } label: {
+            Group {
+                if isRefreshing {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(Font.caption)
+                }
+            }
+            .foregroundStyle(isActionDisabled ? Color.secondary : Theme.accent)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+        }
+        .disabled(isActionDisabled)
+        .accessibilityLabel("刷新人物卡")
     }
 
     private var groupMenu: some View {

@@ -15,6 +15,8 @@ enum FrthinkArchiveError: LocalizedError {
     case projectVersionUnsupported
     case duplicateProjects(isFull: Bool)
     case duplicateTranslations
+    /// 项目 id 会被当成目录名，绝不能让存档用它做路径穿越。
+    case invalidProjectID(String)
     case emptyProjectArchive
     case createFailed
     case writeFailed(String)
@@ -47,6 +49,8 @@ enum FrthinkArchiveError: LocalizedError {
             return isFull ? "全量备份含重复项目" : "书项目存档含重复项目"
         case .duplicateTranslations:
             return "备份含重复译文分段"
+        case .invalidProjectID(let id):
+            return "备份里的项目 id 无效：\(id)"
         case .emptyProjectArchive:
             return "书项目存档为空"
         case .createFailed:

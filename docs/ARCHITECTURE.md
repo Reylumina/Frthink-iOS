@@ -126,6 +126,4 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 
 ## 8. 开放问题
 
-- 正文与气泡的固定字号如何接入 Dynamic Type：设置值当基数，还是完全改用系统 TextStyle。
-- 请求快照只按条数保留 30 条，写全文时 payload 会膨胀；需要字节上限或按块键重建。
 - 50 万字以上的分页边界放在哪一层，`FileStore` 还是 `ProjectSession`。

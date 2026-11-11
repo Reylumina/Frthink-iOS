@@ -83,7 +83,8 @@ struct WriterMessageBubble: View {
                 .font(Font.subheadline)
                 .foregroundStyle(.primary)
                 .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)                .padding(.horizontal, Theme.Spacing.m)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.Spacing.m)
                 .padding(.vertical, Theme.Spacing.s + 2)
                 .background(Theme.accentSoft)
                 .clipShape(RoundedRectangle(
@@ -145,7 +146,7 @@ struct WriterMessageBubble: View {
                 MarkdownInline.text(message.content)
             }
         }
-        .font(.system(size: store.settings.bodyFontSize))
+        .dynamicBodyFont(store.settings.bodyFontSize)
         .foregroundStyle(.primary)
         .lineSpacing(3)
         .fixedSize(horizontal: false, vertical: true)
@@ -266,6 +267,7 @@ struct WriterStreamingBubble: View {
     let controller: WriterController
 
     @Environment(AppStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var reasoningExpanded = false
 
     var body: some View {
@@ -306,7 +308,10 @@ struct WriterStreamingBubble: View {
                 // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
                 StreamingTextView(
                     text: controller.streamingText,
-                    fontSize: CGFloat(store.settings.bodyFontSize)
+                    fontSize: DynamicTypeFont.bodySize(
+                        store.settings.bodyFontSize,
+                        dynamicTypeSize: dynamicTypeSize
+                    )
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)

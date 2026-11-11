@@ -55,9 +55,6 @@ struct WorldPane: View {
     /// 各分栏只感知自己的任务；全局状态条仍显示当前运行的任务。
     private var isWorldRefreshing: Bool { busy == .refreshingWorld }
     private var isExtractingEvents: Bool { busy == .extractingEvents }
-    private var isRulesBusy: Bool {
-        busy == .extractingStyleNotes || busy == .updatingRules
-    }
 
     /// 状态行最小高度，跟随 Dynamic Type。
     @ScaledMetric(relativeTo: .footnote) private var statusSlotHeight: CGFloat = 36
@@ -114,7 +111,13 @@ struct WorldPane: View {
                     }
                 )
             case .characters:
-                WorldCharactersSection(session: session)
+                WorldCharactersSection(
+                    session: session,
+                    isRefreshing: isWorldRefreshing,
+                    isActionDisabled: busy != nil,
+                    onRefresh: { startWorldRefresh(forceFull: false) },
+                    onRefreshFull: { startWorldRefresh(forceFull: true) }
+                )
             case .worldbook:
                 // 世界书词条是独立的键值清单，和「世界设定」那一整段正文不是一回事。
                 WorldbookPane(session: session)
@@ -128,7 +131,7 @@ struct WorldPane: View {
             case .rules:
                 WorldRulesSection(
                     session: session,
-                    isBusy: isRulesBusy,
+                    busy: busy,
                     isActionDisabled: busy != nil,
                     onExtractStyleNotes: startStyleNoteExtraction,
                     onUpdateRules: startLongTermRuleUpdate

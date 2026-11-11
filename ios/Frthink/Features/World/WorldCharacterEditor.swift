@@ -1,4 +1,7 @@
-// 单张人物卡的编辑页：固定字段 + 自定义词条，改动直接写回 session。
+// 单张人物卡的编辑页：固定字段 + 自定义词条。
+//
+// 编辑期间只改局部草稿，点「完成」或离开页面时一次写回 session；打字不再逐键
+// 触发整份 payload 的变更与防抖保存。规则和事件卡已经用同样的写法。
 
 import SwiftUI
 import Foundation
@@ -9,6 +12,17 @@ struct WorldCharacterEditor: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDelete = false
+    /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
+    @State private var draft: CharacterCard
+
+    init(session: ProjectSession, cardID: String) {
+        self.session = session
+        self.cardID = cardID
+        _draft = State(
+            initialValue: session.payload.world.characters.first { $0.id == cardID }
+                ?? CharacterCard(name: "")
+        )
+    }
 
     var body: some View {
         Group {
@@ -25,6 +39,7 @@ struct WorldCharacterEditor: View {
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
+        .onDisappear { commitDraft() }
         .confirmationDialog(
             "删除人物卡",
             isPresented: $confirmingDelete,
@@ -43,7 +58,7 @@ struct WorldCharacterEditor: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Button("完成") {
-                session.scheduleSave()
+                commitDraft()
                 dismiss()
             }
         }
@@ -54,29 +69,26 @@ struct WorldCharacterEditor: View {
             Section {
                 AppTextField(
                     title: "姓名",
-                    text: cardBinding.name,
+                    text: $draft.name,
                     placeholder: "人物本名"
                 )
                 WorldTagsField(
                     title: "别称",
-                    values: cardBinding.aliases,
+                    values: $draft.aliases,
                     placeholder: "用、分隔"
                 )
                 AppTextField(
                     title: "身份",
-                    text: cardBinding.identity,
+                    text: $draft.identity,
                     placeholder: "身份、职业、阵营"
                 )
                 Toggle("参与写作提示词", isOn: Binding(
-                    get: { cardBinding.wrappedValue.enabled ?? true },
-                    set: { cardBinding.wrappedValue.enabled = $0 }
+                    get: { draft.enabled ?? true },
+                    set: { draft.enabled = $0 }
                 ))
                 Picker("分组", selection: Binding(
-                    get: { cardBinding.wrappedValue.groupId ?? "" },
-                    set: {
-                        cardBinding.wrappedValue.groupId =
-                            $0.isEmpty ? nil : $0
-                    }
+                    get: { draft.groupId ?? "" },
+                    set: { draft.groupId = $0.isEmpty ? nil : $0 }
                 )) {
                     Text("未分组").tag("")
                     ForEach(session.payload.world.characterGroups) { group in
@@ -92,25 +104,25 @@ struct WorldCharacterEditor: View {
             Section {
                 AppTextArea(
                     title: "性格",
-                    text: cardBinding.personality,
+                    text: $draft.personality,
                     placeholder: "稳定的性格与价值观",
                     minLines: 3
                 )
                 AppTextArea(
                     title: "语气",
-                    text: cardBinding.voice,
+                    text: $draft.voice,
                     placeholder: "措辞、语气与对不同对象的说话方式",
                     minLines: 3
                 )
                 AppTextArea(
                     title: "目标",
-                    text: cardBinding.goals,
+                    text: $draft.goals,
                     placeholder: "目标与具体动机",
                     minLines: 3
                 )
                 AppTextArea(
                     title: "底线",
-                    text: cardBinding.boundaries,
+                    text: $draft.boundaries,
                     placeholder: "不会做的事、不能触碰的边界",
                     minLines: 3
                 )
@@ -121,13 +133,13 @@ struct WorldCharacterEditor: View {
             Section {
                 AppTextArea(
                     title: "人物记忆",
-                    text: cardBinding.personalMemory,
+                    text: $draft.personalMemory,
                     placeholder: "角色亲历或明确知晓、对其行为有持续影响的经历",
                     minLines: 3
                 )
                 AppTextArea(
                     title: "关系态度",
-                    text: cardBinding.relationshipAttitudes,
+                    text: $draft.relationshipAttitudes,
                     placeholder: "按对象分别记录印象、态度、信任与变化",
                     minLines: 3
                 )
@@ -167,17 +179,15 @@ struct WorldCharacterEditor: View {
 
     @ViewBuilder
     private var customEntryRows: some View {
-        let entries = cardBinding.wrappedValue.customEntries
-        if entries.isEmpty {
+        if draft.customEntries.isEmpty {
             Text("还没有自定义词条")
                 .font(Font.footnote)
                 .foregroundStyle(.secondary)
         } else {
-            ForEach(entries) { entry in
-                let fields = entryBinding(entry.id)
+            ForEach($draft.customEntries) { $entry in
                 CustomEntryRow(
-                    title: fields.title,
-                    content: fields.body,
+                    title: $entry.title,
+                    content: $entry.body,
                     onDelete: { removeCustomEntry(entry.id) }
                 )
             }
@@ -217,69 +227,40 @@ struct WorldCharacterEditor: View {
         }
     }
 
-    // MARK: - 绑定
+    // MARK: - 草稿
 
     private var hasCard: Bool {
         session.payload.world.characters.contains { $0.id == cardID }
     }
 
     private var isNameEmpty: Bool {
-        cardBinding.wrappedValue.name
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var navigationTitle: String {
-        let name = session.payload.world.characters.first { $0.id == cardID }?.name ?? ""
-        return name.isEmpty ? "人物卡" : name
+        draft.name.isEmpty ? "人物卡" : draft.name
     }
 
-    private var cardBinding: Binding<CharacterCard> {
-        Binding(
-            get: {
-                session.payload.world.characters.first { $0.id == cardID }
-                    ?? CharacterCard(name: "")
-            },
-            set: { newValue in
-                guard let index = session.payload.world.characters.firstIndex(where: {
-                    $0.id == cardID
-                }) else { return }
-                var card = newValue
-                card.updatedAt = Date()
-                session.payload.world.characters[index] = card
-                session.scheduleSave()
-            }
-        )
-    }
-
-    private func entryBinding(_ entryID: String) -> Binding<CharacterCard.CustomEntry> {
-        Binding(
-            get: {
-                cardBinding.wrappedValue.customEntries.first { $0.id == entryID }
-                    ?? CharacterCard.CustomEntry(title: "", body: "")
-            },
-            set: { newValue in
-                var card = cardBinding.wrappedValue
-                guard let index = card.customEntries.firstIndex(where: {
-                    $0.id == entryID
-                }) else { return }
-                card.customEntries[index] = newValue
-                cardBinding.wrappedValue = card
-            }
-        )
+    private func commitDraft() {
+        guard let index = session.payload.world.characters.firstIndex(where: {
+            $0.id == cardID
+        }) else { return }
+        guard draft != session.payload.world.characters[index] else { return }
+        var card = draft
+        card.updatedAt = Date()
+        session.payload.world.characters[index] = card
+        draft = card
+        session.scheduleSave()
     }
 
     // MARK: - 操作
 
     private func addCustomEntry() {
-        var card = cardBinding.wrappedValue
-        card.customEntries.append(CharacterCard.CustomEntry(title: "", body: ""))
-        cardBinding.wrappedValue = card
+        draft.customEntries.append(CharacterCard.CustomEntry(title: "", body: ""))
     }
 
     private func removeCustomEntry(_ entryID: String) {
-        var card = cardBinding.wrappedValue
-        card.customEntries.removeAll { $0.id == entryID }
-        cardBinding.wrappedValue = card
+        draft.customEntries.removeAll { $0.id == entryID }
     }
 
     private func deleteCard() {

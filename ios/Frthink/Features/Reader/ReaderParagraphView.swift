@@ -15,11 +15,18 @@ struct ReaderParagraphView: View {
     /// 当前跳到的那一处命中。
     let current: NSRange?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// 设置里的字号是基数，实际尺寸跟随 Dynamic Type。
+    private var scaledFontSize: CGFloat {
+        DynamicTypeFont.bodySize(Double(fontSize), dynamicTypeSize: dynamicTypeSize)
+    }
+
     var body: some View {
         Text(displayText)
-            .font(ReaderStyle.bodyFont(size: fontSize))
+            .font(ReaderStyle.bodyFont(size: scaledFontSize))
             .foregroundStyle(ReaderStyle.ink(dark: darkPage))
-            .lineSpacing(ReaderStyle.lineSpacing(size: fontSize, lineHeight: lineHeight))
+            .lineSpacing(ReaderStyle.lineSpacing(size: scaledFontSize, lineHeight: lineHeight))
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)

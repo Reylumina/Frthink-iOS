@@ -53,9 +53,15 @@ struct ReaderDisplaySettingsSheet: View {
     @Binding var darkPage: Bool
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmingReset = false
 
     private static let previewLine = "夜色像被谁拧暗了一格，走廊尽头的灯还亮着。"
+
+    /// 预览按与阅读页相同的方式跟随 Dynamic Type。
+    private var previewFontSize: CGFloat {
+        DynamicTypeFont.bodySize(fontSize, dynamicTypeSize: dynamicTypeSize)
+    }
 
     var body: some View {
         NavigationStack {
@@ -131,9 +137,9 @@ struct ReaderDisplaySettingsSheet: View {
 
     private var previewBlock: some View {
         Text(Self.previewLine)
-            .font(ReaderStyle.bodyFont(size: CGFloat(fontSize)))
+            .font(ReaderStyle.bodyFont(size: previewFontSize))
             .foregroundStyle(ReaderStyle.ink(dark: darkPage))
-            .lineSpacing(ReaderStyle.lineSpacing(size: CGFloat(fontSize), lineHeight: lineHeight))
+            .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: lineHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Spacing.m)
             .background(ReaderStyle.page(dark: darkPage))
