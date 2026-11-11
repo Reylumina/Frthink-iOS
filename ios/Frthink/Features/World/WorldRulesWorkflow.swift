@@ -88,11 +88,13 @@ enum WorldRulesWorkflow {
                 failOnLength: true
             )
         } catch let error as LLMError {
+            if error.isLLMCancellation { throw CancellationError() }
             if case .truncated = error {
                 throw WorldRunError(message: "摘要达到模型输出上限，未替换现有摘要。")
             }
             throw WorldRunError(message: "摘要未更新：\(error.localizedDescription)")
         } catch {
+            if error.isLLMCancellation { throw CancellationError() }
             throw WorldRunError(message: "摘要未更新：\(error.localizedDescription)")
         }
 

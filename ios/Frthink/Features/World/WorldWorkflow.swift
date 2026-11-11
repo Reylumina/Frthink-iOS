@@ -186,6 +186,7 @@ enum WorldWorkflow {
                     failOnLength: true
                 )
             } catch {
+                if error.isLLMCancellation { throw CancellationError() }
                 throw WorldRunError(message: "世界刷新请求失败：\(error.localizedDescription)")
             }
 

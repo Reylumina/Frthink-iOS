@@ -26,7 +26,7 @@ SSE 增量先进入 `WriterController` 的缓冲，也就是 `displayBuffer` 和
 
 流式气泡单独渲染。`WriterStreamingBubble` 只读控制器文本，不触发正文和其他气泡重算。流式文本用 `StreamingTextView`，平时只追加后缀，窗口攒满才重置一次，避免 SwiftUI `Text` 全量重排，生成结束后切回普通 `Text`，可以选中，也没有额外开销。
 
-生成期间不写 payload。只有离开页面、停止或结束时，才 `persistPendingDelta`、`finishAssistantMessage` 并落盘，避免整页重算。已完成气泡只在出现 `**`/`__` 时解析行内 Markdown，普通正文保持纯文本；流式期间仍用纯文本。
+生成期间不整份重写 payload。每约 3 秒做一次检查点：把已收增量 `persistPendingDelta` 后只写 `payload.json`（并裁掉其中的整本正文，正文页已独立存在）；离开页面、停止或结束时再全量写一次。流式文本仍只更新 `WriterController.streamingText`，60ms 合并，换行立即刷；气泡用独立的 `WriterStreamingBubble` 订阅控制器，不经过父视图。已完成气泡只在出现 `**`/`__` 时解析行内 Markdown，普通正文保持纯文本；流式期间仍用纯文本。
 
 ### 2.2 主线程与依赖
 
@@ -54,9 +54,9 @@ ProMotion 在 `ios/Info.plist` 设 `CADisableMinimumFrameDurationOnPhone = true`
 
 流式气泡只排版末尾滑窗（6000 字窗口，约 8000 字才重置），`sizeThatFits` 不随全文无限增长。生成结束后切回完整气泡。
 
-### 2.5 生成期不碰 payload
+### 2.5 生成期检查点只碰 payload
 
-`appendDelta` 只改内存里的 `payload`，不落盘。生成期间只更新 `WriterController.streamingText`，60ms 合并，换行立即刷。气泡用独立的 `WriterStreamingBubble` 订阅控制器，不经过父视图。只有离开页面、停止或结束时，才把增量写回并落盘。
+`appendDelta` 只改内存里的 `payload`，不逐字落盘。生成期间每约 3 秒把增量并回并写一次 `payload.json`：只写 payload（`.payloadOnly`），不重写正文页，也不再把整本正文重新编码进 payload（正文页独立存在，裁掉的是旧版兜底字段）。正文有未落盘改动时才升级成全量保存。离开页面、停止或结束时全量写一次。
 
 ### 2.6 落盘与打开
 

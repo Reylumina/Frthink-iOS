@@ -188,16 +188,18 @@ struct WorldCharactersSection: View {
                 )
             }
         } label: {
-            Group {
+            HStack(spacing: Theme.Spacing.xs) {
                 if isRefreshing {
                     ProgressView().controlSize(.mini)
                 } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(Font.caption)
                 }
+                Text("刷新")
+                    .font(Font.footnote)
             }
             .foregroundStyle(isActionDisabled ? Color.secondary : Theme.accent)
-            .frame(width: 32, height: 32)
+            .frame(minHeight: 32)
             .contentShape(Rectangle())
         }
         .disabled(isActionDisabled)

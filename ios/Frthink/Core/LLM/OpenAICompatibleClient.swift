@@ -247,7 +247,16 @@ final class OpenAICompatibleClient: LLMClient {
             path: "/chat/completions",
             body: req.jsonBody(isDeepSeek: provider.isDeepSeek, kind: provider.kind, providerLevel: provider.effectiveThinkingLevel)
         )
-        let (data, response) = try await session.data(for: urlRequest)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: urlRequest)
+        } catch {
+            // URLSession 的取消是 URLError.cancelled，和结构化并发取消不是同一种；
+            // 统一成 LLMError.cancelled，调用方才能把「停止」和「失败」分开。
+            if error.isLLMCancellation { throw LLMError.cancelled }
+            throw error
+        }
 
         guard let http = response as? HTTPURLResponse else {
             throw LLMError.decoding("拿不到 HTTP 状态码")

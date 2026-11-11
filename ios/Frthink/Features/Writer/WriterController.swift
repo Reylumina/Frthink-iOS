@@ -855,7 +855,8 @@ final class WriterController {
     func checkpoint(session: ProjectSession) {
         guard isGenerating, let messageID = streamingMessageID else { return }
         persistPendingDelta(session: session, messageID: messageID)
-        session.scheduleSave()
+        // 检查点只重写 payload；正文页没有变化，不必整份重编码。
+        session.scheduleGenerationCheckpoint()
     }
 
     /// 把最后一段增量并回会话。只在生成结束/停止时调用，随后 finishAssistantMessage
@@ -1026,9 +1027,7 @@ final class WriterController {
 
     private func isCancellation(_ error: Error?) -> Bool {
         guard let error else { return false }
-        if error is CancellationError { return true }
-        if let llmError = error as? LLMError, llmError == .cancelled { return true }
-        return false
+        return error.isLLMCancellation
     }
 
     // MARK: - 预算操作

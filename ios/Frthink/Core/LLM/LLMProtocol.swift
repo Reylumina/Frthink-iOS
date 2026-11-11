@@ -153,6 +153,17 @@ enum LLMError: LocalizedError, Equatable {
     }
 }
 
+extension Error {
+    /// 取消有三种形状：结构化并发、URLSession，以及客户端归一后的 `LLMError`。
+    /// 世界/事件/摘要这些流程都靠它区分「用户点了停止」与「请求真的失败」。
+    var isLLMCancellation: Bool {
+        if self is CancellationError { return true }
+        if let llm = self as? LLMError { return llm == .cancelled }
+        if let url = self as? URLError { return url.code == .cancelled }
+        return false
+    }
+}
+
 protocol LLMClient: Sendable {
     /// 流式生成。调用方 `for try await` 消费。
     func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, Error>

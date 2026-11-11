@@ -96,6 +96,8 @@ struct ManuscriptRewriteSheet: View {
             .onDisappear {
                 task?.cancel()
             }
+            // 生成中下滑关闭会静默丢掉这次改写，禁止误触；用「停止」或「取消」退出。
+            .interactiveDismissDisabled(isRunning)
         }
     }
 

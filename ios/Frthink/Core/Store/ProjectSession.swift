@@ -39,6 +39,8 @@ final class ProjectSession {
     private enum SaveKind: Equatable {
         /// 只写正文页和 body.meta，payload.json 不动。
         case bodyOnly
+        /// 只写 payload.json（生成期检查点）：不含正文页，也不再带整份正文。
+        case payloadOnly
         /// 正文页、body.meta 与 payload.json 都写。
         case all
     }
@@ -340,6 +342,20 @@ final class ProjectSession {
         scheduleSaveTask()
     }
 
+    /// 生成期检查点：只重写 payload.json 里新收的增量与生成标记。
+    ///
+    /// 不走 `.all`：正文页没变，`payload.manuscript` 还在内存里；每 3 秒把
+    /// 56 万字正文重新编码一遍纯属浪费。正文有未落盘的改动时才升级成全量。
+    func scheduleGenerationCheckpoint() {
+        guard !isReadOnly, !savesQuiesced else { return }
+        if nextSaveKind == .all || bodyDirty || editorWindow != nil {
+            nextSaveKind = .all
+        } else {
+            nextSaveKind = .payloadOnly
+        }
+        scheduleSaveTask()
+    }
+
     private func scheduleSaveTask() {
         guard !savesQuiesced else { return }
         isDirty = true
@@ -412,8 +428,10 @@ final class ProjectSession {
         for waiter in waiters { waiter.resume() }
     }
 
+    /// 两类范围合并：相同就保持，不同就升级成全量。
     private static func merge(_ lhs: SaveKind?, _ rhs: SaveKind) -> SaveKind {
-        lhs == .all || rhs == .all ? .all : .bodyOnly
+        guard let lhs, lhs != rhs else { return lhs ?? rhs }
+        return .all
     }
 
     /// 两段正文从哪一页开始不同；只在后台写盘时调用。
@@ -450,18 +468,21 @@ final class ProjectSession {
         saveInFlight = true
 
         // 正文没加载过、也没改过，就不要拿空串覆盖正文页。
-        let windowSnapshot = editorWindow
-        let bodySnapshot: String? = windowSnapshot == nil
-            ? ((bodyLoaded || bodyDirty) ? payload.manuscript : nil)
-            : nil
-        bodyDirty = false
-        if let windowSnapshot {
-            project.bodyCharacterCount = windowSnapshot.prefixCharacterCount
-                + windowSnapshot.text.count
-            project.bodyUTF16Length = windowSnapshot.totalLength
-        } else if let bodySnapshot {
-            project.bodyCharacterCount = bodySnapshot.count
-            project.bodyUTF16Length = (bodySnapshot as NSString).length
+        // payload-only 检查点不碰正文页，也不去动 bodyDirty 标记。
+        let windowSnapshot = kind == .payloadOnly ? nil : editorWindow
+        let bodySnapshot: String? = (kind == .payloadOnly || windowSnapshot != nil)
+            ? nil
+            : ((bodyLoaded || bodyDirty) ? payload.manuscript : nil)
+        if kind != .payloadOnly {
+            bodyDirty = false
+            if let windowSnapshot {
+                project.bodyCharacterCount = windowSnapshot.prefixCharacterCount
+                    + windowSnapshot.text.count
+                project.bodyUTF16Length = windowSnapshot.totalLength
+            } else if let bodySnapshot {
+                project.bodyCharacterCount = bodySnapshot.count
+                project.bodyUTF16Length = (bodySnapshot as NSString).length
+            }
         }
 
         project.updatedAt = Date()
@@ -470,6 +491,11 @@ final class ProjectSession {
         // payload 是值类型，拷一份丢后台去编码写盘。整份 JSON 编码 56 万字的正文
         // 在主线程做会掉帧，这活儿不该占 UI 线程。
         let payloadSnapshot = payload
+        // 检查点不把整本正文再写进 payload：正文页已经独立存在，payload 里的
+        // manuscript 只是旧版兜底。仅当确认正文页存在时才裁掉，避免丢稿。
+        let stripsBody = kind == .payloadOnly
+            && !payloadSnapshot.manuscript.isEmpty
+            && (bodyPageCount > 0 || lastSavedManuscript != nil)
         let store = self.store
         let previousManuscript = lastSavedManuscript
         // 先保留 dirty，等编码真正结束再清；期间界面显示“保存中”是对的。
@@ -512,9 +538,11 @@ final class ProjectSession {
                     firstError = firstError ?? error
                 }
             }
-            if kind == .all {
+            if kind == .all || kind == .payloadOnly {
                 do {
-                    try store.savePayload(payloadSnapshot, projectID: projectSnapshot.id)
+                    var payloadForDisk = payloadSnapshot
+                    if stripsBody { payloadForDisk.manuscript = "" }
+                    try store.savePayload(payloadForDisk, projectID: projectSnapshot.id)
                 } catch {
                     firstError = firstError ?? error
                 }

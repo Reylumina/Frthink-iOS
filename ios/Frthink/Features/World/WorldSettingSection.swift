@@ -13,6 +13,8 @@ struct WorldSettingSection: View {
     /// 点资料计数直接切到对应分栏（人物卡/世界书/事件卡/规则）。
     var onOpenTab: (WorldTab) -> Void = { _ in }
 
+    @State private var showingRefreshOptions = false
+
     var body: some View {
         List {
             refreshSection
@@ -21,26 +23,23 @@ struct WorldSettingSection: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
+        .confirmationDialog(
+            "刷新人物卡",
+            isPresented: $showingRefreshOptions,
+            titleVisibility: .visible
+        ) {
+            Button("增量刷新") { onRefreshIncremental() }
+            Button("从头整理（重新分析全部正文）") { onRefreshFull() }
+            Button("取消", role: .cancel) {}
+        }
     }
 
     // MARK: - 刷新
 
     private var refreshSection: some View {
         Section {
-            Menu {
-                Button {
-                    onRefreshIncremental()
-                } label: {
-                    Label("增量刷新人物卡", systemImage: "arrow.triangle.2.circlepath")
-                }
-                Button {
-                    onRefreshFull()
-                } label: {
-                    Label(
-                        "从头整理人物卡（重新分析全部正文）",
-                        systemImage: "arrow.counterclockwise"
-                    )
-                }
+            Button {
+                showingRefreshOptions = true
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     if isBusy {
@@ -62,7 +61,7 @@ struct WorldSettingSection: View {
                     }
                     Spacer(minLength: Theme.Spacing.s)
                     if !isActionDisabled {
-                        Image(systemName: "chevron.up.chevron.down")
+                        Image(systemName: "chevron.down")
                             .font(Font.caption2.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
@@ -70,6 +69,7 @@ struct WorldSettingSection: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .disabled(isActionDisabled)
             .accessibilityLabel("刷新人物卡")
         } header: {

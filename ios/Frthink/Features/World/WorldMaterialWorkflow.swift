@@ -73,6 +73,7 @@ enum WorldMaterialWorkflow {
             do {
                 raw = try await context.complete(messages)
             } catch {
+                if error.isLLMCancellation { throw CancellationError() }
                 throw WorldRunError(
                     message: "事件卡抽取请求失败：\(error.localizedDescription)"
                 )
@@ -156,6 +157,7 @@ enum WorldMaterialWorkflow {
                     PromptComposer.segmentStyleNotesMessages(segment: chunk)
                 )
             } catch {
+                if error.isLLMCancellation { throw CancellationError() }
                 throw WorldRunError(
                     message: "文风笔记请求失败：\(error.localizedDescription)"
                 )
@@ -195,6 +197,7 @@ enum WorldMaterialWorkflow {
                     PromptComposer.styleNotesMergeMessages(notes: notes)
                 )
             } catch {
+                if error.isLLMCancellation { throw CancellationError() }
                 throw WorldRunError(
                     message: "文风笔记合并失败：\(error.localizedDescription)"
                 )
@@ -221,6 +224,7 @@ enum WorldMaterialWorkflow {
                     )
             )
         } catch {
+            if error.isLLMCancellation { throw CancellationError() }
             throw WorldRunError(
                 message: "仿写模板请求失败：\(error.localizedDescription)"
             )
