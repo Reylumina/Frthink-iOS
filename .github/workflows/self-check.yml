@@ -1,0 +1,108 @@
+name: Self Check
+
+# 只编译、安装并执行 -runSelfCheck，不截图。
+#
+# Windows 上不能编译 Swift，CI 是唯一验证通道。逻辑改动（存档、提示词、
+# 加密、协议）走这里，几分钟出结果；界面评审才走 UI Screenshots。
+# 截图流水线里也保留一次自检，作为出图前的门槛。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint DESIGN.md rules
+    runs-on: macos-15
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Lint
+        run: swiftlint lint --reporter github-actions-logging
+
+  self-check:
+    name: Run self check on simulator
+    needs: lint
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -30
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          DEVICE="$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print([x["udid"] for xs in d.values() for x in xs if "iPhone" in x["name"]][0])')"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          # 模拟器构建必须 ad-hoc 签名：无签名的 app 没有 application-identifier，
+          # Keychain 返回 -34018，落盘加密和 API Key 都会失败。
+          xcodebuild \
+            -project ios/Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Debug \
+            -destination "id=$DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            build
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
+          xcrun simctl install "$DEVICE" "$APP"
+
+      - name: Run self check
+        run: |
+          set -o pipefail
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch --console-pty "$DEVICE" com.frthink.app -runSelfCheck \
+            | tee selfcheck.log
+          grep -q "ALL PASS" selfcheck.log
+
+      - name: Upload self check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfcheck-log
+          path: selfcheck.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload xcodebuild log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfcheck-build-log
+          path: ${{ runner.temp }}/DerivedData/Logs/Build
+          if-no-files-found: ignore
+          retention-days: 7

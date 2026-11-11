@@ -1,0 +1,94 @@
+name: iOS Build
+
+# 在 GitHub 免费的 macOS 标准 runner 上把工程编译成未签名 IPA。
+# 公开仓库：标准 runner 不计费。私有仓库：走每月包含的额度，macOS 按倍率扣。
+# 注意：Larger runner（如 macos-15-xlarge）会额外计费，即使仓库是公开的。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # 这一步的价值不只是测试：Windows 上没法编译 Swift，CI 是唯一的
+      # 编译验证。先模拟器编译（快、不需要签名），挂了就直接停。
+      - name: Compile for simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Archive for device
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Frthink.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/Frthink.xcarchive/Products/Applications/Frthink.app"
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          /usr/bin/zip -qry Frthink-unsigned.ipa Payload
+          ls -lh Frthink-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frthink-unsigned-ipa
+          path: ${{ runner.temp }}/Frthink-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload compile log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ${{ runner.temp }}/DerivedData/Logs/Build
+          if-no-files-found: ignore
+          retention-days: 7

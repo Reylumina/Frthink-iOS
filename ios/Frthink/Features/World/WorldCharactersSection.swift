@@ -1,0 +1,376 @@
+// 「人物卡」分栏：搜索、分组、排序、列表、新建、删除，点进单张卡编辑。
+
+import SwiftUI
+import Foundation
+
+enum WorldCharacterSort: Hashable {
+    case name
+    case recentlyUpdated
+
+    var displayName: String {
+        switch self {
+        case .name: return "按姓名"
+        case .recentlyUpdated: return "最近更新"
+        }
+    }
+}
+
+struct WorldCharactersSection: View {
+    @Bindable var session: ProjectSession
+
+    @State private var searchText = ""
+    @State private var sortMode: WorldCharacterSort = .name
+    @State private var route: Route? = nil
+    @State private var pendingDeleteIDs: Set<String> = []
+    @State private var groupFilter = "__all__"
+    @State private var showGroupEditor = false
+    @FocusState private var searchFocused: Bool
+
+    private struct Route: Identifiable {
+        let id: String
+    }
+
+    var body: some View {
+        let cards = filteredCards
+        VStack(spacing: 0) {
+            header
+
+            if cards.isEmpty {
+                emptyState
+            } else {
+                cardList(cards)
+            }
+        }
+        .sheet(item: $route) { item in
+            NavigationStack {
+                WorldCharacterEditor(session: session, cardID: item.id)
+            }
+        }
+        .sheet(isPresented: $showGroupEditor) {
+            NavigationStack {
+                WorldGroupEditor(session: session)
+            }
+        }
+        .onAppear {
+            #if DEBUG
+            applyLaunchCard()
+            #endif
+        }
+        .onChange(of: session.payload.world.characterGroups) { _, groups in
+            // 当前筛选的分组被删掉后回到「全部分组」，不留一个永远空着的列表。
+            guard groupFilter != "__all__", groupFilter != "__ungrouped__",
+                  !groups.contains(where: { $0.id == groupFilter })
+            else { return }
+            groupFilter = "__all__"
+        }
+    }
+
+    #if DEBUG
+    /// 截图流水线：`-openWorldCard first` 打开列表里的第一张人物卡。
+    private func applyLaunchCard() {
+        guard ProcessInfo.processInfo.arguments.contains("-openWorldCard"),
+              route == nil,
+              let first = filteredCards.first
+        else { return }
+        route = Route(id: first.id)
+    }
+    #endif
+
+    // MARK: - 顶部
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: Theme.Spacing.s) {
+                searchField
+                sortMenu
+                addButton
+            }
+            HStack(spacing: Theme.Spacing.s) {
+                Text("共 \(session.payload.world.characters.count) 张人物卡")
+                    .font(Font.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                groupMenu
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.vertical, Theme.Spacing.s)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(Font.footnote)
+                .foregroundStyle(.tertiary)
+
+            TextField("搜索姓名或别称", text: $searchText)
+                .font(Font.subheadline)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+                .submitLabel(.done)
+                .onSubmit { searchFocused = false }
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Font.footnote)
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.m)
+        .frame(minHeight: 36)
+        .background(Theme.field)
+        .clipShape(Capsule())
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Picker("排序", selection: $sortMode) {
+                Text(WorldCharacterSort.name.displayName).tag(WorldCharacterSort.name)
+                Text(WorldCharacterSort.recentlyUpdated.displayName)
+                    .tag(WorldCharacterSort.recentlyUpdated)
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(Font.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Theme.field))
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("排序")
+        .accessibilityValue(sortMode.displayName)
+    }
+
+    private var addButton: some View {
+        Button {
+            addCard()
+        } label: {
+            Image(systemName: "plus")
+                .font(Font.footnote.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Theme.accentSoft))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新建人物")
+    }
+
+    private var groupMenu: some View {
+        Menu {
+            Button("全部人物") { groupFilter = "__all__" }
+            Button("未分组") { groupFilter = "__ungrouped__" }
+            if !session.payload.world.characterGroups.isEmpty {
+                Divider()
+                ForEach(session.payload.world.characterGroups) { group in
+                    Button {
+                        groupFilter = group.id
+                    } label: {
+                        if group.enabled {
+                            Text(group.name)
+                        } else {
+                            Label(group.name + "（已停用）", systemImage: "eye.slash")
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("管理分组…") { showGroupEditor = true }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Text(groupFilterLabel)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Font.caption2)
+            }
+            .font(Font.footnote)
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 32)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel("分组筛选")
+        .accessibilityValue(groupFilterLabel)
+    }
+
+    private var groupFilterLabel: String {
+        switch groupFilter {
+        case "__all__": return "全部分组"
+        case "__ungrouped__": return "未分组"
+        default:
+            return session.payload.world.characterGroups
+                .first(where: { $0.id == groupFilter })?.name ?? "分组"
+        }
+    }
+
+    // MARK: - 列表
+
+    private func cardList(_ cards: [CharacterCard]) -> some View {
+        List {
+            Section {
+                ForEach(cards) { card in
+                    Button {
+                        route = Route(id: card.id)
+                    } label: {
+                        CharacterRow(card: card)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete(perform: deleteCards)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .groupedPageBackground()
+        .keyboardDismissOnScroll()
+        .alert(deleteTitle, isPresented: deleteAlertBinding) {
+            Button("取消", role: .cancel) { pendingDeleteIDs.removeAll() }
+            Button("删除", role: .destructive) { confirmDelete() }
+        }
+    }
+
+    // MARK: - 行
+
+    /// 列表行只依赖卡片本身，和分栏的搜索、路由状态解耦。
+    private struct CharacterRow: View {
+        let card: CharacterCard
+
+        private var subtitle: String {
+            card.identity.isEmpty ? card.personality : card.identity
+        }
+
+        var body: some View {
+            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Theme.accentSoft))
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Text(card.name.isEmpty ? "未命名人物" : card.name)
+                            .font(Font.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        if !card.aliases.isEmpty {
+                            Text(card.aliases.prefix(2).joined(separator: "、"))
+                                .font(Font.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(Font.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(Font.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+            .contentShape(Rectangle())
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if session.payload.world.characters.isEmpty {
+            ContentUnavailableView {
+                Label("还没有人物卡", systemImage: "person.2")
+            } description: {
+                EmptyView()
+            } actions: {
+                Button("新建人物") { addCard() }
+                    .buttonStyle(.bordered)
+            }
+        } else {
+            EmptyStateView(
+                symbol: "magnifyingglass",
+                title: "没有匹配的人物"
+            )
+        }
+    }
+
+    // MARK: - 数据
+
+    private var filteredCards: [CharacterCard] {
+        let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var cards: [CharacterCard]
+        if keyword.isEmpty {
+            cards = session.payload.world.characters
+        } else {
+            cards = session.payload.world.characters.filter { card in
+                if card.name.lowercased().contains(keyword) { return true }
+                return card.aliases.contains { $0.lowercased().contains(keyword) }
+            }
+        }
+
+        switch groupFilter {
+        case "__all__":
+            break
+        case "__ungrouped__":
+            cards = cards.filter { ($0.groupId ?? "").isEmpty }
+        default:
+            cards = cards.filter { $0.groupId == groupFilter }
+        }
+
+        return cards.sorted { lhs, rhs in
+            switch sortMode {
+            case .name:
+                let result = lhs.name.localizedStandardCompare(rhs.name)
+                if result == .orderedSame { return lhs.updatedAt > rhs.updatedAt }
+                return result == .orderedAscending
+            case .recentlyUpdated:
+                return lhs.updatedAt > rhs.updatedAt
+            }
+        }
+    }
+
+    private func addCard() {
+        let card = CharacterCard(name: "")
+        session.payload.world.characters.append(card)
+        session.scheduleSave()
+        route = Route(id: card.id)
+    }
+
+    private var deleteTitle: String {
+        pendingDeleteIDs.count == 1
+            ? "删除这张人物卡？"
+            : "删除 \(pendingDeleteIDs.count) 张人物卡？"
+    }
+
+    private var deleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { !pendingDeleteIDs.isEmpty },
+            set: { if !$0 { pendingDeleteIDs.removeAll() } }
+        )
+    }
+
+    private func deleteCards(at offsets: IndexSet) {
+        pendingDeleteIDs = Set(offsets.map { filteredCards[$0].id })
+    }
+
+    private func confirmDelete() {
+        let ids = pendingDeleteIDs
+        pendingDeleteIDs.removeAll()
+        session.payload.world.characters.removeAll { ids.contains($0.id) }
+        session.scheduleSave()
+    }
+}

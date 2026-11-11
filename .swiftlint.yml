@@ -1,0 +1,68 @@
+# DESIGN.md 的硬规则。
+#
+# 只启用自定义规则，不叠加 SwiftLint 的默认风格规则：默认规则一次接入会产生
+# 大量与设计无关的告警，反而掩盖真正的约束。
+#
+# error 会让 CI 失败；warning 只提示，留给人工判断（图标尺寸、封面字号等）。
+# 本机没有 Swift 工具链，用 script/design_check.py 做同规则预筛，权威以本文件为准。
+
+only_rules:
+  - custom_rules
+
+included:
+  - ios/Frthink
+
+custom_rules:
+  design_spacing_literal:
+    name: "DESIGN.md §3 · 间距禁用 5/7/10/14"
+    regex: '\.padding\((?:\.(?:horizontal|vertical|top|bottom|leading|trailing),\s*)?(?:5|7|10|14)\)'
+    message: "间距只用 4/8/12/16/24/32（DESIGN.md §3）。"
+    severity: error
+
+  design_stack_spacing:
+    name: "DESIGN.md §3 · 栈间距禁用 5/7/10/14"
+    regex: 'spacing:\s*(?:5|7|10|14)\b'
+    message: "间距只用 4/8/12/16/24/32（DESIGN.md §3）。"
+    severity: error
+
+  design_corner_radius:
+    name: "DESIGN.md §3 · 圆角只允许 0/8/12/16/24"
+    regex: 'cornerRadius:\s*(?!0\b|8\b|12\b|16\b|24\b)[0-9]+(?:\.[0-9]+)?'
+    message: "圆角只用 8/12/16/24（DESIGN.md §3）。"
+    severity: error
+
+  design_foreground_color:
+    name: "DESIGN.md §1 · 已停用 foregroundColor"
+    regex: '\.foregroundColor\('
+    message: "改用 foregroundStyle（DESIGN.md §1）。"
+    severity: error
+
+  design_removed_components:
+    name: "DESIGN.md §9 · 已删除的解释性组件"
+    regex: '\b(?:InlineHint|AutosaveBadge|settingsNote)\b'
+    message: "这些组件已从设计系统删除（DESIGN.md §9）。"
+    severity: error
+
+  design_keyboard_toolbar:
+    name: "DESIGN.md §5 · 不自建键盘工具条"
+    regex: 'placement:\s*\.keyboard'
+    message: "键盘避让交给 safeAreaInset，不挂自定义工具条（DESIGN.md §5）。"
+    severity: error
+
+  design_color_literal:
+    name: "DESIGN.md §1 · 自定义颜色字面量"
+    regex: 'Color\((?:red|hue|white|saturation|brightness):'
+    message: "颜色只用语义色或 Theme token（DESIGN.md §1）。"
+    severity: error
+
+  design_font_literal:
+    name: "DESIGN.md §2 · 直接字号"
+    regex: '\.font\(\.system\(size:\s*[0-9]'
+    message: "文字用 Font.TextStyle；正文字号走 settings.bodyFontSize（DESIGN.md §2）。"
+    severity: warning
+
+  design_hardcoded_frame:
+    name: "DESIGN.md §5 · 写死 frame"
+    regex: '\.frame\((?:width|height):\s*(?![01](?:\.[0-9]+)?\b)[0-9]'
+    message: "确认不是套在文字上的固定尺寸（DESIGN.md §5）。"
+    severity: warning

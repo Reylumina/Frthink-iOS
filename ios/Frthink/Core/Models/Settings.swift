@@ -1,0 +1,403 @@
+import Foundation
+
+/// LLM 供应方。Android 端是一个 Kotlin enum，字符串常量在 DEX 里是
+/// `DEEPSEEK` / `OPENROUTER` / `OPENAI_COMPATIBLE` / `CUSTOM_OPENAI_COMPATIBLE`。
+///
+/// 后两者行为一致，都是「OpenAI 兼容的任意端点」，这里合为一个 case。
+enum ProviderKind: String, Codable, CaseIterable, Identifiable {
+    case deepseek = "DEEPSEEK"
+    case openRouter = "OPENROUTER"
+    case openAICompatible = "OPENAI_COMPATIBLE"
+    case openCodeGo = "OPENCODE_GO"
+
+    var id: String { rawValue }
+
+    /// 新建供应方时可选类型；OpenCode 已并入 OpenAI 兼容预设。
+    static var selectableCases: [ProviderKind] {
+        [.deepseek, .openRouter, .openAICompatible]
+    }
+
+    var displayName: String {
+        switch self {
+        case .deepseek: return "DeepSeek"
+        case .openRouter: return "OpenRouter"
+        case .openAICompatible: return "OpenAI 兼容"
+        case .openCodeGo: return "OpenAI 兼容"
+        }
+    }
+
+    /// 设置页的服务商图标。OpenRouter 用分叉表示路由，OpenAI 兼容用机架。
+    var symbolName: String {
+        switch self {
+        case .deepseek: return "sparkles"
+        case .openRouter: return "arrow.triangle.branch"
+        case .openAICompatible: return "server.rack"
+        case .openCodeGo: return "chevron.left.forwardslash.chevron.right"
+        }
+    }
+
+    /// 官方品牌标的 asset 名；没有品牌标的类型退回 `symbolName`。
+    ///
+    /// 来源：DeepSeek 鲸鱼取自 Simple Icons（CC0），填充官方蓝 `#4D6BFE`；
+    /// OpenRouter glyph 取自官方品牌页（`openrouter.ai/brand`），浅色 Grape、
+    /// 深色 Volt，按品牌要求不拉伸、不改色。
+    var logoAssetName: String? {
+        switch self {
+        case .deepseek: return "ProviderDeepSeek"
+        case .openRouter: return "ProviderOpenRouter"
+        case .openAICompatible, .openCodeGo: return nil
+        }
+    }
+
+    /// 默认服务地址。
+    var defaultBaseURL: String {
+        switch self {
+        case .deepseek: return "https://api.deepseek.com"
+        case .openRouter: return "https://openrouter.ai/api/v1"
+        case .openAICompatible: return ""
+        case .openCodeGo: return "https://opencode.ai/zen/go/v1"
+        }
+    }
+
+    /// 新建供应方时的默认模型。
+    var defaultModel: String {
+        ModelCatalog.latest(for: self) ?? ""
+    }
+}
+
+/// 思考档位。关闭时不发任何推理参数。
+enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
+    case off
+    case low
+    case high
+    case max
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .off: return "关闭"
+        case .low: return "低"
+        case .high: return "高"
+        case .max: return "最高"
+        }
+    }
+
+    var rank: Int {
+        switch self {
+        case .off: return 0
+        case .low: return 1
+        case .high: return 2
+        case .max: return 3
+        }
+    }
+}
+
+/// 单个供应方的配置。API Key 不进这个结构，单独存 Keychain。
+struct ProviderSetting: Identifiable, Codable, Hashable {
+    var id: String
+    var kind: ProviderKind
+    var baseURL: String
+    var model: String
+    var temperature: Double
+    var maxTokens: Int
+    var stream: Bool
+    var enabled: Bool
+    /// 旧版布尔开关，仅用于迁移。
+    var thinking: Bool?
+    /// 思考档位；nil 时回落到旧版 `thinking`。
+    var thinkingLevel: ThinkingLevel?
+
+    init(
+        id: String = UUID().uuidString,
+        kind: ProviderKind,
+        baseURL: String? = nil,
+        model: String? = nil,
+        temperature: Double = 1.0,
+        maxTokens: Int = 30000,
+        stream: Bool = true,
+        enabled: Bool = true,
+        thinking: Bool? = nil,
+        thinkingLevel: ThinkingLevel? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.baseURL = baseURL ?? kind.defaultBaseURL
+        self.model = model ?? kind.defaultModel
+        self.temperature = temperature
+        self.maxTokens = maxTokens
+        self.stream = stream
+        self.enabled = enabled
+        self.thinking = thinking
+        self.thinkingLevel = thinkingLevel
+    }
+
+    var effectiveThinkingLevel: ThinkingLevel {
+        if let thinkingLevel { return thinkingLevel }
+        return thinking == true ? .high : .off
+    }
+
+    var baseURLForDisplay: String {
+        baseURL.isEmpty ? kind.defaultBaseURL : baseURL
+    }
+
+    /// 真正要发出去的模型名。
+    ///
+    /// 模型字段留空时回落到目录里的最新模型，而不是发出一个空 `model`
+    /// 让服务端 400。用户填了什么就用什么，不做二次猜测。
+    var resolvedModel: String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return ModelCatalog.latest(for: kind) ?? ""
+    }
+
+    /// 是否在用已弃用的历史别名。
+    var usesDeprecatedModel: Bool {
+        ModelCatalog.isDeprecated(resolvedModel)
+    }
+
+    /// 是否走 DeepSeek 专有分支（`thinking` 字段）。
+    ///
+    /// 原版不是按枚举判断，而是**拿 URL 的主机名跟 `api.deepseek.com` 比**
+    /// （`L1/X.java:498-511`，忽略大小写）。照抄这条：自建反代到别的域名
+    /// 就不算 DeepSeek，哪怕后端是 DeepSeek。
+    var isDeepSeek: Bool {
+        guard let url = URL(string: baseURLForDisplay.trimmingCharacters(in: .whitespaces)),
+              let host = url.host
+        else { return false }
+        return host.caseInsensitiveCompare("api.deepseek.com") == .orderedSame
+    }
+
+    /// 设置页展示用的平台名。用启发式，和请求分支无关
+    /// （`L1/U2.java:1011-1021`）。
+    var platformDisplayName: String {
+        let url = baseURLForDisplay.lowercased()
+        if url.contains("deepseek") { return "DeepSeek" }
+        if url.isEmpty { return "未知 API" }
+        return "OpenAI 兼容"
+    }
+}
+
+/// 设置页「外观」里的主题选择。原版是跟随系统 / 浅色 / 深色三选一。
+enum AppTheme: String, Codable, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system: return "跟随系统"
+        case .light: return "浅色"
+        case .dark: return "深色"
+        }
+    }
+}
+
+/// 全局设置。落盘到 `Application Support/Frthink/settings.json`。
+struct AppSettings: Codable {
+    var providers: [ProviderSetting]
+    var activeProviderID: String
+    /// 语料收集库开关（提示词里有「启用语料收集库用于写作」）。
+    var corpusEnabled: Bool
+    /// 译文分段的 `owner` 字段，用于把本机数据与导入数据隔开。
+    var ownerID: String
+    /// 关闭流式时走一次性请求。
+    var streamByDefault: Bool
+    /// 宇宙层：跨项目共享的设定。
+    var universeEntries: [UniverseEntry]
+    /// 当前书项目启用了哪些宇宙条目（按项目存一份要在 ProjectPayload 里，
+    /// 这里放全局启用的默认集合）。
+    var enabledUniverseEntryIDs: [String]
+
+    // MARK: 提示词集成管理器
+
+    /// 全局预设（P03）。正文原样注入，不加任何前后缀。
+    var globalPreset: String
+    /// 去 AI 味规则（P05）。渲染成「用户确认的写作偏好：\n<内容>」。
+    var aiFlavorRules: String
+    /// 技能列表（P04）。启用的每条渲染成 `# <技能名>\n<内容>`。
+    var skills: [Skill]
+    /// 语料收集库。原版存 `universe-corpus-v1.enc`，库可以嵌套；这里平铺多库。
+    var corpusLibraries: [CorpusLibrary]
+
+    // MARK: 外观
+
+    /// 主题。设置页用 `.preferredColorScheme` 立刻生效。
+    var theme: AppTheme
+    /// 正文字号（pt）。写作台、阅读页渲染正文时读它；设置页负责写入和预览。
+    var bodyFontSize: Double
+
+    // MARK: 全局模型响应
+
+    /// 默认采样温度。新建供应方、或点「应用到当前供应方」时用。
+    var defaultTemperature: Double
+    /// 默认最大输出 token。
+    var defaultMaxTokens: Int
+
+    // MARK: 长上下文预算
+
+    /// 上下文窗口大小（token）。默认按 `TokenEstimator.contextWindow(for:)` 的
+    /// 估计值；用户改过就以这里的值为准。
+    var contextWindowTokens: Int
+    /// 输入预算。原版 `input_budget_tokens`，出厂 32768。
+    var inputBudgetTokens: Int
+    /// 给输出预留的 token。预算 = 窗口 − 预留 − 安全余量。
+    var reservedOutputTokens: Int
+
+    // MARK: 界面
+
+    /// 把界面动画限制到 60 帧（省电、降发热）。
+    var limitAnimationFrameRate: Bool
+    /// 触感反馈。
+    var hapticsEnabled: Bool
+
+    // MARK: 用量
+
+    /// 累计 token 消耗（估算）。
+    var tokenUsageTotal: Int
+    /// 「翻译模型」：翻译任务单独指定一个供应方；空串表示复用当前供应方。
+    var translationProviderID: String
+    /// 「摘要模型」：空串表示复用当前供应方的模型。
+    var summaryModel: String
+    /// 「世界建立」：改写 P18「世界建立要求」的正文；空串表示用出厂值。
+    var worldBuildInstruction: String
+    /// 自动对话摘要（APK `autoConversationSummary`）。
+    var autoConversationSummary: Bool
+    /// 摘要触发阈值（百分比）。
+    var conversationSummaryThresholdPercent: Int
+    /// 摘要时排除助手历史（APK `excludeAssistantChatHistory`）。
+    var excludeAssistantChatHistory: Bool
+
+    init(
+        providers: [ProviderSetting]? = nil,
+        activeProviderID: String = "",
+        corpusEnabled: Bool = false,
+        ownerID: String = "",
+        streamByDefault: Bool = true,
+        universeEntries: [UniverseEntry] = [],
+        enabledUniverseEntryIDs: [String] = [],
+        theme: AppTheme = .system,
+        bodyFontSize: Double = 18,
+        defaultTemperature: Double = 1.0,
+        defaultMaxTokens: Int = 30000,
+        contextWindowTokens: Int = 0,
+        inputBudgetTokens: Int = 32_768,
+        reservedOutputTokens: Int = 30_000,
+        limitAnimationFrameRate: Bool = false,
+        hapticsEnabled: Bool = true,
+        tokenUsageTotal: Int = 0,
+        translationProviderID: String = "",
+        summaryModel: String = "",
+        worldBuildInstruction: String = "",
+        autoConversationSummary: Bool = true,
+        conversationSummaryThresholdPercent: Int = 95,
+        excludeAssistantChatHistory: Bool = false,
+        globalPreset: String = "",
+        aiFlavorRules: String = "",
+        skills: [Skill]? = nil,
+        corpusLibraries: [CorpusLibrary] = []
+    ) {
+        let defaults = providers ?? ProviderKind.selectableCases.map { ProviderSetting(kind: $0) }
+        self.providers = defaults
+        self.activeProviderID = activeProviderID.isEmpty
+            ? (defaults.first?.id ?? "")
+            : activeProviderID
+        self.corpusEnabled = corpusEnabled
+        self.ownerID = ownerID.isEmpty ? UUID().uuidString : ownerID
+        self.streamByDefault = streamByDefault
+        self.universeEntries = universeEntries
+        self.enabledUniverseEntryIDs = enabledUniverseEntryIDs
+        self.theme = theme
+        self.bodyFontSize = bodyFontSize
+        self.defaultTemperature = defaultTemperature
+        self.defaultMaxTokens = defaultMaxTokens
+        self.contextWindowTokens = contextWindowTokens
+        self.inputBudgetTokens = inputBudgetTokens
+        self.reservedOutputTokens = reservedOutputTokens
+        self.limitAnimationFrameRate = limitAnimationFrameRate
+        self.hapticsEnabled = hapticsEnabled
+        self.tokenUsageTotal = tokenUsageTotal
+        self.translationProviderID = translationProviderID
+        self.summaryModel = summaryModel
+        self.worldBuildInstruction = worldBuildInstruction
+        self.autoConversationSummary = autoConversationSummary
+        self.conversationSummaryThresholdPercent = conversationSummaryThresholdPercent
+        self.excludeAssistantChatHistory = excludeAssistantChatHistory
+        self.globalPreset = globalPreset
+        self.aiFlavorRules = aiFlavorRules
+        self.skills = skills ?? Skill.defaults
+        self.corpusLibraries = corpusLibraries
+    }
+
+    /// 提示词能用的预算：上下文窗口 − 预留输出，再留一成安全空间。
+    ///
+    /// `TokenEstimator.trimTail(_:toTokens:)` 直接吃这个值；下限 1024 防止把
+    /// 窗口/预留填反了以后算出负数。
+    var promptBudgetTokens: Int {
+        let model = activeProvider?.resolvedModel ?? ""
+        let plan = try? PromptBudget.make(
+            settings: self,
+            model: model,
+            contextWindowOverride: contextWindowTokens > 0 ? contextWindowTokens : nil
+        )
+        return plan?.effectiveInputBudget ?? max(1_024, inputBudgetTokens)
+    }
+
+    var activeProvider: ProviderSetting? {
+        providers.first { $0.id == activeProviderID } ?? providers.first
+    }
+
+    /// 本书实际注入的宇宙条目：全局启用 + 本书勾选，两者缺一不可。
+    func enabledUniverseEntries(for projectEntryIDs: [String]) -> [UniverseEntry] {
+        let selected = Set(projectEntryIDs)
+        return universeEntries.filter { $0.enabled && selected.contains($0.id) }
+    }
+
+    /// 解码旧版本设置文件时补齐新增字段。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        providers = (try? c.decode([ProviderSetting].self, forKey: .providers))
+            ?? ProviderKind.selectableCases.map { ProviderSetting(kind: $0) }
+        activeProviderID = (try? c.decode(String.self, forKey: .activeProviderID)) ?? ""
+        corpusEnabled = (try? c.decode(Bool.self, forKey: .corpusEnabled)) ?? false
+        ownerID = (try? c.decode(String.self, forKey: .ownerID)) ?? UUID().uuidString
+        streamByDefault = (try? c.decode(Bool.self, forKey: .streamByDefault)) ?? true
+        universeEntries = (try? c.decode([UniverseEntry].self, forKey: .universeEntries)) ?? []
+        enabledUniverseEntryIDs =
+            (try? c.decode([String].self, forKey: .enabledUniverseEntryIDs)) ?? []
+        theme = (try? c.decode(AppTheme.self, forKey: .theme)) ?? .system
+        bodyFontSize = (try? c.decode(Double.self, forKey: .bodyFontSize)) ?? 18
+        defaultTemperature = (try? c.decode(Double.self, forKey: .defaultTemperature)) ?? 1.0
+        defaultMaxTokens = (try? c.decode(Int.self, forKey: .defaultMaxTokens)) ?? 30000
+        contextWindowTokens =
+            (try? c.decode(Int.self, forKey: .contextWindowTokens)) ?? 0
+        inputBudgetTokens = (try? c.decode(Int.self, forKey: .inputBudgetTokens)) ?? 32_768
+        reservedOutputTokens =
+            (try? c.decode(Int.self, forKey: .reservedOutputTokens)) ?? 30_000
+        limitAnimationFrameRate =
+            (try? c.decode(Bool.self, forKey: .limitAnimationFrameRate)) ?? false
+        hapticsEnabled = (try? c.decode(Bool.self, forKey: .hapticsEnabled)) ?? true
+        tokenUsageTotal = (try? c.decode(Int.self, forKey: .tokenUsageTotal)) ?? 0
+        translationProviderID =
+            (try? c.decode(String.self, forKey: .translationProviderID)) ?? ""
+        summaryModel = (try? c.decode(String.self, forKey: .summaryModel)) ?? ""
+        worldBuildInstruction =
+            (try? c.decode(String.self, forKey: .worldBuildInstruction)) ?? ""
+        autoConversationSummary =
+            (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? true
+        conversationSummaryThresholdPercent =
+            (try? c.decode(Int.self, forKey: .conversationSummaryThresholdPercent)) ?? 95
+        excludeAssistantChatHistory =
+            (try? c.decode(Bool.self, forKey: .excludeAssistantChatHistory)) ?? false
+        globalPreset = (try? c.decode(String.self, forKey: .globalPreset)) ?? ""
+        aiFlavorRules = (try? c.decode(String.self, forKey: .aiFlavorRules)) ?? ""
+        skills = (try? c.decode([Skill].self, forKey: .skills)) ?? Skill.defaults
+        corpusLibraries =
+            (try? c.decode([CorpusLibrary].self, forKey: .corpusLibraries)) ?? []
+        if activeProviderID.isEmpty, let first = providers.first {
+            activeProviderID = first.id
+        }
+    }
+}

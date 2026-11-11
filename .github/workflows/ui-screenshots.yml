@@ -1,0 +1,175 @@
+name: UI Screenshots
+
+# 在 macOS runner 的模拟器里跑起来，逐 Tab 截图，作为 artifact 上传。
+#
+# 为什么需要这个：工程在 Windows 上只能编译，看不到界面。这个流水线是唯一
+# 能让 UI 被真实渲染、被眼睛看到的通道。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    name: Render UI on simulator
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -30
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          DEVICE="$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print([x["udid"] for xs in d.values() for x in xs if "iPhone" in x["name"]][0])')"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          # 模拟器构建必须 ad-hoc 签名：无签名的 app 没有 application-identifier，
+          # 访问 Keychain 会返回 -34018，自检的落盘加密和 API Key 都会失败。
+          xcodebuild \
+            -project ios/Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Debug \
+            -destination "id=$DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            build
+
+      - name: Verify ProMotion Info.plist key
+        run: |
+          set -euo pipefail
+          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
+          VALUE="$(/usr/bin/plutil -extract CADisableMinimumFrameDurationOnPhone raw -o - "$APP/Info.plist")"
+          echo "CADisableMinimumFrameDurationOnPhone=$VALUE"
+          test "$VALUE" = "true"
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
+          xcrun simctl install "$DEVICE" "$APP"
+
+      - name: Run self check (pure logic, no network)
+        run: |
+          set -o pipefail
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          # --console-pty 会把 app 的 stdout 接到这里；自检跑完自己 exit。
+          xcrun simctl launch --console-pty "$DEVICE" com.frthink.app -runSelfCheck \
+            | tee selfcheck.log
+          grep -q "ALL PASS" selfcheck.log
+
+      - name: Screenshot each tab
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+          for TAB in 创作 阅读 世界 宇宙 设置; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab "$TAB"
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screenshots/tab-$TAB.png"
+            echo "captured $TAB"
+          done
+          # 写作台：正文单区（对话收起）与流式气泡各拍一张。
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 创作 -writerFocus manuscript
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/tab-创作-正文.png"
+          # 流式气泡：用 DEBUG 静态样本渲染 UITextView 增量文本，验证排版与高度。
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 创作 -streamPreview
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/tab-创作-流式.png"
+          # 设置二级页：验证三级信息架构的第一层跳转。
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 设置 -settingsPage connection
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/tab-设置-连接.png"
+          # 设置二级页全量：连接 / 提示词 / 存档 / 存储 / 外观 / 关于。
+          for PAGE in connection prompts archive storage appearance about; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 设置 -settingsPage "$PAGE"
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screenshots/settings-$PAGE.png"
+            echo "captured settings $PAGE"
+          done
+          # 设置三级页：供应方编辑、世界建立、模型响应、上下文预算。
+          for EDITOR in provider worldbuild modelresponse contextbudget; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 设置 -settingsEditor "$EDITOR"
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screenshots/settings-editor-$EDITOR.png"
+            echo "captured settings editor $EDITOR"
+          done
+          # 阅读面板：显示设置、章节、搜索。
+          for PANEL in display chapters search; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 阅读 -readerPanel "$PANEL"
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screenshots/reader-$PANEL.png"
+            echo "captured reader panel $PANEL"
+          done
+          # 世界五个分栏。
+          for TAB in setting worldbook characters events rules; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 世界 -worldTab "$TAB"
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screenshots/world-$TAB.png"
+            echo "captured world tab $TAB"
+          done
+          # 人物卡编辑（三级页）。
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 世界 -worldTab characters -openWorldCard first
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/world-character-editor.png"
+          # 书架与回收站（RootView 的 sheet）。
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 创作 -openLibrary
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/library.png"
+          xcrun simctl terminate "$DEVICE" com.frthink.app || true
+          xcrun simctl launch "$DEVICE" com.frthink.app -seedDemo -initialTab 创作 -openLibrary -openTrash
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot "screenshots/library-trash.png"
+          ls -lh screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload xcodebuild log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-build-log
+          path: ${{ runner.temp }}/DerivedData/Logs/Build
+          if-no-files-found: ignore
+          retention-days: 7
+
+

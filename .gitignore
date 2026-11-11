@@ -1,0 +1,26 @@
+# 反编译产物，不进仓库（体积 + 版权）
+out/
+out-*/
+tools/
+script/
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcodeproj/xcuserdata/
+*.ipa
+*.xcarchive
+*.dSYM.zip
+
+# macOS
+.DS_Store
+
+# 本地密钥
+*.secrets
+.env
+AGENTS.md
+PLAN.md
+artifacts/
