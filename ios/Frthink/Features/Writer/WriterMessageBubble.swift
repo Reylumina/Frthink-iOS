@@ -4,10 +4,6 @@
 import SwiftUI
 import UIKit
 
-/// 一条已完成的码字机消息。
-///
-/// 助手气泡底部只保留一个主操作「插入正文」和两个图标动作，其余（回退、删版本）
-/// 收进省略号菜单。常驻控件从 4 个文字按钮 + 版本条压到 3 个，长对话才不吵。
 /// 气泡上的用户动作。集中成一组，调用方不用在 init 里排十几行闭包。
 struct WriterMessageActions {
     var copy: () -> Void = {}
@@ -22,6 +18,10 @@ struct WriterMessageActions {
     var beginSelection: () -> Void = {}
 }
 
+/// 一条已完成的码字机消息。
+///
+/// 助手气泡底部是四个图标动作（插入、追加、复制、重新生成），回退与删版本收进
+/// 省略号菜单；版本切换条只在有多版本时出现。
 struct WriterMessageBubble: View {
     let message: ChatMessage
     /// 有任何一条消息正在生成时，操作条禁用，避免并发改同一份对话。
