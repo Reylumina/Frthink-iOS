@@ -31,6 +31,8 @@ struct WriterComposerBar: View {
     var autoFocus: Bool = false
 
     @FocusState private var focused: Bool
+    /// 输入条里控件的行内高度，跟随字号缩放（§2.4、§5.9）。
+    @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = Theme.Layout.inlineControl
 
     var body: some View {
         // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。
@@ -91,7 +93,7 @@ struct WriterComposerBar: View {
             Image(systemName: "wand.and.stars")
                 .font(Font.subheadline.weight(.medium))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                .frame(width: Theme.Layout.inlineControl, height: Theme.Layout.inlineControl)
+                .frame(width: controlSize, height: controlSize)
                 .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
         }
@@ -107,7 +109,7 @@ struct WriterComposerBar: View {
             .focused($focused)
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
-            .frame(minHeight: Theme.Layout.inlineControl)
+            .frame(minHeight: controlSize)
             .modifier(WriterComposerFieldSurface())
     }
 
@@ -170,9 +172,10 @@ struct WriterComposerBar: View {
 
 // MARK: - 输入条材质
 
-/// 输入条外壳。§1.6：iOS 26 上输入框和发送按钮各自是玻璃胶囊，放在同一个
-/// `GlassEffectContainer` 里，不铺满宽底条；17–25 回落成 `.bar` 材质满宽底条。
-/// 两档分支收在组件里，页面代码不写 `#available`（§5.2）。
+/// 输入条外壳。§1.6：iOS 26 只有输入框是玻璃胶囊，发送键是实心圆，
+/// 所以这一条只有一个玻璃元素、不套 `GlassEffectContainer`，也不铺满宽底条；
+/// 17–25 回落成 `.bar` 材质满宽底条。两档分支收在组件里，页面代码不写
+/// `#available`（§5.2）。
 private struct WriterComposerShell<Content: View>: View {
     private let content: Content
 
@@ -182,11 +185,9 @@ private struct WriterComposerShell<Content: View>: View {
 
     var body: some View {
         if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: Theme.Spacing.s) {
-                content
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .padding(.vertical, Theme.Spacing.s)
-            }
+            content
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.s)
         } else {
             content
                 .padding(.horizontal, Theme.Spacing.m)
@@ -225,14 +226,19 @@ private struct WriterComposerPrimaryButton: View {
     let isEnabled: Bool
     let action: () -> Void
 
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.inlineControl
+
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(Font.subheadline.weight(.semibold))
                 .foregroundStyle(isEnabled ? Color.white : Color.secondary)
-                .frame(width: Theme.Layout.inlineControl, height: Theme.Layout.inlineControl)
+                .frame(width: size, height: size)
                 .background(Circle().fill(isEnabled ? Theme.accent : Theme.field))
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

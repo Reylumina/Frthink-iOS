@@ -129,6 +129,7 @@ struct LibraryView: View {
             symbol: "books.vertical",
             title: "还没有书项目",
             actionTitle: "新建书项目",
+            isPrimaryAction: true,
             action: { editTarget = .newProject }
         )
         .listRowBackground(Color.clear)

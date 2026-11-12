@@ -19,16 +19,111 @@ extension View {
     ///
     /// 系统默认值在 iOS 26 的 insetGrouped 上把行内容（44pt）撑成了 74pt，
     /// 设置页六行就多占一屏；这里收回 4pt，行距 52pt。显式写死是为了不再
-    /// 跟着系统版本变。左右 16pt 与分区卡片的内边距对齐。
+    /// 跟着系统版本变。左右 20pt 是量出来的系统值：卡片边缘 16pt，行内容
+    /// 从 36pt 起（截图 108px @3x），不写这个值行内容会比标题左移 4pt。
     func compactRowInsets() -> some View {
         listRowInsets(
             EdgeInsets(
                 top: Theme.Layout.rowInsetVertical,
-                leading: Theme.Spacing.l,
+                leading: Theme.Layout.rowInsetHorizontal,
                 bottom: Theme.Layout.rowInsetVertical,
-                trailing: Theme.Spacing.l
+                trailing: Theme.Layout.rowInsetHorizontal
             )
         )
+    }
+}
+
+// MARK: - 行内控件
+
+/// 行内圆形图标按钮的可见部分：34pt 圆 + 居中符号（§5.1）。
+///
+/// 只画外形，热区由外层的 `CircleIconButton` 或调用方补到 44pt。
+/// 单独拆出来是因为 `Menu` 也要用同一个圆做 label。
+struct CircleIconLabel: View {
+    let symbol: String
+    var fill: Color = Theme.accentSoft
+    var tint: Color = Theme.accent
+
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.controlHeight
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(Font.footnote.weight(.semibold))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .background(Circle().fill(fill))
+    }
+}
+
+/// 行内圆形图标按钮：可见 34pt，热区 44pt（§5.1）。
+///
+/// 世界页的排序、新建等一行里的圆钮都走这里，避免每处再抄一遍
+/// 「画圆 → 补热区 → contentShape」。
+struct CircleIconButton: View {
+    let symbol: String
+    let label: String
+    var fill: Color = Theme.accentSoft
+    var tint: Color = Theme.accent
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            CircleIconLabel(symbol: symbol, fill: fill, tint: tint)
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .accessibilityLabel(label)
+    }
+}
+
+/// 行内搜索框：36pt 胶囊 + 放大镜 + 清除键（§5.1）。
+///
+/// 清除键跟胶囊同高，不参与行高：写成 44pt 会让输入文字后整条长高 8pt。
+/// 焦点由组件自己持有，调用方不关心。
+struct InlineSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+
+    @FocusState private var focused: Bool
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.controlHeight
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .font(Font.footnote)
+                .foregroundStyle(.tertiary)
+
+            TextField(placeholder, text: $text)
+                .font(Font.subheadline)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit { focused = false }
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Font.footnote)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: size, height: size)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清除搜索")
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.m)
+        .frame(minHeight: size)
+        .background(Theme.field)
+        .clipShape(Capsule())
     }
 }
 
@@ -746,19 +841,13 @@ struct FloatingGlassButton: View {
     var isEnabled = true
     let action: () -> Void
 
-    var body: some View {
-        if #available(iOS 26.0, *) {
-            button.buttonStyle(.glass)
-        } else {
-            button
-                .background(.regularMaterial, in: Capsule())
-                .clipShape(Capsule())
-        }
-    }
+    /// 可见高度跟随字号缩放（§2.4）。
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.controlHeight
 
-    private var button: some View {
+    var body: some View {
         Button(action: action) {
             if let title {
+                // 文字胶囊：玻璃按 36pt 画，外面再补到 44pt 热区，外形不变。
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: symbol)
                         .font(Font.caption.weight(.semibold))
@@ -766,16 +855,23 @@ struct FloatingGlassButton: View {
                         .font(Font.caption.weight(.medium))
                 }
                 .padding(.horizontal, Theme.Spacing.m)
-                .frame(minHeight: Theme.Layout.inlineControl)
+                .frame(minHeight: size)
+                .glassSurface(Capsule())
+                .frame(minHeight: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
             } else {
                 Image(systemName: symbol)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 36, height: 36)
+                    .font(Font.subheadline.weight(.semibold))
+                    .frame(width: size, height: size)
+                    .glassSurface(Circle())
+                    .frame(
+                        minWidth: Theme.Layout.hitTarget,
+                        minHeight: Theme.Layout.hitTarget
+                    )
                     .contentShape(Rectangle())
-                    .padding(Theme.Spacing.xs)
             }
         }
+        .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(label)
     }

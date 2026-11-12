@@ -13,7 +13,8 @@ struct WorldEventsSection: View {
     @State private var searchText = ""
     @State private var route: Route? = nil
     @State private var pendingDeleteIDs: Set<String> = []
-    @FocusState private var searchFocused: Bool
+    /// 抽取胶囊的可见高度，跟随字号缩放（§2.4、§5.1）。
+    @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = Theme.Layout.controlHeight
 
     private struct Route: Identifiable {
         let id: String
@@ -40,45 +41,14 @@ struct WorldEventsSection: View {
 
     private var header: some View {
         HStack(spacing: Theme.Spacing.m) {
-            searchField
+            InlineSearchField(placeholder: "搜索事件或人物", text: $searchText)
             extractButton
-            addButton
+            CircleIconButton(symbol: "plus", label: "新建事件") {
+                addEvent()
+            }
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.s)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .font(Font.footnote)
-                .foregroundStyle(.tertiary)
-
-            TextField("搜索事件或人物", text: $searchText)
-                .font(Font.subheadline)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .submitLabel(.done)
-                .onSubmit { searchFocused = false }
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(Font.footnote)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除搜索")
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.m)
-        .frame(minHeight: Theme.Layout.controlHeight)
-        .background(Theme.field)
-        .clipShape(Capsule())
     }
 
     /// 抽取是低频动作，用次要按钮，高度与搜索框一致。
@@ -98,28 +68,14 @@ struct WorldEventsSection: View {
             }
             .foregroundStyle(isBusy ? Color.secondary : Theme.accent)
             .padding(.horizontal, Theme.Spacing.m)
-            .frame(minHeight: Theme.Layout.controlHeight)
+            .frame(minHeight: controlSize)
             .background(Theme.field, in: Capsule())
+            // 可见高度 36pt，热区补到 44pt（§5.1）。
+            .frame(minHeight: Theme.Layout.hitTarget)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(isActionDisabled)
-    }
-
-    private var addButton: some View {
-        Button {
-            addEvent()
-        } label: {
-            Image(systemName: "plus")
-                .font(Font.footnote.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
-                .background(Circle().fill(Theme.accentSoft))
-                // 可见圆 36pt，热区仍是 44pt（§5.1）。
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("新建事件")
     }
 
     // MARK: - 列表
@@ -203,19 +159,18 @@ struct WorldEventsSection: View {
     @ViewBuilder
     private var emptyState: some View {
         if session.payload.world.events.isEmpty {
-            ContentUnavailableView {
-                Label("还没有事件卡", systemImage: "calendar")
-            } description: {
-                EmptyView()
-            } actions: {
-                Button("新建事件") { addEvent() }
-                    .buttonStyle(.bordered)
-            }
-        } else {
+            // 整页空态只留一套组件（§5.7）：和「宇宙」「没有匹配」两处一致。
             EmptyStateView(
-                symbol: "magnifyingglass",
-                title: "没有匹配的事件"
+                symbol: "calendar",
+                title: "还没有事件卡",
+                actionTitle: "新建事件",
+                action: addEvent
             )
+            // 撑满剩余高度，空态在列表区居中，不贴在搜索栏下面。
+            .frame(maxHeight: .infinity)
+        } else {
+            InlineEmptyState(symbol: "magnifyingglass", message: "没有匹配的事件")
+                .frame(maxHeight: .infinity)
         }
     }
 

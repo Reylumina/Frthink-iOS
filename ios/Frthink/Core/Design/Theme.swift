@@ -114,12 +114,16 @@ enum Theme {
 
         /// 同一行控件的可见高度：搜索框、次操作胶囊、圆形图标按钮（§5.1）。
         /// 圆形按钮按它画圆，外面再留 `hitTarget` 的热区。
+        /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
-        /// 列表行上下内边距（§5.11）。行内容 44pt + 上下各 4pt = 52pt 行距。
+        /// 列表行上下内边距（§5.1）。行内容 44pt + 上下各 4pt = 52pt 行距。
         static let rowInsetVertical: CGFloat = 4
 
-        /// 输入条里控件的行内高度：输入框、发送/停止圆、续写图标（§5.9）。
+        /// 列表行左右内边距：系统 insetGrouped 的值，卡片边缘 16pt + 内容 20pt。
+        static let rowInsetHorizontal: CGFloat = 20
+
+        /// 输入条里控件的行内高度：发送/停止圆、续写图标（§5.9）。
         /// 比 `controlHeight` 小一点：这一条浮在正文上，多一像素都在压字。
         static let inlineControl: CGFloat = 34
     }
@@ -277,6 +281,8 @@ struct EmptyStateView: View {
     let title: String
     var message: String = ""
     var actionTitle: String? = nil
+    /// 这一屏除了它没有别的可做时，才用实底主操作（书架首启）。
+    var isPrimaryAction: Bool = false
     var action: (() -> Void)? = nil
 
     var body: some View {
@@ -300,11 +306,14 @@ struct EmptyStateView: View {
             }
 
             if let actionTitle, let action {
-                // 空态里的动作是这一屏唯一能做的事，但不是「主操作」那种实心块：
-                // 与世界里事件卡、人物卡两栏的空态保持一致（§5.4、§5.7）。
+                // 默认用次操作按钮，和世界页两栏的空态保持一致；整页只有一个动作时
+                // 传 isPrimaryAction 换成实底（§5.4、§5.7）。
                 Button(actionTitle, action: action)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(isPrimaryAction ? .borderedProminent : .bordered)
                     .controlSize(.regular)
+                    // 可见高度 34pt，热区补到 44pt（§5.1）。
+                    .frame(minHeight: Theme.Layout.hitTarget)
+                    .contentShape(Capsule())
                     .padding(.top, Theme.Spacing.xs)
             }
         }

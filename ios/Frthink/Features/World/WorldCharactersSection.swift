@@ -29,7 +29,6 @@ struct WorldCharactersSection: View {
     @State private var pendingDeleteIDs: Set<String> = []
     @State private var groupFilter = "__all__"
     @State private var showGroupEditor = false
-    @FocusState private var searchFocused: Bool
 
     private struct Route: Identifiable {
         let id: String
@@ -86,9 +85,11 @@ struct WorldCharactersSection: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(spacing: Theme.Spacing.s) {
-                searchField
+                InlineSearchField(placeholder: "搜索姓名或别称", text: $searchText)
                 sortMenu
-                addButton
+                CircleIconButton(symbol: "plus", label: "新建人物") {
+                    addCard()
+                }
             }
             HStack(spacing: Theme.Spacing.s) {
                 Text("共 \(session.payload.world.characters.count) 张人物卡")
@@ -106,39 +107,6 @@ struct WorldCharactersSection: View {
         .padding(.vertical, Theme.Spacing.s)
     }
 
-    private var searchField: some View {
-        HStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .font(Font.footnote)
-                .foregroundStyle(.tertiary)
-
-            TextField("搜索姓名或别称", text: $searchText)
-                .font(Font.subheadline)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .submitLabel(.done)
-                .onSubmit { searchFocused = false }
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(Font.footnote)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除搜索")
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.m)
-        .frame(minHeight: Theme.Layout.controlHeight)
-        .background(Theme.field)
-        .clipShape(Capsule())
-    }
-
     private var sortMenu: some View {
         Menu {
             Picker("排序", selection: $sortMode) {
@@ -147,32 +115,16 @@ struct WorldCharactersSection: View {
                     .tag(WorldCharacterSort.recentlyUpdated)
             }
         } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(Font.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
-                .background(Circle().fill(Theme.field))
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                .contentShape(Circle())
+            CircleIconLabel(
+                symbol: "arrow.up.arrow.down",
+                fill: Theme.field,
+                tint: .secondary
+            )
+            .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
+            .contentShape(Circle())
         }
         .accessibilityLabel("排序")
         .accessibilityValue(sortMode.displayName)
-    }
-
-    private var addButton: some View {
-        Button {
-            addCard()
-        } label: {
-            Image(systemName: "plus")
-                .font(Font.footnote.weight(.semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
-                .background(Circle().fill(Theme.accentSoft))
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("新建人物")
     }
 
     /// 从正文整理人物卡：常规刷新与从头整理两种，和概览里是同一组动作。
@@ -341,19 +293,16 @@ struct WorldCharactersSection: View {
     @ViewBuilder
     private var emptyState: some View {
         if session.payload.world.characters.isEmpty {
-            ContentUnavailableView {
-                Label("还没有人物卡", systemImage: "person.2")
-            } description: {
-                EmptyView()
-            } actions: {
-                Button("新建人物") { addCard() }
-                    .buttonStyle(.bordered)
-            }
-        } else {
             EmptyStateView(
-                symbol: "magnifyingglass",
-                title: "没有匹配的人物"
+                symbol: "person.2",
+                title: "还没有人物卡",
+                actionTitle: "新建人物",
+                action: addCard
             )
+            .frame(maxHeight: .infinity)
+        } else {
+            InlineEmptyState(symbol: "magnifyingglass", message: "没有匹配的人物")
+                .frame(maxHeight: .infinity)
         }
     }
 

@@ -260,7 +260,8 @@ HStack {
 - 不给文字写死 `.frame(width:height:)`，Dynamic Type 放大时会裁字。图标、封面、控件可以有固定尺寸，但要用 `@ScaledMetric`。
 - 可点目标的热区至少 44×44pt。图标按钮看起来可以小，热区用 `.frame(minWidth: 44, minHeight: 44)` 加 `.contentShape(Rectangle())` 扩大，不能只放大图标。
 - 同一行里的控件可见高度统一成 `Theme.Layout.controlHeight`（36pt）：搜索框、次要操作胶囊、圆形图标按钮。圆形按钮按 36pt 画圆，外面再包一层 44pt 的透明框，所以行高是 44、视觉是 36，三者对齐。
-- 列表行距 52pt：行内容 44pt，上下各 4pt，用 `compactRowInsets()`。系统默认会撑到 74pt，一屏少两行。
+- 列表行距 52pt：行内容 44pt，上下各 4pt，用 `compactRowInsets()`。系统默认会撑到 74pt，一屏少两行。这是 §3.1「列表内部间距交给系统」的唯一例外，理由是系统的默认值在 iOS 26 上又多出 30pt。
+- `controlHeight`、`inlineControl`、`rowInsetVertical` 这些控件尺寸是基准值，视图里用 `@ScaledMetric(relativeTo: .body)` 读，随字号一起放大（§2.4）。
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
 
@@ -307,6 +308,7 @@ HStack {
 | 输入条发送键 | 34pt 强调色实心圆（`Theme.Layout.inlineControl`），不用玻璃主操作 | 一屏一个 |
 | 次操作 | `SecondaryActionButton`（`.bordered`）；浮在内容上时用 `.glass` | 不限，并排不超过两个 |
 | 行内动作 | 纯文字按钮，`.borderless` | 不限 |
+| 空态动作 | `EmptyStateView` 默认 `.bordered`；整页只有这一个动作时用实底 | 一屏一个 |
 | 破坏性 | `DestructiveActionRow`，放在页面最后一个独立 Section | 一页一个 |
 | 工具栏 | 系统默认，只放图标或短词 | 一侧不超过 3 个 |
 
@@ -362,8 +364,8 @@ HStack {
 - 不加自定义的「完成」键盘工具条。
 - 滚动区用 `.scrollDismissesKeyboard(.interactively)`。
 - 底部输入条放在 `.safeAreaInset(edge: .bottom)` 里，键盘避让交给系统。输入条的材质见 §1.6。
-- 输入条里只有一个输入框、一个发送/停止按钮，加最多一个辅助按钮。三件控件同高：可见高度都是 `Theme.Layout.inlineControl`（34pt），按中轴对齐，热区仍是 44pt。
-- 输入框最小高度 34pt，随行数长高（最多 5 行）；多行时两侧按钮保持居中。
+- 输入条里只有一个输入框、一个发送/停止按钮，加最多一个辅助按钮。两侧按钮可见高度 `Theme.Layout.inlineControl`（34pt），输入框可见高度 ≥34pt（单行排版自然高度约 38pt），三者按中轴对齐，热区都是 44pt。
+- 输入框随行数长高（最多 5 行）；多行时两侧按钮保持居中。
 
 ### 5.10 页面级别
 
@@ -384,6 +386,8 @@ HStack {
 | `AppSettingsRow` | 导航行：图标（可选）+ 标题 + 行尾的值 |
 | `AppValueRow` | 只读的标签加值 |
 | `StatusPill` | 当前、已停用、未填 Key 等状态胶囊 |
+| `InlineSearchField` | 世界页一栏顶部的搜索框：36pt 胶囊，清除键不参与行高 |
+| `CircleIconLabel`、`CircleIconButton` | 行内圆钮：可见 36pt、热区 44pt；`Menu` 用前者当 label |
 | `AppStatusLine` | 一行业务状态：进行中、成功、失败、普通 |
 | `AppTextField`、`AppSecureField` | 单行字段，标题在上 |
 | `AppTextArea`、`AppTextEditor` | 多行字段、长正文编辑 |
