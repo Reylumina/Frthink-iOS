@@ -39,6 +39,9 @@ struct LibraryView: View {
                     LibraryContinueRow(project: project) {
                         onOpen(project)
                     }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
                 }
             }
 

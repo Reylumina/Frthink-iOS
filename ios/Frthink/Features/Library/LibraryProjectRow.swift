@@ -15,29 +15,47 @@ struct LibraryContinueRow: View {
                     title: project.title,
                     seed: project.id
                 )
-                .frame(width: 52, height: 69)
+                .frame(width: 64, height: 86)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                )
+                .shadow(color: Theme.cardShadow, radius: 8, y: 4)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text("继续写作")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(Font.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
                     Text(project.shelfTitle)
-                        .font(Theme.heading)
+                        .font(Font.title3.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text(LibraryFormat.updatedText(project.updatedAt))
-                        .font(.caption)
+                        .font(Font.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: Theme.Spacing.s)
 
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.title2)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.accent)
+                    .frame(width: 38, height: 38)
+                    .background(.regularMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5))
             }
-            .padding(.vertical, Theme.Spacing.xs)
+            .padding(Theme.Spacing.l)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.sheet, style: .continuous)
+                    .fill(Theme.accentWash)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.sheet, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
+            )
+            .shadow(color: Theme.cardShadow, radius: 14, y: 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -64,7 +82,13 @@ struct LibraryProjectRow: View {
                     title: project.title,
                     seed: project.id
                 )
-                .frame(width: 44, height: 59)
+                .frame(width: 52, height: 70)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+                )
+                .shadow(color: Theme.cardShadow, radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: Theme.Spacing.xs) {
@@ -89,6 +113,11 @@ struct LibraryProjectRow: View {
                             .font(Theme.numericSmall)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
+                        if let count = project.bodyCharacterCount, count > 0 {
+                            Text("\(count.formatted()) 字")
+                                .font(Theme.numericSmall)
+                                .foregroundStyle(.tertiary)
+                        }
                         if branchCount > 1 {
                             Label("\(branchCount) 分支", systemImage: "arrow.triangle.branch")
                                 .font(Theme.numericSmall)

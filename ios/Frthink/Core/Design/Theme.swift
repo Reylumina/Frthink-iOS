@@ -36,6 +36,17 @@ enum Theme {
     /// 分隔线用系统值，自动适配深浅色。
     static let separator = Color(uiColor: .separator)
 
+    /// 强调色低饱和渐变。用于图标印章、继续写作卡等身份性表面，
+    /// 不做页面底，也不与语义状态色混用。
+    static let accentWash = LinearGradient(
+        colors: [Color.accentColor.opacity(0.20), Color.accentColor.opacity(0.05)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// 卡片投影。浅色下给一点浮起感，深色下几乎不可见。
+    static let cardShadow = Color.black.opacity(0.07)
+
     // MARK: - 字体
 
     /// 正文。系统字体，跟随 Dynamic Type。
@@ -96,19 +107,20 @@ enum Theme {
 // MARK: - 容器
 
 extension View {
-    /// 页面底：白/黑打底，不加渐变、不加灰。
+    /// 页面底：白/黑打底；分组页在顶部叠极淡的强调色，避免大片纯灰发死。
     func pageBackground() -> some View {
         background(Theme.pageBackgroundColor.ignoresSafeArea())
     }
 
-    /// 卡片表面：与页面同色，靠描边和间距分区。
+    /// 卡片表面：同色底、细描边 + 轻投影，靠层次而不是重色分区。
     func cardSurface(radius: CGFloat = Theme.Radius.large) -> some View {
         background(Theme.card)
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Theme.separator.opacity(0.6), lineWidth: 0.5)
+                    .strokeBorder(Theme.separator.opacity(0.55), lineWidth: 0.5)
             )
+            .shadow(color: Theme.cardShadow, radius: 8, y: 3)
     }
 
     /// 玻璃表面。
@@ -135,7 +147,7 @@ struct GlassSurfaceModifier: ViewModifier {
 
 /// 空状态。
 ///
-/// 只用图标 + 两行字。不画装饰圆、不加渐变、不放营销腔的文案。
+/// 图标印章 + 标题 + 一句说明；用系统符号和语义色，不画插画。
 struct EmptyStateView: View {
     let symbol: String
     let title: String
@@ -144,18 +156,43 @@ struct EmptyStateView: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: symbol)
-        } description: {
+        VStack(spacing: Theme.Spacing.m) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 64, height: 64)
+                .background(
+                    Theme.accentWash,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
+                )
+                .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+
+            Text(title)
+                .font(Font.headline)
+                .foregroundStyle(.primary)
+
             if !message.isEmpty {
                 Text(message)
+                    .font(Font.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        } actions: {
+
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .padding(.top, Theme.Spacing.xs)
             }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xl)
+        .padding(.horizontal, Theme.Spacing.l)
     }
 }
 

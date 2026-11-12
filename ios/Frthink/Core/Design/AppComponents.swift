@@ -6,9 +6,16 @@ import UIKit
 // MARK: - 页面底板
 
 extension View {
-    /// 分组表单页底。
+    /// 分组表单页底：系统分组灰 + 顶部一层极淡的强调色，避免整页发死。
     func groupedPageBackground() -> some View {
-        background(Theme.groupedPageColor.ignoresSafeArea())
+        background(
+            LinearGradient(
+                colors: [Theme.accent.opacity(0.05), Theme.groupedPageColor],
+                startPoint: .top,
+                endPoint: .center
+            )
+            .ignoresSafeArea()
+        )
     }
 }
 
@@ -50,8 +57,16 @@ struct IconTile: View {
             .foregroundStyle(tint)
             .frame(width: size, height: size)
             .background(
-                tint.opacity(0.12),
+                LinearGradient(
+                    colors: [tint.opacity(0.24), tint.opacity(0.08)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
                 in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                    .strokeBorder(tint.opacity(0.10), lineWidth: 0.5)
             )
             .accessibilityHidden(true)
     }

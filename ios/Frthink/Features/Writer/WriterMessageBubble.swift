@@ -84,23 +84,43 @@ struct WriterMessageBubble: View {
                 .foregroundStyle(.primary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, Theme.Spacing.m)
-                .padding(.vertical, Theme.Spacing.s + 2)
-                .background(Theme.accentSoft)
-                .clipShape(RoundedRectangle(
-                    cornerRadius: Theme.Radius.large,
-                    style: .continuous
-                ))
+                .padding(.horizontal, Theme.Spacing.m + 2)
+                .padding(.vertical, Theme.Spacing.s + 3)
+                .background(
+                    LinearGradient(
+                        colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.10), lineWidth: 0.5)
+                )
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            header
-            content
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                header
+                content
+            }
+            .padding(.horizontal, Theme.Spacing.m + 2)
+            .padding(.vertical, Theme.Spacing.m)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .fill(Theme.card.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
+            )
             if !isSelecting {
                 footer
+                    .padding(.horizontal, Theme.Spacing.xs)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,9 +129,7 @@ struct WriterMessageBubble: View {
 
     private var header: some View {
         HStack(spacing: Theme.Spacing.s) {
-            Text("码字机")
-                .font(Font.caption.weight(.semibold))
-                .foregroundStyle(Theme.accent)
+            WriterAssistantBadge()
             if let model = message.model, !model.isEmpty {
                 Text(model)
                     .font(Theme.numeric)
@@ -120,7 +138,7 @@ struct WriterMessageBubble: View {
             }
             if isInterrupted {
                 Text("生成中断")
-                    .font(Theme.badge)
+                    .font(Font.caption2.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, Theme.Spacing.s)
                     .padding(.vertical, 2)
@@ -263,6 +281,31 @@ struct WriterMessageBubble: View {
 }
 
 /// 流式生成中的气泡，只订阅控制器里的实时文本。
+/// 码字机的身份标记：渐变圆点 + 名字，完成与流式气泡共用。
+struct WriterAssistantBadge: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(
+                    LinearGradient(
+                        colors: [Theme.accent, Theme.accent.opacity(0.65)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: Circle()
+                )
+            Text("码字机")
+                .font(Font.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("码字机")
+    }
+}
+
 struct WriterStreamingBubble: View {
     let controller: WriterController
 
@@ -272,60 +315,70 @@ struct WriterStreamingBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.s) {
-                Text("码字机")
-                    .font(Font.caption.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                ProgressView().controlSize(.mini)
-                Text(statusText)
-                    .font(Font.caption)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 0)
-                Text("\(controller.streamingCharacterCount.formatted()) 字")
-                    .font(Theme.numericSmall)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if controller.streamingText.isEmpty {
-                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                    // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
-                    // 时页面不能只挂一个转圈，看起来像卡死。
-                    Text(Self.recentLines(reasoning, limit: 6))
-                        .font(Theme.reply)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text("……")
-                        .font(Theme.reply)
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                HStack(spacing: Theme.Spacing.s) {
+                    WriterAssistantBadge()
+                    ProgressView().controlSize(.mini)
+                    Text(statusText)
+                        .font(Font.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                    Text("\(controller.streamingCharacterCount.formatted()) 字")
+                        .font(Theme.numericSmall)
                         .foregroundStyle(.tertiary)
                 }
-            } else {
-                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                    DisclosureGroup(isExpanded: $reasoningExpanded) {
-                        Text(reasoning)
-                            .font(Theme.numeric)
+
+                if controller.streamingText.isEmpty {
+                    if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                        // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
+                        // 时页面不能只挂一个转圈，看起来像卡死。
+                        Text(Self.recentLines(reasoning, limit: 6))
+                            .font(Theme.reply)
                             .foregroundStyle(.secondary)
+                            .lineLimit(6)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    } label: {
-                        Text("思考过程 · \(reasoning.count.formatted()) 字")
-                            .font(Font.caption.weight(.semibold))
+                    } else {
+                        Text("……")
+                            .font(Theme.reply)
                             .foregroundStyle(.tertiary)
                     }
-                }
+                } else {
+                    if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                        DisclosureGroup(isExpanded: $reasoningExpanded) {
+                            Text(reasoning)
+                                .font(Theme.numeric)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        } label: {
+                            Text("思考过程 · \(reasoning.count.formatted()) 字")
+                                .font(Font.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
 
-                // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
-                StreamingTextView(
-                    text: controller.streamingText,
-                    fontSize: DynamicTypeFont.bodySize(
-                        store.settings.bodyFontSize,
-                        dynamicTypeSize: dynamicTypeSize
+                    // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
+                    StreamingTextView(
+                        text: controller.streamingText,
+                        fontSize: DynamicTypeFont.bodySize(
+                            store.settings.bodyFontSize,
+                            dynamicTypeSize: dynamicTypeSize
+                        )
                     )
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .padding(.horizontal, Theme.Spacing.m + 2)
+            .padding(.vertical, Theme.Spacing.m)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .fill(Theme.card.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
