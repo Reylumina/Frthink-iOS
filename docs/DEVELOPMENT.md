@@ -37,7 +37,7 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 |---|---|---|
 | `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（65 项） | push main、手动 |
 | `.github/workflows/real-import.yml` | 真实备份导入/导出/重开/落盘 | 手动 |
-| `.github/workflows/ios.yml` | 未签名 IPA | push main、手动 |
+| `.github/workflows/ios.yml` | 未签名 IPA | 手动 |
 | `.github/workflows/ui-screenshots.yml` | 各 Tab 与二、三级页截图（出图前先跑自检） | 手动、push main |
 | `.github/workflows/stream-check.yml` | mock SSE 连跑三次 + 正文行数/段落断言 | 手动 |
 

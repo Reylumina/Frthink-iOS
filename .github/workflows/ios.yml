@@ -6,11 +6,6 @@ run-name: "iOS Build #${{ github.run_number }}"
 # 注意：Larger runner（如 macos-15-xlarge）会额外计费，即使仓库是公开的。
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
   workflow_dispatch:
 
 permissions:
