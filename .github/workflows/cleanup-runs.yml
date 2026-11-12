@@ -1,0 +1,64 @@
+name: Cleanup Runs
+run-name: "Cleanup Runs #${{ github.run_number }}"
+
+# 定期清掉旧的 workflow run 与它们的 artifact。
+#
+# 为什么需要：这条仓库每改一次就至少跑一次 Self Check + UI Screenshots，
+# 一次截图任务要传 29 张 PNG。两个月下来 run 列表能到三位数，翻起来费劲，
+# artifact 也占存储配额。
+#
+# 保留最近 N 次已完成的运行（默认 30），更早的删掉；正在跑的不动。
+
+on:
+  schedule:
+    # 每周一 03:00 UTC。
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: 保留最近多少次已完成的运行
+        required: false
+        default: '30'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-runs
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    name: Delete old runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Purge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -euo pipefail
+          keep="${KEEP:-30}"
+          echo "keeping the newest $keep completed runs"
+
+          ids="$(gh run list -R "$REPO" --limit 200 --json databaseId,status \
+            --jq '.[] | select(.status == "completed") | .databaseId')"
+
+          total="$(printf '%s\n' "$ids" | grep -c . || true)"
+          echo "completed runs seen: $total"
+          if [ "$total" -le "$keep" ]; then
+            echo "nothing to delete"
+            exit 0
+          fi
+
+          printf '%s\n' "$ids" | tail -n "+$((keep + 1))" | while read -r id; do
+            [ -n "$id" ] || continue
+            echo "deleting run $id"
+            gh run delete "$id" -R "$REPO" || echo "  (skip $id)"
+          done
+
+          echo "remaining:"
+          gh run list -R "$REPO" --limit 5
