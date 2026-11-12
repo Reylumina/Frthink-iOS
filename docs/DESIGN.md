@@ -35,15 +35,15 @@
 
 ### 1.3 材质
 
-Apple HIG 的规则是内容层不用 Liquid Glass。玻璃只属于导航和控件层：标签栏、工具栏、浮起的输入条、浮层。
+Apple HIG 的规则是内容层不用 Liquid Glass。玻璃只属于导航和系统控件层：标签栏、工具栏、浮层。iOS 26 起 Tab 栏本身已是浮起玻璃，底部输入条不要再叠一层玻璃，否则会出现两条浮起的 Dock。
 
 | 层 | 用什么 |
 |---|---|
 | 导航和工具 | 系统默认，必要时 `.glassEffect` |
-| 浮起的输入条 | `.glassEffect(.regular)` |
+| 底部输入条 | 系统 `.bar` 材质，贴在 Tab 栏上方；内层只放一个圆角输入框 |
 | 内容：气泡、卡片、正文 | 普通表面 + 细描边 + 轻投影；不用玻璃，也不用装饰性渐变 |
 
-多个玻璃元素相邻时需置于 `GlassEffectContainer` 中，单个无需。内容层不加玻璃。`glassEffect` 只在 iOS 26 及以上生效，低版本由 `glassSurface(radius:)` 修饰符回落 `.regularMaterial`，不手绘玻璃背景。
+多个玻璃元素相邻时需置于 `GlassEffectContainer` 中，单个无需。内容层不加玻璃。`glassEffect` 只在 iOS 26 及以上生效，低版本由 `glassSurface(radius:)` 修饰符回落 `.regularMaterial`，不手绘玻璃背景。输入条不参与玻璃层，避免和系统 Tab 栏叠成双层。
 
 ### 1.4 层次与投影
 

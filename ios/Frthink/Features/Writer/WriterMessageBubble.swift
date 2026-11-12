@@ -80,7 +80,8 @@ struct WriterMessageBubble: View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: 48)
             MarkdownInline.text(message.content)
-                .font(Font.subheadline)
+                .font(Font.body)
+                .dynamicBodyFont(store.settings.bodyFontSize)
                 .foregroundStyle(.primary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)

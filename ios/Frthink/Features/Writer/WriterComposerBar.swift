@@ -66,11 +66,14 @@ struct WriterComposerBar: View {
                 .accessibilityLabel("发送")
             }
         }
-        .padding(Theme.Spacing.s)
-        .glassSurface(radius: Theme.Radius.sheet)
         .padding(.horizontal, Theme.Spacing.m)
-        .padding(.top, Theme.Spacing.s)
-        .padding(.bottom, Theme.Spacing.s)
+        .padding(.vertical, Theme.Spacing.s)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Theme.separator.opacity(0.6))
+                .frame(height: 0.5)
+        }
         .onAppear {
             if autoFocus {
                 focused = true
@@ -95,9 +98,20 @@ struct WriterComposerBar: View {
             .font(Font.body)
             .lineLimit(1...5)
             .focused($focused)
-            .padding(.horizontal, Theme.Spacing.xs)
+            .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s + 2)
-            .frame(minHeight: 44)
+            .background(Theme.card)
+            .clipShape(RoundedRectangle(
+                cornerRadius: Theme.Radius.large,
+                style: .continuous
+            ))
+            .overlay(
+                RoundedRectangle(
+                    cornerRadius: Theme.Radius.large,
+                    style: .continuous
+                )
+                .strokeBorder(Theme.separator, lineWidth: 0.5)
+            )
     }
 
     /// 草稿只在收键盘/离开页面时落盘。

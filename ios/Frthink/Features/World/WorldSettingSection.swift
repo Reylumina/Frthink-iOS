@@ -10,6 +10,8 @@ struct WorldSettingSection: View {
     var isActionDisabled: Bool = false
     var onRefresh: () -> Void
     var onRefreshFull: () -> Void
+    /// 刷新中从概览行直接停止，不再另占一行状态条。
+    var onStop: () -> Void = {}
     /// 点资料计数直接切到对应分栏（人物卡/世界书/事件卡/规则）。
     var onOpenTab: (WorldTab) -> Void = { _ in }
 
@@ -38,40 +40,49 @@ struct WorldSettingSection: View {
 
     private var refreshSection: some View {
         Section {
-            Button {
-                showingRefreshOptions = true
-            } label: {
-                HStack(spacing: Theme.Spacing.s) {
-                    if isBusy {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(Font.footnote)
-                            .foregroundStyle(Theme.accent)
+            HStack(spacing: Theme.Spacing.s) {
+                Button {
+                    showingRefreshOptions = true
+                } label: {
+                    HStack(spacing: Theme.Spacing.s) {
+                        if isBusy {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(Font.footnote)
+                                .foregroundStyle(Theme.accent)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("刷新人物卡")
+                                .font(Font.body)
+                                .foregroundStyle(.primary)
+                            Text(refreshStatusLine)
+                                .font(Font.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer(minLength: Theme.Spacing.s)
+                        if !isBusy {
+                            Image(systemName: "chevron.down")
+                                .font(Font.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("刷新人物卡")
-                            .font(Font.body)
-                            .foregroundStyle(.primary)
-                        Text(refreshStatusLine)
-                            .font(Font.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: Theme.Spacing.s)
-                    if !isActionDisabled {
-                        Image(systemName: "chevron.down")
-                            .font(Font.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(isActionDisabled)
+                .accessibilityLabel("刷新人物卡")
+
+                if isBusy {
+                    Button("停止") { onStop() }
+                        .font(Font.footnote.weight(.semibold))
+                        .buttonStyle(.borderless)
+                        .frame(minWidth: 44, minHeight: 44)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(isActionDisabled)
-            .accessibilityLabel("刷新人物卡")
         } header: {
             AppSectionHeader(title: "人物卡整理")
         }
@@ -117,8 +128,6 @@ struct WorldSettingSection: View {
                 symbol: "list.bullet",
                 tab: .rules
             )
-        } header: {
-            AppSectionHeader(title: "这本书的资料")
         }
     }
 

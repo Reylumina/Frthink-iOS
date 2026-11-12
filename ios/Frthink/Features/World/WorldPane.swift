@@ -103,6 +103,7 @@ struct WorldPane: View {
                     isActionDisabled: busy != nil,
                     onRefresh: { startWorldRefresh(forceFull: false) },
                     onRefreshFull: { startWorldRefresh(forceFull: true) },
+                    onStop: { worldTask?.cancel() },
                     onOpenTab: { newTab in
                         withAnimation(.snappy(duration: 0.2)) { tab = newTab }
                     }
@@ -149,7 +150,10 @@ struct WorldPane: View {
     /// 有任务、有回执或能看原始响应时才占位；空闲时不预留空白行。
     @ViewBuilder
     private var statusArea: some View {
-        if busy != nil || statusMessage != nil || lastRawResponse != nil {
+        // 刷新人物卡时，概览行的副标题已经显示进度与停止；不再重复一条状态栏。
+        if isWorldRefreshing {
+            EmptyView()
+        } else if busy != nil || statusMessage != nil || lastRawResponse != nil {
             HStack(spacing: Theme.Spacing.s) {
                 statusIcon
                     .frame(width: 16)
