@@ -127,7 +127,7 @@ struct ManuscriptReaderSheet: View {
                 loadEarlier()
             }
             .font(Font.footnote.weight(.semibold))
-            .frame(minHeight: 36)
+            .frame(minHeight: Theme.Layout.controlHeight)
             .accessibilityHint("把更早的正文载入编辑器")
         }
         .padding(.horizontal, Theme.Spacing.l)

@@ -39,7 +39,7 @@ struct SettingsProjectArchiveSection: View {
                     Text(isPreparingExport ? "正在打包…" : "导出书项目")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .frame(minHeight: Theme.Layout.controlHeight)
             }
             .disabled(store.activeProjects.isEmpty || isPreparingExport)
 
@@ -52,7 +52,7 @@ struct SettingsProjectArchiveSection: View {
                     Text("导入书项目存档")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .frame(minHeight: Theme.Layout.controlHeight)
             }
             .fileImporter(
                 isPresented: $isImporting,
@@ -153,7 +153,7 @@ struct SettingsFullArchiveSection: View {
                     Text(isPreparingExport ? "正在打包…" : "导出全部书项目")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .frame(minHeight: Theme.Layout.controlHeight)
             }
             .disabled(store.projects.isEmpty || isPreparingExport)
 
@@ -166,7 +166,7 @@ struct SettingsFullArchiveSection: View {
                     Text("导入全量存档")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .frame(minHeight: Theme.Layout.controlHeight)
             }
             .fileImporter(
                 isPresented: $isImporting,

@@ -218,7 +218,7 @@ struct WorldCharacterEditor: View {
                 } label: {
                     Label("删除这条词条", systemImage: "trash")
                         .font(Font.footnote)
-                        .frame(minHeight: 36)
+                        .frame(minHeight: Theme.Layout.controlHeight)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
