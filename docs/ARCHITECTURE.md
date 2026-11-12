@@ -92,6 +92,8 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 
 每次请求把实际发出的消息存进 `requestSnapshots`，事后可还原模型当时看到的内容。快照只留最近 30 条，可以单条删除或清空，删除不影响下一次请求。
 
+世界块里，P07 仿写模板取 `world.styleTemplate`；P08 剧情梗概直接渲染事件卡（APK `L1/W2.java:480-484`），`world.plotOutline` 字符串只随存档往返，不参与提示词，也不再单独提供编辑入口。
+
 自动摘要在同一条流水线上多一步：上下文占用达到阈值时，用 P54 把未摘要的用户轮次并进长期规则，并记录 `sourceMessageKeys`。这一步只改长期规则，不删除对话消息。
 
 ### 4.6 错误模型

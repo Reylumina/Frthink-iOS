@@ -24,8 +24,10 @@ struct WorldBook: Codable {
     var corpus: [CorpusEntry]
     /// 本书自带的世界书词条（P10），只属于当前书项目。
     var worldbookEntries: [WorldbookEntry]
-    /// 剧情梗概原文。原版把它存成一段 Markdown（`snapshot.world.plotOutline`），
-    /// 不是事件卡数组；有它时提示词用原文，没有才回落到事件卡渲染。
+    /// 旧「剧情梗概」文本（`snapshot.world.plotOutline`），仅用于存档往返。
+    ///
+    /// APK 的 P08 实际渲染 `plotEvents`（事件卡，`L1/W2.java:480-484`），
+    /// 这段字符串在 APK 里没有任何读取点；iOS 不再把它注入提示词或单独展示。
     var plotOutline: String
     /// 人物关系摘要，原版 `world.relationships`，逐条是「甲 → 乙：关系」的文本。
     var relationships: [String]
