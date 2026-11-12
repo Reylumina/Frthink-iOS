@@ -59,6 +59,8 @@ final class ProjectSession {
     private var queuedSaveKind: SaveKind?
     /// 章节扫描的防抖任务。
     private var chapterScanTask: Task<Void, Never>?
+    /// 章节扫描的代号。后发起的扫描结果才允许写回，避免慢任务覆盖新书。
+    private var chapterScanGeneration = 0
     /// 防抖窗口。正文是边打边存的，2 秒足够合并连续输入，也给背景编码留出空档。
     private let debounceInterval: Duration = .seconds(2)
     /// 正文密文是否已解密进内存。打开书时只读 body.meta，编辑/阅读/请求时才置 true。
@@ -195,11 +197,16 @@ final class ProjectSession {
         guard let window = editorWindow else { return }
         let snapshot = window.text
         let windowStart = window.start
+        chapterScanGeneration &+= 1
+        let token = chapterScanGeneration
         Task { [weak self] in
             let scanned = await Task.detached(priority: .utility) {
                 ChapterScanner.scan(snapshot)
             }.value
-            guard let self, self.editorWindow?.text == snapshot else { return }
+            guard let self,
+                  self.chapterScanGeneration == token,
+                  self.editorWindow?.text == snapshot
+            else { return }
             let prefix = self.payload.chapters.filter { $0.location < windowStart }
             let shifted = scanned.map {
                 Chapter(title: $0.title, location: $0.location + windowStart)
@@ -273,14 +280,7 @@ final class ProjectSession {
         // 导入的书、旧版本落盘的 payload 可能没有章节索引（章节是派生数据）。
         // 这里补一次后台扫描：不占打开书的这一帧，扫完再刷新章节条。
         if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
-            let text = payload.manuscript
-            Task { [weak self] in
-                let scanned = await Task.detached(priority: .utility) {
-                    ChapterScanner.scan(text)
-                }.value
-                guard let self, self.payload.chapters.isEmpty else { return }
-                self.payload.chapters = scanned
-            }
+            scanChaptersIfNeeded(payload.manuscript)
         }
     }
 
@@ -305,14 +305,7 @@ final class ProjectSession {
         bodyLoaded = true
         manuscriptCharacterCount = text.count
         if payload.chapters.isEmpty, !text.isEmpty {
-            let snapshot = text
-            Task { [weak self] in
-                let scanned = await Task.detached(priority: .utility) {
-                    ChapterScanner.scan(snapshot)
-                }.value
-                guard let self, self.payload.chapters.isEmpty else { return }
-                self.payload.chapters = scanned
-            }
+            scanChaptersIfNeeded(text)
         }
     }
 
@@ -656,20 +649,70 @@ final class ProjectSession {
 
     /// 章节扫描的防抖任务。顺带把字数也算出来，界面不用再数全文。
     private func scheduleChapterScan() {
+        scanChapters(
+            source: payload.manuscript,
+            delay: .milliseconds(1500),
+            updatesCharacterCount: true,
+            savesBodyAfter: true
+        )
+    }
+
+    /// 旧书补索引：只在章节仍为空、正文没变时写回。结果同样受代号保护。
+    private func scanChaptersIfNeeded(
+        _ source: String,
+        updatesCharacterCount: Bool = false
+    ) {
+        guard payload.chapters.isEmpty, !source.isEmpty else { return }
+        chapterScanGeneration &+= 1
+        let token = chapterScanGeneration
+        let snapshot = source
+        Task { [weak self] in
+            let scanned = await Task.detached(priority: .utility) {
+                ChapterScanner.scan(snapshot)
+            }.value
+            guard let self,
+                  self.chapterScanGeneration == token,
+                  self.payload.chapters.isEmpty,
+                  self.payload.manuscript == snapshot
+            else { return }
+            self.payload.chapters = scanned
+            if updatesCharacterCount {
+                self.manuscriptCharacterCount = snapshot.count
+            }
+        }
+    }
+
+    /// 后台扫描并写回章节；`savesBodyAfter` 用于正文编辑防抖（章节存在 body.meta）。
+    private func scanChapters(
+        source: String,
+        delay: Duration,
+        updatesCharacterCount: Bool,
+        savesBodyAfter: Bool
+    ) {
         chapterScanTask?.cancel()
-        let snapshot = payload.manuscript
+        chapterScanGeneration &+= 1
+        let token = chapterScanGeneration
+        let snapshot = source
         chapterScanTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard !Task.isCancelled else { return }
-            // 纯计算，放到后台，别占主线程。
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled else { return }
+            }
             let result = await Task.detached(priority: .utility) {
                 (ChapterScanner.scan(snapshot), snapshot.count)
             }.value
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled,
+                  let self,
+                  self.chapterScanGeneration == token,
+                  self.payload.manuscript == snapshot
+            else { return }
             self.payload.chapters = result.0
-            self.manuscriptCharacterCount = result.1
-            // 章节索引也在正文文件里，扫完补一次正文保存。
-            self.scheduleBodySave()
+            if updatesCharacterCount {
+                self.manuscriptCharacterCount = result.1
+            }
+            if savesBodyAfter {
+                self.scheduleBodySave()
+            }
         }
     }
 
@@ -810,15 +853,7 @@ final class ProjectSession {
         // 章节已经扫过就不再整本重扫：56 万字的正则扫描放在每次进入写作台
         // 的 onAppear 里，代价太大，而结果本来也会被 `isEmpty` 丢掉。
         guard payload.chapters.isEmpty else { return }
-        let snapshot = payload.manuscript
-        Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                (snapshot.count, ChapterScanner.scan(snapshot))
-            }.value
-            guard let self, self.payload.manuscript == snapshot else { return }
-            self.manuscriptCharacterCount = result.0
-            self.payload.chapters = result.1
-        }
+        scanChaptersIfNeeded(payload.manuscript, updatesCharacterCount: true)
     }
 
     /// 覆盖导入后，把内存态整体换成磁盘上的新内容。
@@ -831,6 +866,7 @@ final class ProjectSession {
         saveTask = nil
         chapterScanTask?.cancel()
         chapterScanTask = nil
+        chapterScanGeneration &+= 1
         saveInFlight = false
         savesQuiesced = false
         resumeSaveWaiters()
@@ -864,15 +900,12 @@ final class ProjectSession {
 
     /// 插入/撤销/导入后的章节重扫：放后台，别占用户操作这一帧。
     private func rescanChapters() {
-        let snapshot = payload.manuscript
-        Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                (ChapterScanner.scan(snapshot), snapshot.count)
-            }.value
-            guard let self, self.payload.manuscript == snapshot else { return }
-            self.payload.chapters = result.0
-            self.manuscriptCharacterCount = result.1
-        }
+        scanChapters(
+            source: payload.manuscript,
+            delay: .zero,
+            updatesCharacterCount: true,
+            savesBodyAfter: false
+        )
     }
 
     /// 设置/取消续写锚点（原版「放置续写锚」）。
