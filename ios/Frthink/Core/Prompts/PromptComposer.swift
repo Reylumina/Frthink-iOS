@@ -394,11 +394,11 @@ extension PromptAssembly {
         // 6 · 本书仿写模板（P07）
         assembly.imitationTemplate = world.styleTemplate
 
-        // 7 · 剧情梗概（P08）。原版 `U2.java:719` 始终用事件卡渲染
-        // （`plotEvents`），没有事件时才回落到手写的梗概文本。
-        assembly.plotOutline = world.events.isEmpty
-            ? world.plotOutline
-            : PromptComposer.renderEvents(world.events)
+        // 7 · 剧情梗概（P08）。原版直接渲染事件卡列表
+        // （`L1/W2.java:480-484` + `L1/C0604u0.java:78-102`），
+        // 数据模型里的 `plotOutline` 字符串在 APK 中没有任何读取点，
+        // 这里不再拿它兜底；没有事件卡就不发这一块。
+        assembly.plotOutline = PromptComposer.renderEvents(world.events)
 
         // 8 · 语料条目（P09）：每个启用库最多 10 条。
         // 全局「语料收集库」开关关掉时一律不注入——总开关的语义就是「本次写作不用语料」。

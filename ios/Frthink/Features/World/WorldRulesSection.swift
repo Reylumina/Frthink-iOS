@@ -1,15 +1,18 @@
-// 「模板与规则」分栏：剧情梗概、文风笔记、仿写模板、长期写作规则。
+// 「模板与规则」分栏：文风笔记、仿写模板、长期写作规则。
 //
 // 主列表只做概览（一句预览 + 字数）和模型更新入口；正文进推入页编辑，
 // 长文编辑不再打包在 sheet 里。更新动作跟着正文分栏走，用户不用先点进
 // 编辑器再找按钮。
+//
+// 剧情梗概不在这一栏：APK 的写作提示词直接渲染「事件」分栏里的
+// `plotEvents`（`L1/W2.java:480-484`）；数据模型里的 `plotOutline`
+// 字符串是死字段，不再单独暴露一个编辑入口，避免两处都能改。
 
 import SwiftUI
 import Foundation
 
-/// 模板与规则的四个文本字段。主列表和编辑器共用这份枚举，避免两边写串。
+/// 模板与规则的三个文本字段。主列表和编辑器共用这份枚举，避免两边写串。
 enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
-    case plotOutline
     case styleNotes
     case styleTemplate
     case longTermRules
@@ -18,7 +21,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .plotOutline: return "剧情梗概"
         case .styleNotes: return "文风笔记"
         case .styleTemplate: return "仿写模板"
         case .longTermRules: return "长期写作规则"
@@ -27,7 +29,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
-        case .plotOutline: return "text.alignleft"
         case .styleNotes: return "text.magnifyingglass"
         case .styleTemplate: return "doc.text"
         case .longTermRules: return "list.bullet"
@@ -36,8 +37,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
 
     var placeholder: String {
         switch self {
-        case .plotOutline:
-            return "按事件顺序记录起因、关键发展、结果与后续影响"
         case .styleNotes:
             return "每行一条可迁移的写法规则"
         case .styleTemplate:
@@ -49,7 +48,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
 
     func text(in world: WorldBook) -> String {
         switch self {
-        case .plotOutline: return world.plotOutline
         case .styleNotes: return world.styleNotes
         case .styleTemplate: return world.styleTemplate
         case .longTermRules: return world.longTermRules
@@ -60,11 +58,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .styleNotes:
             return "\(WorldRuleTextKind.lineCount(of: world.styleNotes)) 行"
-        case .plotOutline:
-            if !world.events.isEmpty { return "由事件卡渲染" }
-            let count = world.plotOutline
-                .trimmingCharacters(in: .whitespacesAndNewlines).count
-            return count == 0 ? "未建立" : "\(count) 字"
         case .styleTemplate, .longTermRules:
             let count = text(in: world)
                 .trimmingCharacters(in: .whitespacesAndNewlines).count
@@ -90,10 +83,9 @@ struct WorldRulesSection: View {
 
     @State private var editing: WorldRuleTextKind?
 
-    /// 四个文本字段的快照；只在真正变化时触发一次保存。
+    /// 三个文本字段的快照；只在真正变化时触发一次保存。
     private var ruleTexts: [String] {
         [
-            session.payload.world.plotOutline,
             session.payload.world.styleNotes,
             session.payload.world.styleTemplate,
             session.payload.world.longTermRules,
@@ -225,15 +217,6 @@ private struct WorldRuleEditorPage: View {
             )
             .padding(Theme.Spacing.l)
 
-            if kind == .plotOutline, !session.payload.world.events.isEmpty {
-                AppStatusLine(
-                    kind: .info,
-                    text: "已有 \(session.payload.world.events.count) 张事件卡；写作提示词由事件卡渲染，本页文本仅在无事件卡时生效。"
-                )
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.bottom, Theme.Spacing.s)
-            }
-
             if kind == .styleNotes {
                 mergeBar
             }
@@ -269,8 +252,6 @@ private struct WorldRuleEditorPage: View {
         // 拿打开时的旧草稿回写会把新结果覆盖掉。
         guard draft != baseline else { return }
         switch kind {
-        case .plotOutline:
-            session.payload.world.plotOutline = draft
         case .styleNotes:
             session.payload.world.styleNotes = draft
         case .styleTemplate:

@@ -1413,6 +1413,18 @@ enum SelfCheck {
         check("writer.promptAssembly") {
             var settings = AppSettings()
             settings.globalPreset = "全局预设"
+            var world = WorldBook()
+            world.plotOutline = "旧梗概不应进提示词"
+            world.events = [
+                EventCard(
+                    title: "雨夜来客",
+                    scene: "旧书店",
+                    characters: ["林昭"],
+                    cause: "找书",
+                    development: "陌生人进门",
+                    consequence: "答应第二天帮忙"
+                )
+            ]
             let manuscript = "开头标记" + String(repeating: "甲", count: 6_000) + "末尾片段"
             var snapshot = WriterPromptSnapshot(
                 action: .send(instruction: "写到雨停"),
@@ -1421,7 +1433,7 @@ enum SelfCheck {
                     ChatMessage(role: .user, content: "上一轮"),
                     ChatMessage(role: .assistant, content: "上一段回复"),
                 ],
-                world: WorldBook(),
+                world: world,
                 assistantSupplement: "",
                 settings: settings,
                 projectID: "writer-check",
@@ -1447,6 +1459,19 @@ enum SelfCheck {
             let system = prepared.messages.first?.content ?? ""
             try expect(system.contains("末尾片段"), "正文末尾片段没有进请求")
             try expect(!system.contains("开头标记"), "只发末尾时仍带了正文开头")
+            try expect(system.contains("雨夜来客"), "事件卡没有渲染进剧情梗概块")
+            try expect(
+                !system.contains("旧梗概不应进提示词"),
+                "剧情梗概块错误地使用了 plotOutline 死字段"
+            )
+
+            // 没有事件卡时 P08 整块不出现，也不回落到 plotOutline。
+            snapshot.world.events = []
+            let withoutEvents = WriterPromptBuilder.prepare(snapshot)
+            try expect(
+                !withoutEvents.sourceIds.contains("world:plot-outline"),
+                "没有事件卡时仍生成了剧情梗概块"
+            )
 
             snapshot.action = .continueWriting
             let continuation = WriterPromptBuilder.prepare(snapshot)

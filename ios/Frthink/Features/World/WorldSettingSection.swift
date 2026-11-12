@@ -100,12 +100,6 @@ struct WorldSettingSection: View {
                 tab: .events
             )
             materialRow(
-                "剧情梗概",
-                value: plotOutlineValue,
-                symbol: "text.alignleft",
-                tab: .rules
-            )
-            materialRow(
                 "文风笔记",
                 value: "\(WorldRuleTextKind.lineCount(of: session.payload.world.styleNotes)) 行",
                 symbol: "text.magnifyingglass",
@@ -126,14 +120,6 @@ struct WorldSettingSection: View {
         } header: {
             AppSectionHeader(title: "这本书的资料")
         }
-    }
-
-    private var plotOutlineValue: String {
-        let world = session.payload.world
-        let empty = world.plotOutline
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if !empty { return "已建立" }
-        return world.events.isEmpty ? "未建立" : "由事件卡渲染"
     }
 
     private var styleTemplateValue: String {
