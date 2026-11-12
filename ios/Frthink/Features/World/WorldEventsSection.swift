@@ -69,6 +69,8 @@ struct WorldEventsSection: View {
                         .font(Font.footnote)
                         .foregroundStyle(.tertiary)
                 }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索")
             }

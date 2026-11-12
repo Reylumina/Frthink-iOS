@@ -124,7 +124,7 @@ struct LibraryProjectRow: View {
                 Image(systemName: "ellipsis")
                     .font(Font.body.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 44)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("管理「\(project.shelfTitle)」")

@@ -127,6 +127,8 @@ struct WorldCharactersSection: View {
                         .font(Font.footnote)
                         .foregroundStyle(.tertiary)
                 }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索")
             }
@@ -199,7 +201,7 @@ struct WorldCharactersSection: View {
                     .font(Font.footnote)
             }
             .foregroundStyle(isActionDisabled ? Color.secondary : Theme.accent)
-            .frame(minHeight: 32)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .disabled(isActionDisabled)
@@ -235,7 +237,7 @@ struct WorldCharactersSection: View {
             }
             .font(Font.footnote)
             .foregroundStyle(.secondary)
-            .frame(minHeight: 32)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("分组筛选")

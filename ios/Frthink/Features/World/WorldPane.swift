@@ -188,7 +188,7 @@ struct WorldPane: View {
                         }
                         .font(Font.footnote.weight(.semibold))
                         .buttonStyle(.borderless)
-                        .frame(minHeight: 32)
+                        .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     } else if statusMessage != nil {
                         Button {
@@ -197,7 +197,7 @@ struct WorldPane: View {
                             Image(systemName: "xmark")
                                 .font(Font.caption.weight(.semibold))
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 32, height: 32)
+                                .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.borderless)
