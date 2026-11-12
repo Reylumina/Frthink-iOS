@@ -75,7 +75,11 @@ jobs:
               -seedDemo -initialTab 创作 -mockStream -mockAutoSend \
               > "logs/stream-$i.log" 2>&1 &
             LAUNCH_PID=$!
-            sleep 14
+            # 启动慢时 14 秒不够；最多等 30 秒，完成标记到了再截图。
+            for _ in $(seq 1 30); do
+              if grep -q "MOCK STREAM DONE" "logs/stream-$i.log"; then break; fi
+              sleep 1
+            done
             xcrun simctl io "$DEVICE" screenshot "screenshots/stream-$i.png"
             xcrun simctl terminate "$DEVICE" com.frthink.app || true
             wait "$LAUNCH_PID" || true
