@@ -383,7 +383,11 @@ struct WriterPane: View {
     private var chatList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                // 用 VStack 而不是 LazyVStack：整列已经按 `visibleMessageCount`
+                // 截过，行数有上限；流式那一行可能有上万字，LazyVStack 的估算
+                // 行高 + `scrollTo` 会在结束时落到内容之外，正文区留一整屏空白
+                // （Stream Check 的第 2 次连跑复现）。全量测量后偏移是精确值。
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     if session.payload.messages.count > visibleMessageCount {
                         Button("加载更早的对话") {
                             visibleMessageCount += 30
