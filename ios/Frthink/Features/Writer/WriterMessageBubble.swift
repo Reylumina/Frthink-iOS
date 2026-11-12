@@ -269,7 +269,7 @@ struct WriterMessageBubble: View {
 }
 
 /// 流式生成中的气泡，只订阅控制器里的实时文本。
-/// 码字机的身份标记：渐变圆点 + 名字，完成与流式气泡共用。
+/// 码字机的身份标记：圆点 + 名字，完成与流式气泡共用。
 struct WriterAssistantBadge: View {
     var body: some View {
         HStack(spacing: 6) {

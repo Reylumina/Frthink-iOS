@@ -1484,6 +1484,55 @@ enum SelfCheck {
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 
+        // 世界刷新契约：APK 的刷新按钮传 z6=false，不追加 P24/P26 增量句，
+        // 也不再生成 P31 只读基线；旧卡只走 P30 随请求带上。
+        check("world.refreshContract") {
+            let cards = [CharacterCard(name: "林昭")]
+            let normal = PromptComposer.worldRefreshMessages(
+                existingCharacters: cards,
+                existingStyleTemplate: "旧模板",
+                digest: "雨夜正文",
+                incremental: false
+            )
+            let normalSystem = normal.first?.content ?? ""
+            let normalUser = normal.last?.content ?? ""
+            try expect(normalSystem.contains("林昭"), "非增量刷新丢了 P30 已有角色卡")
+            try expect(
+                !normalSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
+                "非增量刷新仍生成 P31 基线"
+            )
+            try expect(
+                !normalSystem.contains(PromptLibrary.incrementalCharacterClause),
+                "非增量刷新仍追加 P24 增量契约"
+            )
+            try expect(
+                !normalUser.contains("只返回正文中此前没有的新事实"),
+                "非增量刷新的 user 指令仍走 P28 增量口径"
+            )
+
+            let incremental = PromptComposer.worldRefreshMessages(
+                existingCharacters: cards,
+                existingStyleTemplate: "旧模板",
+                digest: "雨夜正文",
+                incremental: true
+            )
+            let incrementalSystem = incremental.first?.content ?? ""
+            let incrementalUser = incremental.last?.content ?? ""
+            try expect(
+                incrementalSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
+                "增量刷新没有生成 P31 基线"
+            )
+            try expect(
+                incrementalSystem.contains(PromptLibrary.incrementalCharacterClause),
+                "增量刷新没有追加 P24"
+            )
+            try expect(
+                incrementalUser.contains("只返回正文中此前没有的新事实"),
+                "增量刷新的 user 指令没有走 P28"
+            )
+            return "非增量 / 增量契约分流 ok"
+        }
+
         // 提示词回看：大快照按 token 总量封顶，小快照仍按 30 条封顶
         check("writer.snapshotBudget") {
             let root = FileManager.default.temporaryDirectory
