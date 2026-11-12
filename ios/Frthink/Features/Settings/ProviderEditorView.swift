@@ -240,6 +240,17 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
 
+            // 关闭思考时要不要额外发一个「别推理」的字段。默认不发，和原版一致；
+            // 服务端默认开推理（OpenCode 这类）时才需要挑一种。
+            if draft.effectiveThinkingLevel == .off, !draft.isDeepSeek {
+                Picker("关闭思考时发送", selection: reasoningOffBinding) {
+                    ForEach(ReasoningOffStyle.allCases) { style in
+                        Text(style.displayName).tag(style)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 HStack {
                     Text("温度")
@@ -264,6 +275,13 @@ struct ProviderEditorView: View {
                 draft.thinkingLevel = level
                 draft.thinking = level != .off
             }
+        )
+    }
+
+    private var reasoningOffBinding: Binding<ReasoningOffStyle> {
+        Binding(
+            get: { draft.effectiveReasoningOffStyle },
+            set: { draft.reasoningOffStyle = $0 }
         )
     }
 

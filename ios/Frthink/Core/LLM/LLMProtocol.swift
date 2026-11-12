@@ -57,7 +57,8 @@ struct LLMRequest {
     func jsonBody(
         isDeepSeek: Bool,
         kind: ProviderKind,
-        providerLevel: ThinkingLevel
+        providerLevel: ThinkingLevel,
+        offStyle: ReasoningOffStyle = .none
     ) -> Data {
         var body: [String: Any] = [
             "model": model,
@@ -73,6 +74,17 @@ struct LLMRequest {
         if level == .off {
             if isDeepSeek {
                 body["thinking"] = ["type": "disabled"]
+            } else {
+                // 关闭思考默认什么都不发（原版行为）；用户按供应方挑了字段才追加，
+                // 否则默认开推理的服务端根本关不掉。
+                switch offStyle {
+                case .none:
+                    break
+                case .reasoningDisabled:
+                    body["reasoning"] = ["enabled": false]
+                case .enableThinkingFalse:
+                    body["enable_thinking"] = false
+                }
             }
             body["temperature"] = temperature
         } else {

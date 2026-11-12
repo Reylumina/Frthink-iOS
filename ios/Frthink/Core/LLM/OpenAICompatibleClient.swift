@@ -96,7 +96,12 @@ final class OpenAICompatibleClient: LLMClient {
                     req.stream = true
                     let urlRequest = try makeRequest(
                         path: "/chat/completions",
-                        body: req.jsonBody(isDeepSeek: provider.isDeepSeek, kind: provider.kind, providerLevel: provider.effectiveThinkingLevel),
+                        body: req.jsonBody(
+                            isDeepSeek: provider.isDeepSeek,
+                            kind: provider.kind,
+                            providerLevel: provider.effectiveThinkingLevel,
+                            offStyle: provider.effectiveReasoningOffStyle
+                        ),
                         accept: "text/event-stream",
                         attemptId: req.attemptId
                     )
@@ -274,7 +279,8 @@ final class OpenAICompatibleClient: LLMClient {
             body: req.jsonBody(
                 isDeepSeek: provider.isDeepSeek,
                 kind: provider.kind,
-                providerLevel: provider.effectiveThinkingLevel
+                providerLevel: provider.effectiveThinkingLevel,
+                offStyle: provider.effectiveReasoningOffStyle
             )
         )
         let (data, _) = try await send(urlRequest)

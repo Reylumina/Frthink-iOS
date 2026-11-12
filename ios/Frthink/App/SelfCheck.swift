@@ -1019,11 +1019,17 @@ enum SelfCheck {
         check("llm.thinkingLevel") {
             let base = LLMRequest(model: "m", messages: [.user("hi")], stream: false)
 
-            func body(_ request: LLMRequest, kind: ProviderKind, level: ThinkingLevel) throws -> [String: Any] {
+            func body(
+                _ request: LLMRequest,
+                kind: ProviderKind,
+                level: ThinkingLevel,
+                offStyle: ReasoningOffStyle = .none
+            ) throws -> [String: Any] {
                 let data = request.jsonBody(
                     isDeepSeek: kind == .deepseek,
                     kind: kind,
-                    providerLevel: level
+                    providerLevel: level,
+                    offStyle: offStyle
                 )
                 return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
             }
@@ -1066,7 +1072,26 @@ enum SelfCheck {
             try expect(structured["reasoning_effort"] == nil,
                        "关闭 thinking 后不应再发 reasoning_effort")
 
-            return "off/deep/router/compat/explicit-close ok"
+            // 关闭思考时按供应方选的字段：默认不发，选了才追加。
+            let quiet = try body(base, kind: .openAICompatible, level: .off)
+            try expect(quiet["reasoning"] == nil && quiet["enable_thinking"] == nil,
+                       "默认关闭思考不应追加任何字段")
+
+            let routerOff = try body(
+                base, kind: .openRouter, level: .off, offStyle: .reasoningDisabled
+            )
+            try expect((routerOff["reasoning"] as? [String: Bool])?["enabled"] == false,
+                       "选了 reasoning.enabled=false 时应发该字段")
+
+            let localOff = try body(
+                base, kind: .openAICompatible, level: .off, offStyle: .enableThinkingFalse
+            )
+            try expect(localOff["enable_thinking"] as? Bool == false,
+                       "选了 enable_thinking=false 时应发该字段")
+            try expect(routerOff["reasoning_effort"] == nil,
+                       "关闭思考后不应再发 reasoning_effort")
+
+            return "off/deep/router/compat/explicit-close/offStyle ok"
         }
 
         // 200 流里的 error 块不能被静默丢弃

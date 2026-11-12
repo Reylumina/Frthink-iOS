@@ -93,6 +93,30 @@ enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// 「关闭思考」时怎么要求服务端别推理。
+///
+/// 原版请求体只有 7 个键，关闭思考就是「什么都不发」。可 OpenAI 兼容的服务
+/// 常常默认开推理，不发就等于关不掉（OpenCode 这类）。这里给一个按供应方
+/// 选择的开关位：默认仍是不发，和原版一致；需要时再让用户显式挑一种字段。
+enum ReasoningOffStyle: String, Codable, CaseIterable, Identifiable, Hashable {
+    /// 不发任何字段（原版行为）。
+    case none
+    /// OpenAI 兼容 / OpenRouter 一族：`reasoning: {"enabled": false}`。
+    case reasoningDisabled
+    /// vLLM、Qwen 这类本地/自建服务：`enable_thinking: false`。
+    case enableThinkingFalse
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: return "不发送（默认）"
+        case .reasoningDisabled: return "reasoning.enabled = false"
+        case .enableThinkingFalse: return "enable_thinking = false"
+        }
+    }
+}
+
 /// 单个供应方的配置。API Key 不进这个结构，单独存 Keychain。
 struct ProviderSetting: Identifiable, Codable, Hashable {
     var id: String
@@ -107,6 +131,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
     var thinking: Bool?
     /// 思考档位；nil 时回落到旧版 `thinking`。
     var thinkingLevel: ThinkingLevel?
+    /// 关闭思考时发什么字段；nil 等同 `.none`（原版行为）。
+    var reasoningOffStyle: ReasoningOffStyle?
 
     init(
         id: String = UUID().uuidString,
@@ -118,7 +144,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         stream: Bool = true,
         enabled: Bool = true,
         thinking: Bool? = nil,
-        thinkingLevel: ThinkingLevel? = nil
+        thinkingLevel: ThinkingLevel? = nil,
+        reasoningOffStyle: ReasoningOffStyle? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -130,11 +157,17 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.enabled = enabled
         self.thinking = thinking
         self.thinkingLevel = thinkingLevel
+        self.reasoningOffStyle = reasoningOffStyle
     }
 
     var effectiveThinkingLevel: ThinkingLevel {
         if let thinkingLevel { return thinkingLevel }
         return thinking == true ? .high : .off
+    }
+
+    /// 关闭思考时实际要发的字段形态。
+    var effectiveReasoningOffStyle: ReasoningOffStyle {
+        reasoningOffStyle ?? .none
     }
 
     var baseURLForDisplay: String {
