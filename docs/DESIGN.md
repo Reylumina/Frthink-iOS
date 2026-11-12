@@ -2,7 +2,9 @@
 
 `ARCHITECTURE.md` 说明技术架构，本页规定视觉表现、交互依据和文案规则。修改界面前需阅读本页，完成后按第 9 节检查。
 
-依据是 Apple HIG 和 iOS 26 的 Liquid Glass 三条原则：内容优先、形状随硬件、一套系统。
+依据是 Apple HIG 和 iOS 26.2 的 Liquid Glass 三条原则：内容优先、形状随硬件、一套系统。
+
+设计、交互和 SwiftUI 写法以 **iOS 26.2** 为基线；CI 用 Xcode 26.3 + `iPhoneSimulator26.2.sdk` 构建。最低运行版本仍是 iOS 17.0：26 及以上走 Liquid Glass，17–25 通过 `#available(iOS 26.0, *)` 回落到系统材质，两档共用本页的层级、间距与触控规则。
 
 ## 1. 颜色
 
@@ -41,7 +43,7 @@ Apple HIG 的规则是内容层不用 Liquid Glass。玻璃只属于导航和控
 | 浮起的输入条 | `.glassEffect(.regular)` |
 | 内容：气泡、卡片、正文 | 普通表面加描边，不用玻璃 |
 
-多个玻璃元素相邻时需置于 `GlassEffectContainer` 中，单个无需。内容层不加玻璃。
+多个玻璃元素相邻时需置于 `GlassEffectContainer` 中，单个无需。内容层不加玻璃。`glassEffect` 只在 iOS 26 及以上生效，低版本由 `glassSurface(radius:)` 修饰符回落 `.regularMaterial`，不手绘玻璃背景。
 
 ## 2. 字体
 
