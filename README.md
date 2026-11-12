@@ -32,6 +32,7 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | 项目 | 版本 |
 |---|---|
 | 最低系统 | iOS 17.0 |
+| 构建 SDK | iOS 26（CI 用 latest-stable Xcode；Liquid Glass 通过 `#available(iOS 26.0, *)` 判断，17–25 回落材质） |
 | 构建环境 | Xcode 26，Swift 5 语言模式 |
 | 第三方依赖 | 无 |
 

@@ -14,9 +14,6 @@ enum Theme {
     /// 次级表面。
     static let surfaceSecondary = Color(uiColor: .secondarySystemBackground)
 
-    /// 三级表面：输入框、统计条。
-    static let surfaceTertiary = Color(uiColor: .tertiarySystemBackground)
-
     /// 内容页底：白/黑。
     static let pageBackgroundColor = Color(uiColor: .systemBackground)
 
@@ -36,9 +33,6 @@ enum Theme {
     /// 输入框、标签、次级容器。比卡片再深一点，用来区分「可点」和「只读」。
     static let field = Color(uiColor: .tertiarySystemFill)
 
-    /// 选中态填充。系统四级的填充最轻，配合系统 tint 的前景色正好。
-    static let selectionFill = Color(uiColor: .quaternarySystemFill)
-
     /// 分隔线用系统值，自动适配深浅色。
     static let separator = Color(uiColor: .separator)
 
@@ -46,14 +40,11 @@ enum Theme {
 
     /// 正文。系统字体，跟随 Dynamic Type。
     static let prose = Font.system(.body)
-    /// 大段正文（阅读页）。
-    static let proseLarge = Font.system(.title3)
     /// 助手回复。
     static let reply = Font.system(.callout)
 
     /// 标题。
     static let heading = Font.system(.title3).weight(.semibold)
-    static let headingLarge = Font.system(.title2).weight(.semibold)
 
     /// 界面文字。无衬线、系统字号。
     static let label = Font.body
@@ -61,7 +52,6 @@ enum Theme {
     static let labelSmall = Font.subheadline
     /// 元信息：时间、字数、条数。最小只到 `.caption`。
     static let metadata = Font.caption
-    static let metadataEmphasis = Font.caption.weight(.medium)
     /// 极小号只用于角标，且不再小于 `.caption2`。
     static let badge = Font.caption2.weight(.medium)
 
@@ -99,14 +89,8 @@ enum Theme {
 
     // MARK: - 动效
 
-    /// 常规状态切换。
-    static let motion = Animation.snappy(duration: 0.3)
-    /// 强调：内容出现、生成开始。
-    static let motionEmphasis = Animation.smooth(duration: 0.35)
     /// 选中、开关。
     static let motionSelection = Animation.snappy(duration: 0.2)
-    /// 数值滚动。
-    static let motionNumeric = Animation.smooth(duration: 0.4)
 }
 
 // MARK: - 容器
@@ -149,18 +133,6 @@ struct GlassSurfaceModifier: ViewModifier {
     }
 }
 
-struct CardContainer<Content: View>: View {
-    var padding: CGFloat = Theme.Spacing.l
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface()
-    }
-}
-
 /// 空状态。
 ///
 /// 只用图标 + 两行字。不画装饰圆、不加渐变、不放营销腔的文案。
@@ -186,25 +158,4 @@ struct EmptyStateView: View {
         }
     }
 }
-
-/// 元信息行：左标签右值，全局统一。
-struct MetadataRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(Theme.labelSmall)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: Theme.Spacing.s)
-            Text(value)
-                .font(Theme.numericSmall)
-                .foregroundStyle(.primary)
-        }
-    }
-}
-
-
-
 
