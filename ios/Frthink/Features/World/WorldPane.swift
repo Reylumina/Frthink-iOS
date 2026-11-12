@@ -120,7 +120,6 @@ struct WorldPane: View {
             case .characters:
                 WorldCharactersSection(
                     session: session,
-                    isRefreshing: isWorldRefreshing,
                     isActionDisabled: busy != nil,
                     onRefresh: { startWorldRefresh(forceFull: false) },
                     onRefreshFull: { startWorldRefresh(forceFull: true) }

@@ -18,7 +18,6 @@ enum WorldCharacterSort: Hashable {
 struct WorldCharactersSection: View {
     @Bindable var session: ProjectSession
     /// 人物卡由世界刷新流程写入；入口放在卡片列表上，不必回概览找。
-    var isRefreshing: Bool = false
     var isActionDisabled: Bool = false
     var onRefresh: (() -> Void)? = nil
     var onRefreshFull: (() -> Void)? = nil
