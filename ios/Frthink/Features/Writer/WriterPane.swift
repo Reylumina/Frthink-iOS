@@ -212,8 +212,6 @@ struct WriterPane: View {
                 guard let text = controller.consumeInstructionToRestore() else { return }
                 composer.text = text
             }
-        // 页内所有系统级撤销（摇一摇之外，iPad 的 ⌘Z 走环境里的这一份）共用同一个栈。
-        .environment(\.undoManager, undoManager)
         .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
         .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
         .toolbar {
