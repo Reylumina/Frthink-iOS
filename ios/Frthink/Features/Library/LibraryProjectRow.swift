@@ -15,20 +15,17 @@ struct LibraryContinueRow: View {
                     title: project.title,
                     seed: project.id
                 )
-                .frame(width: 64, height: 86)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .frame(width: 56, height: 74)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
                 )
-                .shadow(color: Theme.cardShadow, radius: 8, y: 4)
+                .shadow(color: Theme.cardShadow, radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("继续写作")
-                        .font(Font.caption.weight(.semibold))
-                        .foregroundStyle(Theme.accent)
                     Text(project.shelfTitle)
-                        .font(Font.title3.weight(.semibold))
+                        .font(Font.headline)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -39,23 +36,10 @@ struct LibraryContinueRow: View {
 
                 Spacer(minLength: Theme.Spacing.s)
 
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 38, height: 38)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5))
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(Theme.Spacing.l)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.sheet, style: .continuous)
-                    .fill(Theme.accentWash)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.sheet, style: .continuous)
-                    .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
-            )
-            .shadow(color: Theme.cardShadow, radius: 14, y: 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -36,14 +36,6 @@ enum Theme {
     /// 分隔线用系统值，自动适配深浅色。
     static let separator = Color(uiColor: .separator)
 
-    /// 强调色低饱和渐变。用于图标印章、继续写作卡等身份性表面，
-    /// 不做页面底，也不与语义状态色混用。
-    static let accentWash = LinearGradient(
-        colors: [Color.accentColor.opacity(0.20), Color.accentColor.opacity(0.05)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
     /// 卡片投影。浅色下给一点浮起感，深色下几乎不可见。
     static let cardShadow = Color.black.opacity(0.07)
 
@@ -107,7 +99,7 @@ enum Theme {
 // MARK: - 容器
 
 extension View {
-    /// 页面底：白/黑打底；分组页在顶部叠极淡的强调色，避免大片纯灰发死。
+    /// 页面底：白/黑打底。
     func pageBackground() -> some View {
         background(Theme.pageBackgroundColor.ignoresSafeArea())
     }
@@ -162,7 +154,7 @@ struct EmptyStateView: View {
                 .foregroundStyle(Theme.accent)
                 .frame(width: 64, height: 64)
                 .background(
-                    Theme.accentWash,
+                    Theme.accentSoft,
                     in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                 )
                 .overlay(

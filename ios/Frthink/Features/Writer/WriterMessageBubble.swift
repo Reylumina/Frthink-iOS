@@ -87,11 +87,7 @@ struct WriterMessageBubble: View {
                 .padding(.horizontal, Theme.Spacing.m + 2)
                 .padding(.vertical, Theme.Spacing.s + 3)
                 .background(
-                    LinearGradient(
-                        colors: [Theme.accent.opacity(0.18), Theme.accent.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
+                    Theme.accentSoft,
                     in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
                 )
                 .overlay(
@@ -112,7 +108,7 @@ struct WriterMessageBubble: View {
             .padding(.vertical, Theme.Spacing.m)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .fill(Theme.card.opacity(0.72))
+                    .fill(Theme.card)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
@@ -289,14 +285,7 @@ struct WriterAssistantBadge: View {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
-                .background(
-                    LinearGradient(
-                        colors: [Theme.accent, Theme.accent.opacity(0.65)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: Circle()
-                )
+                .background(Theme.accent, in: Circle())
             Text("码字机")
                 .font(Font.caption.weight(.semibold))
                 .foregroundStyle(.primary)
@@ -322,10 +311,14 @@ struct WriterStreamingBubble: View {
                     Text(statusText)
                         .font(Font.caption)
                         .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                     Spacer(minLength: 0)
                     Text("\(controller.streamingCharacterCount.formatted()) 字")
                         .font(Theme.numericSmall)
                         .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
 
                 if controller.streamingText.isEmpty {
@@ -373,11 +366,11 @@ struct WriterStreamingBubble: View {
             .padding(.vertical, Theme.Spacing.m)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .fill(Theme.card.opacity(0.72))
+                    .fill(Theme.card)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
+                    .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
