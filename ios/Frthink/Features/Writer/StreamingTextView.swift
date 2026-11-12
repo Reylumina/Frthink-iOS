@@ -118,7 +118,7 @@ struct StreamingTextView: UIViewRepresentable {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
-        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing
+        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing(size: fontSize)
         let normalized = WriterTypography.paragraphs(text).joined(separator: "\n")
         return NSAttributedString(
             string: normalized,

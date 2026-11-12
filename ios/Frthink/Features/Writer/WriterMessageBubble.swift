@@ -164,7 +164,7 @@ struct WriterMessageBubble: View {
                 Text("（空回复）")
                     .foregroundStyle(.tertiary)
             } else {
-                VStack(alignment: .leading, spacing: WriterTypography.paragraphSpacing) {
+                VStack(alignment: .leading, spacing: WriterTypography.paragraphSpacing(size: bodyFontSize)) {
                     ForEach(paragraphs.indices, id: \.self) { index in
                         MarkdownInline.text(paragraphs[index])
                     }

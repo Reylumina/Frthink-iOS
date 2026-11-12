@@ -140,7 +140,7 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 | 字号基数 | 外观设置的 `bodyFontSize`，默认 18pt，范围 13–28；经 `UIFontMetrics` 跟随 Dynamic Type，见 `Core/Design/DynamicTypeFont.swift` |
 | 阅读页字号 | 阅读设置单独可调，换算方式同上 |
 | 行高 | 默认 1.6 倍，换算统一走 `ReaderStyle.lineSpacing(size:lineHeight:)`；阅读页可调 1.2–2.0，其他正文场景固定 1.6 |
-| 段落 | 按原文换行分段，空行只当分隔符，不占行高。段距只能来自一处：`WriterTypography.paragraphSpacing`（12pt）或段落视图的间距，二者不叠加。不自动加首行缩进 |
+| 段落 | 按原文换行分段，空行只当分隔符，不占行高。段距只能来自一处：`WriterTypography.paragraphSpacing(size:)`（字号 × 0.9，默认字号约 16pt）或段落视图的间距，二者不叠加。不自动加首行缩进 |
 | 行宽 | 每行不超过 36 个汉字。正文栏最大宽度 = 字号 × 36，超出时居中，两侧留白（§5.3） |
 | 对齐 | 左对齐。SwiftUI `Text` 不支持两端对齐，需要时只能包 UIKit 并设 `NSParagraphStyle.alignment = .justified`，目前不做 |
 | 颜色 | `.primary`。阅读页的黑底模式不跟随系统深浅色，前景用 `ReaderStyle.ink(dark:)` |
@@ -260,7 +260,7 @@ HStack {
 - 不给文字写死 `.frame(width:height:)`，Dynamic Type 放大时会裁字。图标、封面、控件可以有固定尺寸，但要用 `@ScaledMetric`。
 - 可点目标的热区至少 44×44pt。图标按钮看起来可以小，热区用 `.frame(minWidth: 44, minHeight: 44)` 加 `.contentShape(Rectangle())` 扩大，不能只放大图标。
 - 同一行里的控件可见高度统一成 `Theme.Layout.controlHeight`（36pt）：搜索框、次要操作胶囊、圆形图标按钮。圆形按钮按 36pt 画圆，外面再包一层 44pt 的透明框，所以行高是 44、视觉是 36，三者对齐。
-- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。带图标印章的行用 `Theme.Layout.rowContentHeight`（28pt），实测从 66pt 收到 50pt，整行可点，热区够。行内边距仍交给系统（§3.1）。
+- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。带图标印章的行用 `Theme.Layout.rowContentHeight`（28pt），实测（1206×2622 模拟器截图）从 198px/行收到 143px/行，即 66pt → 47.7pt，整行可点，热区够。行内边距仍交给系统（§3.1）。
 - `controlHeight`、`inlineControl` 这些控件尺寸是基准值，视图里用 `@ScaledMetric(relativeTo: .body)` 读，随字号一起放大（§2.4）。
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
