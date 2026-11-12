@@ -1190,7 +1190,7 @@ enum SelfCheck {
         // 事件卡合并：同名只补字段、空标题跳过、别的事件新增，不能整表重写。
         check("world.mergeEvents") {
             let existing = [
-                EventCard(title: "雨夜来客", cause: "林昭找书", characters: ["林昭"])
+                EventCard(title: "雨夜来客", characters: ["林昭"], cause: "林昭找书")
             ]
             let result = WorldMerge.mergeEvents(
                 existing: existing,
