@@ -1187,6 +1187,37 @@ enum SelfCheck {
             return "换行追加 ok"
         }
 
+        // 事件卡合并：同名只补字段、空标题跳过、别的事件新增，不能整表重写。
+        check("world.mergeEvents") {
+            let existing = [
+                EventCard(title: "雨夜来客", cause: "林昭找书", characters: ["林昭"])
+            ]
+            let result = WorldMerge.mergeEvents(
+                existing: existing,
+                incoming: [
+                    EventCard(
+                        title: "雨夜来客",
+                        scene: "旧书店",
+                        characters: ["林昭", "沈默"],
+                        cause: "林昭找书。答应帮忙。"
+                    ),
+                    EventCard(title: "   "),
+                    EventCard(title: "次日清晨", scene: "码头"),
+                ]
+            )
+            try expect(result.cards.count == 2, "事件数不对：\(result.cards.count)")
+            try expect(result.added == 1, "新增数不对：\(result.added)")
+            try expect(result.updated == 1, "更新数不对：\(result.updated)")
+            try expect(result.skipped == 1, "空标题应跳过：\(result.skipped)")
+            let merged = result.cards[0]
+            try expect(merged.scene == "旧书店", "空场景没有补入")
+            try expect(merged.characters == ["林昭", "沈默"], "人物没有去重并入")
+            try expect(merged.cause.contains("答应帮忙"), "旧原因后没有追加新原因")
+            try expect(merged.cause.hasPrefix("林昭找书"), "旧原因被覆盖")
+            try expect(merged.id == existing[0].id, "同名事件换了 ID，列表会跳")
+            return "同名合并 / 空标题跳过 / 新事件保留 ok"
+        }
+
         // 宇宙条目：全局启用 + 本书勾选，缺一不可
         check("universe.enabledGate") {
             var settings = AppSettings()
