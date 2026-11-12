@@ -41,7 +41,6 @@ struct WriterComposerBar: View {
                     .font(Font.subheadline.weight(.medium))
                     .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
                     .frame(width: 44, height: 44)
-                    .background(Circle().fill(Theme.accentSoft))
             }
             .buttonStyle(.plain)
             .disabled(controller.isGenerating || controller.isPreparing)
@@ -96,20 +95,9 @@ struct WriterComposerBar: View {
             .font(Font.body)
             .lineLimit(1...5)
             .focused($focused)
-            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.horizontal, Theme.Spacing.xs)
             .padding(.vertical, Theme.Spacing.s + 2)
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(
-                cornerRadius: Theme.Radius.large,
-                style: .continuous
-            ))
-            .overlay(
-                RoundedRectangle(
-                    cornerRadius: Theme.Radius.large,
-                    style: .continuous
-                )
-                .strokeBorder(Theme.separator, lineWidth: 0.5)
-            )
+            .frame(minHeight: 44)
     }
 
     /// 草稿只在收键盘/离开页面时落盘。
