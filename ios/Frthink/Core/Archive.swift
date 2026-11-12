@@ -173,10 +173,18 @@ enum FrthinkArchive {
             translations = {
                 let iosShape =
                     (try? c.decode([TranslationSegment].self, forKey: .translations)) ?? []
-                if !iosShape.isEmpty { return iosShape }
+                if !iosShape.isEmpty {
+                    // iOS 自己的存档带 project；Android 的 TranslationRecord 没有
+                    // owner/project，按所属项目补齐，否则多本书会撞主键被判重复。
+                    return iosShape.map { segment in
+                        var stamped = segment
+                        if stamped.project.isEmpty { stamped.project = projectId }
+                        return stamped
+                    }
+                }
                 // Android 存档的 translations 是 TranslationRecord 列表
                 // （target/sourceHash/index/text/chunkHash），没有 owner/project；
-                // 解成 iOS 模型时先留空，由 restore 按本机 owner 重打归属。
+                // 解成 iOS 模型时按所属项目补 project，owner 留空由 restore 重打。
                 let androidShape =
                     (try? c.decode([ArchivedTranslationJSON].self, forKey: .translations)) ?? []
                 return androidShape.compactMap { raw in
@@ -188,7 +196,7 @@ enum FrthinkArchive {
                     else { return nil }
                     return TranslationSegment(
                         owner: "",
-                        project: "",
+                        project: projectId,
                         target: TranslationSegment.defaultTarget,
                         sourceHash: sourceHash,
                         segment: index,
@@ -995,6 +1003,7 @@ enum FrthinkArchive {
         var sourceHash: String
         var segment: Int
         var payload: String
+        var updatedAt: Date
         var index: Int
         var text: String
 
@@ -1006,6 +1015,7 @@ enum FrthinkArchive {
             self.sourceHash = segment.sourceHash
             self.segment = segment.segment
             self.payload = segment.payload
+            self.updatedAt = segment.updatedAt
             self.index = segment.segment
             self.text = segment.payload
         }
@@ -1385,7 +1395,7 @@ enum FrthinkArchive {
                         "title": $0.title,
                         "keywords": "",
                         "content": $0.body,
-                        "enabled": true,
+                        "enabled": $0.enabled,
                         "dynamic": false,
                     ]
                 }
@@ -1585,7 +1595,10 @@ enum FrthinkArchive {
                 }
                 if !mapped.isEmpty { settings.skills = mapped }
             }
-            if let worldbooks, !worldbooks.isEmpty {
+            if let worldbooks, !worldbooks.isEmpty, settings.universeEntries.isEmpty {
+                // 只有 iOS 形状没解出任何条目时才用 Android 映射：否则会把
+                // 用户自建的 .preset/.skill 宇宙条目覆盖掉，还会把停用的世界书
+                // 重新启用。iOS 自己的条目已经带 kind/enabled/updatedAt。
                 settings.universeEntries = worldbooks.compactMap { raw in
                     guard let title = raw.title, !title.isEmpty else { return nil }
                     return UniverseEntry(

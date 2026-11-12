@@ -158,6 +158,7 @@ struct WriterPane: View {
                 } label: {
                     Image(systemName: "doc.text")
                 }
+                .disabled(controller.isBusy)
                 .accessibilityLabel("正文")
 
                 Menu {
@@ -270,12 +271,14 @@ struct WriterPane: View {
         } label: {
             Label("导入正文…", systemImage: "square.and.arrow.down")
         }
+        .disabled(controller.isBusy)
         if !session.payload.bodyAppendReceipts.isEmpty {
             Button {
                 undoInsert()
             } label: {
                 Label("撤销上次插入", systemImage: "arrow.uturn.backward")
             }
+            .disabled(controller.isBusy)
         }
 
         Divider()
@@ -286,13 +289,14 @@ struct WriterPane: View {
             } label: {
                 Label("放置续写锚", systemImage: "bookmark")
             }
-            .disabled(cursorOffset < 0)
+            .disabled(controller.isBusy || cursorOffset < 0)
         } else {
             Button {
                 clearAnchor()
             } label: {
                 Label("取消续写锚点", systemImage: "bookmark.slash")
             }
+            .disabled(controller.isBusy)
         }
     }
 

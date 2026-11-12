@@ -546,6 +546,40 @@ enum SelfCheck {
             return "译文 / 共享世界书 / 分组 / 旧事件 ok"
         }
 
+        // Android 两份书都用 index 0 起排的 TranslationRecord；没有 project 字段，
+        // 导入时必须按所属项目补齐，否则会被判成重复译文整份失败。
+        check("archive.androidMultiBookTranslations") {
+            var payload = ArchiveFixture.payload()
+            var projects = payload["projects"] as? [[String: Any]] ?? []
+            for index in projects.indices {
+                projects[index]["translations"] = [
+                    [
+                        "target": "body",
+                        "sourceHash": "hash-\(index)",
+                        "index": 0,
+                        "text": "第 \(index) 本译文",
+                    ],
+                ]
+            }
+            payload["projects"] = projects
+            let data = try ArchiveFixture.envelope(payload: payload)
+            let archive = try FrthinkArchive.openAny(data)
+            guard case .full(let backup) = archive, backup.projects.count == 2 else {
+                throw Failure(message: "两份 Android 书应能一起导入")
+            }
+            for project in backup.projects {
+                try expect(
+                    project.translations.first?.project == project.projectId,
+                    "译文没有按所属项目补齐"
+                )
+                try expect(
+                    project.translations.first?.payload.hasPrefix("第 ") == true,
+                    "译文内容没有映射"
+                )
+            }
+            return "2 本书各自 index 0 译文不撞键"
+        }
+
         // Android 备份没有 providers 键：导入后必须保留本机供应方与外观偏好
         check("archive.fullRestoreKeepsLocalSettings") {
             var local = AppSettings(

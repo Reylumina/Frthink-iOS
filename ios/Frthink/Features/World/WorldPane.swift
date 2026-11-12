@@ -247,25 +247,40 @@ struct WorldPane: View {
         store.registerWorldTask(task, for: session.project.id)
     }
 
-    private func startWorldRefresh(forceFull: Bool) {
+    /// 四类世界任务共用的入口：占位、进度、取消文案、错误上屏收在一处。
+    private func startWorldTask(
+        kind: WorldBusy,
+        cancelled: String,
+        operation: @escaping @MainActor () async throws -> String
+    ) {
         guard busy == nil else {
             statusMessage = "当前任务还没结束，请稍候。"
             return
         }
-        busy = .refreshingWorld
-        progressText = "正在准备正文…"
+        busy = kind
+        progressText = ""
         statusMessage = nil
         startTrackedTask {
-            await self.runWorldRefresh(forceFull: forceFull)
+            do {
+                self.statusMessage = try await operation()
+            } catch is CancellationError {
+                self.statusMessage = cancelled
+            } catch {
+                self.handle(error)
+            }
+            self.busy = nil
+            self.progressText = ""
         }
     }
 
-    @MainActor
-    private func runWorldRefresh(forceFull: Bool) async {
-        do {
+    private func startWorldRefresh(forceFull: Bool) {
+        startWorldTask(
+            kind: .refreshingWorld,
+            cancelled: "已停止刷新；已完成的段已保留。"
+        ) {
             let outcome = try await WorldWorkflow.refreshWorld(
-                session: session,
-                store: store,
+                session: self.session,
+                store: self.store,
                 forceFull: forceFull,
                 progress: { current, total in
                     self.progressText = total > 1
@@ -273,107 +288,47 @@ struct WorldPane: View {
                         : "正在分析正文…"
                 }
             )
-            statusMessage = outcome.summary
-        } catch is CancellationError {
-            statusMessage = "已停止刷新；已完成的段已保留。"
-        } catch {
-            handle(error)
+            return outcome.summary
         }
-        busy = nil
-        progressText = ""
     }
-
-    // MARK: - 事件卡
 
     private func startEventExtraction() {
-        guard busy == nil else {
-            statusMessage = "当前任务还没结束，请稍候。"
-            return
-        }
-        busy = .extractingEvents
-        progressText = ""
-        statusMessage = nil
-        startTrackedTask {
-            await self.runEventExtraction()
-        }
-    }
-
-    @MainActor
-    private func runEventExtraction() async {
-        do {
+        startWorldTask(
+            kind: .extractingEvents,
+            cancelled: "已停止抽取；已完成的段已保留。"
+        ) {
             let outcome = try await WorldMaterialWorkflow.extractEvents(
-                session: session,
-                store: store
+                session: self.session,
+                store: self.store
             )
-            statusMessage = outcome.summary
-        } catch is CancellationError {
-            statusMessage = "已停止抽取；已完成的段已保留。"
-        } catch {
-            handle(error)
+            return outcome.summary
         }
-        busy = nil
     }
-
-    // MARK: - 文风笔记
 
     private func startStyleNoteExtraction() {
-        guard busy == nil else {
-            statusMessage = "当前任务还没结束，请稍候。"
-            return
-        }
-        busy = .extractingStyleNotes
-        progressText = ""
-        statusMessage = nil
-        startTrackedTask {
-            await self.runStyleNoteExtraction()
-        }
-    }
-
-    @MainActor
-    private func runStyleNoteExtraction() async {
-        do {
+        startWorldTask(
+            kind: .extractingStyleNotes,
+            cancelled: "已停止提炼；已完成的笔记已保留。"
+        ) {
             let outcome = try await WorldMaterialWorkflow.extractStyleNotes(
-                session: session,
-                store: store
+                session: self.session,
+                store: self.store
             )
-            statusMessage = outcome.summary
-        } catch is CancellationError {
-            statusMessage = "已停止提炼；已完成的笔记已保留。"
-        } catch {
-            handle(error)
+            return outcome.summary
         }
-        busy = nil
     }
-
-    // MARK: - 长期规则
 
     private func startLongTermRuleUpdate() {
-        guard busy == nil else {
-            statusMessage = "当前任务还没结束，请稍候。"
-            return
-        }
-        busy = .updatingRules
-        progressText = ""
-        statusMessage = nil
-        startTrackedTask {
-            await self.runLongTermRuleUpdate()
-        }
-    }
-
-    @MainActor
-    private func runLongTermRuleUpdate() async {
-        do {
+        startWorldTask(
+            kind: .updatingRules,
+            cancelled: "已停止更新长期规则。"
+        ) {
             let outcome = try await WorldRulesWorkflow.updateLongTermRules(
-                session: session,
-                store: store
+                session: self.session,
+                store: self.store
             )
-            statusMessage = outcome.summary
-        } catch is CancellationError {
-            statusMessage = "已停止更新长期规则。"
-        } catch {
-            handle(error)
+            return outcome.summary
         }
-        busy = nil
     }
 
     // MARK: - 错误

@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// 正文先按空行切成小段，再交给 `LazyVStack` 渲染：几万字的书也只画屏幕上的十几段，
 /// 不会因为一个 `Text` 塞进整篇而卡住。跳章节、跳命中、跳书签一律换算成「哪一段的
-/// 起始偏移」，交给 `ScrollViewReader.scrollTo` 滚过去。
+/// 起始偏移」，写进 `scrollPosition` 的绑定滚过去。
 struct ReaderPane: View {
     @Environment(AppStore.self) private var store
 
@@ -27,9 +27,8 @@ struct ReaderPane: View {
     @State private var manuscriptLength = 0
     /// 当前定位点（UTF-16 偏移），滚动时跟着视口顶部那一段走。
     @State private var anchorOffset = 0
-    /// `scrollPosition(id:)` 报告的顶部段落起点。
+    /// `scrollPosition(id:)` 报告的顶部段落起点；跳转也写它，只保留一个滚动驱动。
     @State private var scrolledBlockStart: Int?
-    @State private var jump: ReaderJump?
     @State private var showSettings = false
     @State private var showChapters = false
     @State private var showSearch = false
@@ -260,53 +259,42 @@ struct ReaderPane: View {
     // MARK: - 正文
 
     private var readingSurface: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                    if document.blocks.isEmpty {
-                        if isLoadingDocument {
-                            loadingState
-                        } else {
-                            emptyState
-                        }
-                    }
-                    ForEach(document.blocks) { block in
-                        ReaderParagraphView(
-                            text: document.text(for: block),
-                            fontSize: CGFloat(fontSize),
-                            lineHeight: lineHeight,
-                            darkPage: darkPage,
-                            highlights: highlightMap[block.start] ?? [],
-                            current: currentHighlight(in: block)
-                        )
-                        .id(block.start)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                if document.blocks.isEmpty {
+                    if isLoadingDocument {
+                        loadingState
+                    } else {
+                        emptyState
                     }
                 }
-                .scrollTargetLayout()
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.vertical, Theme.Spacing.l)
-            }
-            .background(ReaderStyle.page(dark: darkPage))
-            .scrollDismissesKeyboard(.interactively)
-            .scrollIndicators(.hidden)
-            // iOS 17 的滚动位置绑定：只更新一个 Int，不再给每一段挂
-            // GeometryReader + PreferenceKey，滚动时不会整页重算。
-            .scrollPosition(id: $scrolledBlockStart, anchor: .top)
-            .onChange(of: scrolledBlockStart) { _, start in
-                guard let start, start != anchorOffset else { return }
-                anchorOffset = start
-                lastOffset = start
-            }
-            .onChange(of: jump) { _, request in
-                guard let request else { return }
-                if request.animated {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        proxy.scrollTo(request.offset, anchor: .top)
-                    }
-                } else {
-                    proxy.scrollTo(request.offset, anchor: .top)
+                ForEach(document.blocks) { block in
+                    ReaderParagraphView(
+                        text: document.text(for: block),
+                        fontSize: CGFloat(fontSize),
+                        lineHeight: lineHeight,
+                        darkPage: darkPage,
+                        highlights: highlightMap[block.start] ?? [],
+                        current: currentHighlight(in: block)
+                    )
+                    .id(block.start)
                 }
             }
+            .scrollTargetLayout()
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.l)
+        }
+        .background(ReaderStyle.page(dark: darkPage))
+        .scrollDismissesKeyboard(.interactively)
+        .scrollIndicators(.hidden)
+        // iOS 17 的滚动位置绑定：只更新一个 Int，不再给每一段挂
+        // GeometryReader + PreferenceKey，滚动时不会整页重算。
+        // 跳转也只写这个绑定，避免 `scrollTo` 与 id 驱动互相拉扯。
+        .scrollPosition(id: $scrolledBlockStart, anchor: .top)
+        .onChange(of: scrolledBlockStart) { _, start in
+            guard let start, start != anchorOffset else { return }
+            anchorOffset = start
+            lastOffset = start
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -466,9 +454,10 @@ struct ReaderPane: View {
         let start = document.blocks[index].start
         anchorOffset = start
         lastOffset = start
-        // 同步滚动位置绑定，避免它用旧段落把刚跳到的位置再拉回去。
-        scrolledBlockStart = start
-        jump = ReaderJump(offset: start, animated: true)
+        // 只写滚动位置绑定：它同时也是跳转驱动，避免和 scrollTo 抢位置。
+        withAnimation(.easeInOut(duration: 0.22)) {
+            scrolledBlockStart = start
+        }
     }
 
     private func clamp(_ offset: Int) -> Int {
@@ -600,22 +589,6 @@ struct ReaderPane: View {
         let index = ReaderLocator.blockIndex(for: clamp(preferredOffset), in: document.blocks)
         anchorOffset = document.blocks[index].start
         scrolledBlockStart = anchorOffset
-        jump = ReaderJump(offset: anchorOffset, animated: false)
         performSearch()
-    }
-}
-
-// MARK: - 内部类型
-
-/// 一次跳转请求。带 token 是为了「同一段连点两次」也能重新滚一次。
-private struct ReaderJump: Equatable {
-    let offset: Int
-    let animated: Bool
-    let token: UUID
-
-    init(offset: Int, animated: Bool) {
-        self.offset = offset
-        self.animated = animated
-        self.token = UUID()
     }
 }
