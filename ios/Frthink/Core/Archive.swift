@@ -150,7 +150,8 @@ enum FrthinkArchive {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             formatVersion = (try? c.decode(Int.self, forKey: .formatVersion)) ?? 1
             createdAt = (try? c.decode(Int64.self, forKey: .createdAt)) ?? 0
-            projectId = (try? c.decode(String.self, forKey: .projectId)) ?? ""
+            let backupProjectId = (try? c.decode(String.self, forKey: .projectId)) ?? ""
+            projectId = backupProjectId
             title = (try? c.decode(String.self, forKey: .title)) ?? ""
             synopsis = (try? c.decode(String.self, forKey: .synopsis)) ?? ""
             // snapshot 是书稿本体：解不出来必须整本失败，不能静默换成空快照，
@@ -178,7 +179,7 @@ enum FrthinkArchive {
                     // owner/project，按所属项目补齐，否则多本书会撞主键被判重复。
                     return iosShape.map { segment in
                         var stamped = segment
-                        if stamped.project.isEmpty { stamped.project = projectId }
+                        if stamped.project.isEmpty { stamped.project = backupProjectId }
                         return stamped
                     }
                 }
@@ -196,7 +197,7 @@ enum FrthinkArchive {
                     else { return nil }
                     return TranslationSegment(
                         owner: "",
-                        project: projectId,
+                        project: backupProjectId,
                         target: TranslationSegment.defaultTarget,
                         sourceHash: sourceHash,
                         segment: index,
