@@ -170,9 +170,6 @@ struct WorldRulesSection: View {
                     .font(Font.body)
                     .foregroundStyle(.primary)
                 Spacer(minLength: Theme.Spacing.s)
-                if running {
-                    ProgressView().controlSize(.mini)
-                }
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())

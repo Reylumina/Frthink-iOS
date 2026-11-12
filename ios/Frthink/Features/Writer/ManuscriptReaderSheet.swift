@@ -22,6 +22,8 @@ struct ManuscriptReaderSheet: View {
     @State private var showRewrite = false
     @State private var rewriteRange = NSRange(location: 0, length: 0)
     @State private var rewriteText = ""
+    /// 正文编辑器的撤销栈状态：编辑时 ⋯ 菜单里的「撤销 / 重做」跟着它变。
+    @State private var undoState: WriterUndoState?
 
     var body: some View {
         NavigationStack {
@@ -46,6 +48,10 @@ struct ManuscriptReaderSheet: View {
                     onCursorInteraction: onCursorInteraction,
                     onSelectionChange: { range in
                         selection = range
+                    },
+                    onUndoManagerReady: { manager in
+                        guard let manager else { return }
+                        undoState = WriterUndoState(manager: manager)
                     }
                 )
 
@@ -67,6 +73,30 @@ struct ManuscriptReaderSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(editing ? "完成编辑" : "编辑") {
                         toggleEditing()
+                    }
+                }
+                if editing, let undoState {
+                    // 编辑器的逐字撤销登记在 UITextView 自己的栈上；没有聚焦输入框
+                    // 时摇一摇和 ⌘Z 不一定能触发，所以给一个看得见的入口（§5.8）。
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                undoState.undo()
+                            } label: {
+                                Label(undoState.undoTitle, systemImage: "arrow.uturn.backward")
+                            }
+                            .disabled(!undoState.canUndo)
+
+                            Button {
+                                undoState.redo()
+                            } label: {
+                                Label(undoState.redoTitle, systemImage: "arrow.uturn.forward")
+                            }
+                            .disabled(!undoState.canRedo)
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("撤销与重做")
                     }
                 }
             }

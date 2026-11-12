@@ -17,12 +17,17 @@ struct WriterPane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let session: ProjectSession
+    /// 这一页登记的撤销都落在这份栈上：优先窗口栈，没有时用兜底栈，
+    /// 所以「插入正文 / 追加到正文」在任何状态下都撤得回来。
+    private let undoManager: UndoManager
 
     @State private var controller = WriterController()
     /// 输入框文本与焦点都在子视图里，打字不触发整页重算。
     @State private var composer = WriterComposerModel()
     /// 应用级撤销动作（`UndoManager` 只保存 unowned target），由这里登记与清理。
     @State private var undoActions: [WriterBodyUndoAction] = []
+    /// 撤销栈的菜单状态：栈顶变了，⋯ 里的「撤销 / 重做」跟着变。
+    @State private var undoState: WriterUndoState
     /// 页面自带的「已插入正文 · 撤销」提示。
     ///
     /// 全局 toast 只有文字，放不下撤销按钮；这条只服务插入/追加这类可撤销动作，
@@ -58,6 +63,14 @@ struct WriterPane: View {
     #if DEBUG
     @State private var didMockSend = false
     #endif
+
+    @MainActor
+    init(session: ProjectSession) {
+        self.session = session
+        let manager = WriterUndo.manager()
+        self.undoManager = manager
+        _undoState = State(initialValue: WriterUndoState(manager: manager))
+    }
 
     private enum WriterSheet: String, Identifiable {
         case manuscript
@@ -199,6 +212,8 @@ struct WriterPane: View {
                 guard let text = controller.consumeInstructionToRestore() else { return }
                 composer.text = text
             }
+        // 页内所有系统级撤销（摇一摇之外，iPad 的 ⌘Z 走环境里的这一份）共用同一个栈。
+        .environment(\.undoManager, undoManager)
         .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
         .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
         .toolbar {
@@ -324,6 +339,24 @@ struct WriterPane: View {
 
     @ViewBuilder
     private var writerMenu: some View {
+        // 插入/追加正文的撤销入口。系统摇一摇和 ⌘Z 在没有聚焦输入框时拿不到
+        // 撤销栈，光靠四秒的提示条太容易错过，所以菜单里常驻一条。
+        Button {
+            undoState.undo()
+        } label: {
+            Label(undoState.undoTitle, systemImage: "arrow.uturn.backward")
+        }
+        .disabled(!undoState.canUndo)
+
+        Button {
+            undoState.redo()
+        } label: {
+            Label(undoState.redoTitle, systemImage: "arrow.uturn.forward")
+        }
+        .disabled(!undoState.canRedo)
+
+        Divider()
+
         Button {
             openSheet(.snapshots)
         } label: {
@@ -887,7 +920,7 @@ struct WriterPane: View {
         let action = WriterBodyUndoAction(
             receipt: receipt,
             actionName: actionName,
-            undoManager: WriterUndo.manager(),
+            undoManager: undoManager,
             session: session,
             store: store
         )
@@ -895,6 +928,7 @@ struct WriterPane: View {
         // 所以不清空、不丢引用；离开页面时先摘动作再释放。
         undoActions.append(action)
         action.registerInitialUndo()
+        undoState.refresh()
         return action
     }
 
@@ -902,7 +936,6 @@ struct WriterPane: View {
     /// 不清就会切到别的书之后撤回旧书正文。撤销栈只持 unowned 引用，
     /// 摘不掉动作时宁可把对象一起留着，也不能让它悬空。
     private func discardUndoActions() {
-        guard let undoManager = WriterUndo.manager() else { return }
         for action in undoActions {
             undoManager.removeAllActions(withTarget: action)
         }

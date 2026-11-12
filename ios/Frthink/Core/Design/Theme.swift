@@ -187,8 +187,12 @@ extension View {
     }
 
     /// 任意形状的玻璃表面，用于胶囊类的浮层。
-    func glassSurface<S: Shape>(_ shape: S) -> some View {
-        modifier(GlassShapeModifier(shape: shape))
+    ///
+    /// `interactive` 打开系统给玻璃的触摸反馈：iOS 26 上可点的玻璃要声明成
+    /// interactive，否则点下去没有形变，看起来像一张静态贴纸（§1.6）。
+    /// 只给真正可点的元素开：输入框、可点的胶囊。
+    func glassSurface<S: Shape>(_ shape: S, interactive: Bool = false) -> some View {
+        modifier(GlassShapeModifier(shape: shape, interactive: interactive))
     }
 
     /// 带「减弱动态效果」降级的隐式动画。
@@ -250,10 +254,11 @@ struct GlassSurfaceModifier: ViewModifier {
 
 struct GlassShapeModifier<S: Shape>: ViewModifier {
     var shape: S
+    var interactive: Bool = false
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
+            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
             content.background(.regularMaterial, in: shape)
         }

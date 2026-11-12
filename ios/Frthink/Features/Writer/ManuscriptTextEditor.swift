@@ -51,6 +51,10 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     /// 选区变化（读写都回调）。改写条只在编辑态、选区非空时出现。
     var onSelectionChange: ((NSRange) -> Void)? = nil
 
+    /// 把 UITextView 自己的撤销栈交出去：编辑页的 ⋯ 菜单要用它显示「撤销 / 重做」。
+    /// 逐字编辑的撤销本来就登记在这份栈上，不需要再造一个。
+    var onUndoManagerReady: ((UndoManager?) -> Void)? = nil
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -73,6 +77,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         context.coordinator.appliedRevision = revision
         // 委托最后挂：上面这些初始设置不该回调进 SwiftUI 的状态。
         view.delegate = context.coordinator
+        context.coordinator.parent.onUndoManagerReady?(view.undoManager)
         return view
     }
 

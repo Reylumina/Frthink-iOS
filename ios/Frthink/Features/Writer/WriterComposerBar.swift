@@ -207,7 +207,8 @@ private struct WriterComposerShell<Content: View>: View {
 private struct WriterComposerFieldSurface: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassSurface(Capsule())
+            // 可点的输入框声明成 interactive，点下去有系统的玻璃反馈。
+            content.glassSurface(Capsule(), interactive: true)
         } else {
             content.background(Theme.field, in: Capsule())
         }

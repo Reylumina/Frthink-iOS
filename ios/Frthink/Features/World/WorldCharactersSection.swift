@@ -144,13 +144,10 @@ struct WorldCharactersSection: View {
                 )
             }
         } label: {
+            // 进度由世界页的状态行统一报，这一行只留入口。
             HStack(spacing: Theme.Spacing.xs) {
-                if isRefreshing {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(Font.caption)
-                }
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(Font.caption)
                 Text("刷新")
                     .font(Font.footnote)
             }

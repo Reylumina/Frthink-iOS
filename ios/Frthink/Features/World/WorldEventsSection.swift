@@ -56,13 +56,10 @@ struct WorldEventsSection: View {
         Button {
             onExtract()
         } label: {
+            // 进度由世界页的状态行统一报，按钮这里不再挂第二个转圈。
             HStack(spacing: Theme.Spacing.xs) {
-                if isBusy {
-                    ProgressView().controlSize(.mini)
-                } else {
-                    Image(systemName: "wand.and.stars")
-                        .font(Font.footnote)
-                }
+                Image(systemName: "wand.and.stars")
+                    .font(Font.footnote)
                 Text("从正文抽取")
                     .font(Font.footnote.weight(.medium))
             }

@@ -117,13 +117,75 @@ final class WriterBodyUndoAction {
 }
 
 enum WriterUndo {
-    /// 撤销栈挂在窗口上：响应链向上查到 `UIWindow`，它返回可用的实例；
-    /// 正文编辑器里 UITextView 的逐字编辑也落在同一份栈上。
+    /// 没有窗口栈时用的兜底栈。
+    ///
+    /// `UIWindow.undoManager` 只在响应链上有能提供撤销栈的响应者时才非 nil：
+    /// 输入框没聚焦（例如刚在气泡上点「插入正文」）、或者页面里没有正在编辑的
+    /// 文本视图时，它返回 nil。以前这里直接返回 nil，插入动作于是根本没登记进
+    /// 任何栈，页面上的提示四秒后一消失，这件事就再也撤不回来了。
+    @MainActor private static let fallback = UndoManager()
+
+    /// 撤销栈：优先窗口栈（和正文编辑器的逐字撤销共用一个），否则用兜底栈。
     @MainActor
-    static func manager() -> UndoManager? {
+    static func manager() -> UndoManager {
+        windowManager() ?? fallback
+    }
+
+    @MainActor
+    private static func windowManager() -> UndoManager? {
         let windows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
         return (windows.first(where: \.isKeyWindow) ?? windows.first)?.undoManager
+    }
+}
+
+/// 撤销栈的可观察状态：菜单里的「撤销 / 重做」要跟着栈顶变化刷新。
+@MainActor
+@Observable
+final class WriterUndoState {
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    private(set) var undoTitle = "撤销"
+    private(set) var redoTitle = "重做"
+
+    private let manager: UndoManager
+    private var observers: [NSObjectProtocol] = []
+
+    init(manager: UndoManager) {
+        self.manager = manager
+        let center = NotificationCenter.default
+        for name in [
+            Notification.Name.NSUndoManagerDidUndoChange,
+            Notification.Name.NSUndoManagerDidRedoChange,
+            Notification.Name.NSUndoManagerDidCloseUndoGroup,
+            Notification.Name.NSUndoManagerWillCloseUndoGroup,
+        ] {
+            observers.append(center.addObserver(forName: name, object: manager, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            })
+        }
+        refresh()
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    func refresh() {
+        canUndo = manager.canUndo
+        canRedo = manager.canRedo
+        undoTitle = manager.undoMenuItemTitle
+        redoTitle = manager.redoMenuItemTitle
+    }
+
+    func undo() {
+        manager.undo()
+        refresh()
+    }
+
+    func redo() {
+        manager.redo()
+        refresh()
     }
 }

@@ -159,8 +159,9 @@ struct WorldPane: View {
     /// 有任务、有回执或能看原始响应时才占位；空闲时不预留空白行。
     @ViewBuilder
     private var statusArea: some View {
-        // 刷新人物卡时，概览行的副标题已经显示进度与停止；不再重复一条状态栏。
-        if isWorldRefreshing {
+        // 概览页的刷新行自带进度与停止；其余分栏只由这一行报进度。
+        // 「正在刷新」原来在所有分栏都让位，于是事件/规则页同时出现两处转圈。
+        if isWorldRefreshing, tab == .setting {
             EmptyView()
         } else if busy != nil || statusMessage != nil || lastRawResponse != nil {
             HStack(spacing: Theme.Spacing.s) {
