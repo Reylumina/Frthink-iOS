@@ -1,4 +1,5 @@
 name: UI Screenshots
+run-name: "UI Screenshots #${{ github.run_number }}"
 
 # 在 macOS runner 的模拟器里跑起来，逐 Tab 截图，作为 artifact 上传。
 #
@@ -9,6 +10,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 permissions:
   contents: read
