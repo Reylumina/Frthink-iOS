@@ -29,13 +29,13 @@ python script/pbxproj_check.py
 
 以上都是本地秒级检查，改完一批就跑，不依赖 CI。CI 按批次跑：一个功能点或一组相关改动做完，跑一次 `Self Check`；需要 IPA 时跑 `iOS Build`；界面批次末尾才跑 `UI Screenshots`，按 `DESIGN.md` §9 目检。
 
-CI 的运行时自检在启动时传 `-runSelfCheck`，执行 41 项纯逻辑检查（清单见 `ios/Frthink/App/SelfCheck.swift`）。结果写入 stdout 后退出，工作流用 `grep -q "ALL PASS"` 断言。真实备份检查需要 `fixture-backup.frthink`，缺少该文件时跳过。
+CI 的运行时自检在启动时传 `-runSelfCheck`，执行 42 项纯逻辑检查（清单见 `ios/Frthink/App/SelfCheck.swift`）。结果写入 stdout 后退出，工作流用 `grep -q "ALL PASS"` 断言。真实备份检查需要 `fixture-backup.frthink`，缺少该文件时跳过。
 
 ## 3. CI 流水线
 
 | 文件 | 产物 | 触发 |
 |---|---|---|
-| `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（41 项） | push、PR、手动 |
+| `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（42 项） | push、PR、手动 |
 | `.github/workflows/real-import.yml` | 真实备份导入/导出/重开/落盘 | 手动 |
 | `.github/workflows/ios.yml` | 未签名 IPA | push、PR、手动 |
 | `.github/workflows/ui-screenshots.yml` | 各 Tab 与二、三级页截图（出图前先跑自检） | 手动、push main |

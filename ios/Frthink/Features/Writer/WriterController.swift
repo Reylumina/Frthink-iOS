@@ -306,9 +306,13 @@ final class WriterController {
             isPreparing = true
             prepareTask?.cancel()
             prepareTask = Task { @MainActor [weak self] in
-                let result = await Task.detached(priority: .userInitiated) {
+                let result: WriterPromptRetryResult = await Task.detached(
+                    priority: .userInitiated
+                ) {
                     if retry == nil {
-                        return .prepared(WriterPromptBuilder.prepare(snapshot))
+                        return WriterPromptRetryResult.prepared(
+                            WriterPromptBuilder.prepare(snapshot)
+                        )
                     }
                     return WriterPromptBuilder.retryAfterTrimming(snapshot)
                 }.value
@@ -890,39 +894,5 @@ final class WriterController {
     private func isCancellation(_ error: Error?) -> Bool {
         guard let error else { return false }
         return error.isLLMCancellation
-    }
-
-    // MARK: - 预算操作
-
-    private func messages(
-        for action: PendingAction,
-        session: ProjectSession,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange
-    ) -> [LLMMessage]? {
-        switch action {
-        case .send(let instruction):
-            return chatMessages(
-                instruction: instruction,
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
-            ).messages
-        case .regenerate(let messageID):
-            guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID })
-            else { return nil }
-            return regenerateMessages(
-                beforeIndex: index,
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
-            ).messages
-        case .continuation:
-            return continueMessages(
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
-            ).messages
-        }
     }
 }

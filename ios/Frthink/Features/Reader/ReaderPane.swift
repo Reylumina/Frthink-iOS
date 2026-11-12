@@ -27,6 +27,8 @@ struct ReaderPane: View {
     @State private var manuscriptLength = 0
     /// 当前定位点（UTF-16 偏移），滚动时跟着视口顶部那一段走。
     @State private var anchorOffset = 0
+    /// `scrollPosition(id:)` 报告的顶部段落起点。
+    @State private var scrolledBlockStart: Int?
     @State private var jump: ReaderJump?
     @State private var showSettings = false
     @State private var showChapters = false
@@ -269,8 +271,7 @@ struct ReaderPane: View {
                         }
                     }
                     ForEach(document.blocks) { block in
-                        ReaderParagraphRow(
-                            block: block,
+                        ReaderParagraphView(
                             text: document.text(for: block),
                             fontSize: CGFloat(fontSize),
                             lineHeight: lineHeight,
@@ -281,15 +282,20 @@ struct ReaderPane: View {
                         .id(block.start)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.vertical, Theme.Spacing.l)
             }
-            .coordinateSpace(name: ReaderScrollSpace.name)
             .background(ReaderStyle.page(dark: darkPage))
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
-            .onPreferenceChange(ReaderTopPreferenceKey.self) { tops in
-                updateVisible(tops)
+            // iOS 17 的滚动位置绑定：只更新一个 Int，不再给每一段挂
+            // GeometryReader + PreferenceKey，滚动时不会整页重算。
+            .scrollPosition(id: $scrolledBlockStart, anchor: .top)
+            .onChange(of: scrolledBlockStart) { _, start in
+                guard let start, start != anchorOffset else { return }
+                anchorOffset = start
+                lastOffset = start
             }
             .onChange(of: jump) { _, request in
                 guard let request else { return }
@@ -607,63 +613,9 @@ struct ReaderPane: View {
         jump = ReaderJump(offset: anchorOffset, animated: false)
         performSearch()
     }
-
-    /// 取「顶部已经越过视口上沿、且越得最少」的那一段当当前位置。
-    /// 段落粒度就够了：页脚和章节高亮不需要精确到像素。
-    private func updateVisible(_ tops: [Int: CGFloat]) {
-        let above = tops.filter { $0.value <= 8 }
-        let candidate = above.max(by: { $0.value < $1.value })?.key
-            ?? tops.min(by: { $0.value < $1.value })?.key
-        guard let candidate, candidate != anchorOffset else { return }
-        anchorOffset = candidate
-        if lastOffset != candidate {
-            lastOffset = candidate
-        }
-    }
-}
-
-// MARK: - 段落行
-
-/// 一段正文 + 它自己的顶部坐标上报。`ForEach` 每项只对应这一个视图。
-private struct ReaderParagraphRow: View {
-    let block: ReaderBlock
-    let text: String
-    let fontSize: CGFloat
-    let lineHeight: Double
-    let darkPage: Bool
-    let highlights: [NSRange]
-    let current: NSRange?
-
-    var body: some View {
-        ReaderParagraphView(
-            text: text,
-            fontSize: fontSize,
-            lineHeight: lineHeight,
-            darkPage: darkPage,
-            highlights: highlights,
-            current: current
-        )
-        .background(
-            GeometryReader { inner in
-                Color.clear.preference(
-                    key: ReaderTopPreferenceKey.self,
-                    value: [
-                        block.start: inner
-                            .frame(in: .named(ReaderScrollSpace.name))
-                            .minY
-                    ]
-                )
-            }
-        )
-    }
 }
 
 // MARK: - 内部类型
-
-/// 段落顶部坐标报给这个坐标系；滚动时每段报一次自己的顶边。
-private enum ReaderScrollSpace {
-    static let name = "reader-scroll-space"
-}
 
 /// 一次跳转请求。带 token 是为了「同一段连点两次」也能重新滚一次。
 private struct ReaderJump: Equatable {
@@ -675,14 +627,5 @@ private struct ReaderJump: Equatable {
         self.offset = offset
         self.animated = animated
         self.token = UUID()
-    }
-}
-
-/// 每段报上来的「段首在滚动坐标系里的 y」。
-private struct ReaderTopPreferenceKey: PreferenceKey {
-    static let defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }
