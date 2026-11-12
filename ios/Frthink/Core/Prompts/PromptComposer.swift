@@ -272,8 +272,10 @@ enum PromptComposer {
     /// 参与本轮请求的人物：卡片 enabled + 所属分组 enabled。
     /// 分组被删或 groupId 悬空时按启用处理，避免静默丢卡。
     static func activeCharacters(in world: WorldBook) -> [CharacterCard] {
+        // 分组 id 理论上唯一；存档导入可能带重复 id，不能因此崩溃。
         let groupStates = Dictionary(
-            uniqueKeysWithValues: world.characterGroups.map { ($0.id, $0.enabled) }
+            world.characterGroups.map { ($0.id, $0.enabled) },
+            uniquingKeysWith: { first, _ in first }
         )
         return world.characters.filter { card in
             guard card.enabled ?? true else { return false }
@@ -325,6 +327,22 @@ enum PromptComposer {
             hash = hash &* 0x0000_0100_0000_01b3
         }
         return String(String(hash, radix: 16).prefix(12))
+    }
+
+    // MARK: - 历史消息
+
+    /// `ChatMessage` → `LLMMessage`：空内容丢弃，角色直映射。
+    /// 写请求组装与上下文占用估算共用这一份规则。
+    static func llmMessages(from messages: [ChatMessage]) -> [LLMMessage] {
+        messages.compactMap { message -> LLMMessage? in
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else { return nil }
+            switch message.role {
+            case .user: return LLMMessage.user(content)
+            case .assistant: return LLMMessage.assistant(content)
+            case .system: return LLMMessage.system(content)
+            }
+        }
     }
 }
 

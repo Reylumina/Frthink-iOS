@@ -82,6 +82,7 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 ### 4.5 提示词流水线
 
 ```text
+0. WriterPromptBuilder：主线程只拍 world/messages/settings 快照，组装与预算裁剪在后台
 1. PromptAssembly：按 14 个固定槽位装块
 2. PromptComposer：把块转成 system/user 消息，并裁剪历史
 3. TokenEstimator：逐码点加权估算，不是 tokenizer

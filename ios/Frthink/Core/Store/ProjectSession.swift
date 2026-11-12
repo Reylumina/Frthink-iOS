@@ -989,14 +989,16 @@ final class ProjectSession {
         omittedHistoryMessages: Int,
         maxTokens: Int,
         inputBudgetTokens: Int,
-        contextWindow: Int
+        contextWindow: Int,
+        estimatedInputTokens: Int? = nil
     ) {
         let snapshot = RequestSnapshot(
             createdAt: Date(),
             modelId: model,
             sourceIds: sourceIds,
             messages: messages,
-            estimatedInputTokens: TokenEstimator.estimate(messages: messages),
+            estimatedInputTokens: estimatedInputTokens
+                ?? TokenEstimator.estimate(messages: messages),
             inputBudgetTokens: inputBudgetTokens,
             modelContextWindowTokens: contextWindow,
             outputReserveTokens: maxTokens,

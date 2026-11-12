@@ -1348,6 +1348,57 @@ enum SelfCheck {
             return "跨页切片 / 块索引 ok"
         }
 
+        // 提示词组装移到后台后，输出结构必须保持：system + 历史 + 本轮指令；
+        // 续写把正文片段回灌成 assistant 消息。
+        check("writer.promptAssembly") {
+            var settings = AppSettings()
+            settings.globalPreset = "全局预设"
+            let manuscript = "开头标记" + String(repeating: "甲", count: 6_000) + "末尾片段"
+            var snapshot = WriterPromptSnapshot(
+                action: .send(instruction: "写到雨停"),
+                manuscript: manuscript,
+                messages: [
+                    ChatMessage(role: .user, content: "上一轮"),
+                    ChatMessage(role: .assistant, content: "上一段回复"),
+                ],
+                world: WorldBook(),
+                assistantSupplement: "",
+                settings: settings,
+                projectID: "writer-check",
+                enabledUniverseEntryIDs: [],
+                bodyPromptSendWhole: false,
+                bodyPromptTailCodePoints: 5_000,
+                continuationAnchor: nil,
+                explicitBodyRange: .full,
+                inputBudget: 100_000
+            )
+            let prepared = WriterPromptBuilder.prepare(snapshot)
+            try expect(!prepared.messages.isEmpty, "组装结果为空")
+            try expect(prepared.messages.first?.role == "system", "首条应为 system")
+            try expect(prepared.messages.last?.role == "user", "末条应为本轮指令")
+            try expect(
+                prepared.messages.last?.content.contains("写到雨停") == true,
+                "本轮指令没有进请求"
+            )
+            try expect(
+                prepared.sourceIds.contains("body:authoritative"),
+                "正文块没有进来源列表"
+            )
+            let system = prepared.messages.first?.content ?? ""
+            try expect(system.contains("末尾片段"), "正文末尾片段没有进请求")
+            try expect(!system.contains("开头标记"), "只发末尾时仍带了正文开头")
+
+            snapshot.action = .continueWriting
+            let continuation = WriterPromptBuilder.prepare(snapshot)
+            try expect(
+                continuation.messages.contains {
+                    $0.role == "assistant" && $0.content.hasSuffix("末尾片段")
+                },
+                "续写没有把正文片段回灌成 assistant"
+            )
+            return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
+        }
+
         // 提示词回看：大快照按 token 总量封顶，小快照仍按 30 条封顶
         check("writer.snapshotBudget") {
             let root = FileManager.default.temporaryDirectory

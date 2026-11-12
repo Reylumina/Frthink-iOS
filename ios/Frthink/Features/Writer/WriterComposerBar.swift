@@ -47,7 +47,7 @@ struct WriterComposerBar: View {
                         .background(Circle().fill(Theme.accentSoft))
                 }
                 .buttonStyle(.plain)
-                .disabled(controller.isGenerating)
+                .disabled(controller.isGenerating || controller.isPreparing)
                 .accessibilityLabel("续写")
 
                 inputField
@@ -93,13 +93,13 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 生成中的顶部横幅：进度 + 停止。不生成时整段不出现。
+    /// 生成中的顶部横幅：准备提示词/进度 + 停止。空闲时整段不出现。
     @ViewBuilder
     private var generatingBanner: some View {
-        if controller.isGenerating {
+        if controller.isGenerating || controller.isPreparing {
             HStack(spacing: Theme.Spacing.s) {
                 ProgressView().controlSize(.small)
-                Text("码字机正在写…")
+                Text(controller.isPreparing ? "正在整理提示词…" : "码字机正在写…")
                     .font(Font.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -151,6 +151,7 @@ struct WriterComposerBar: View {
 
     private var canSend: Bool {
         !controller.isGenerating
+            && !controller.isPreparing
             && store.settings.activeProvider != nil
             && !model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }

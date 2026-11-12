@@ -45,6 +45,12 @@ final class WriterController {
     /// 自动摘要进行中，避免并发重复请求。
     private var autoSummarizing = false
 
+    /// 正在后台组装提示词。此时还没有开始生成，界面显示「整理提示词…」。
+    private(set) var isPreparing = false
+
+    /// 准备阶段的 Task；点停止或切页时取消。
+    private var prepareTask: Task<Void, Never>?
+
     /// 非 nil 时弹上下文预算提示；由视图观察后弹 alert。
     private(set) var budgetAlert: BudgetAlert?
 
@@ -149,46 +155,66 @@ final class WriterController {
     // MARK: - 入口
 
     /// 发送一条指令。返回 false 表示请求根本没发出去（没配置供应方等），
-    /// 视图据此把输入框里的文字放回去。
+    /// 视图据此把输入框里的文字还回去。
     @discardableResult
     func send(_ text: String, session: ProjectSession, store: AppStore) -> Bool {
         let instruction = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !instruction.isEmpty, !isGenerating else { return false }
+        guard !instruction.isEmpty, !isGenerating, !isPreparing else { return false }
         activeStore = store
-        return performSend(
-            instruction: instruction,
+        return start(
+            action: .send(instruction: instruction),
             session: session,
             store: store,
-            manuscript: session.manuscript
+            manuscript: session.manuscript,
+            bodyRange: .full
         )
     }
 
     /// 续写：不带用户输入，从正文末尾接着写（正文末尾片段作为 assistant 回灌）。
     func continueWriting(session: ProjectSession, store: AppStore) {
-        guard !isGenerating else { return }
+        guard !isGenerating, !isPreparing else { return }
         activeStore = store
-        performContinue(
+        _ = start(
+            action: .continueWriting,
             session: session,
             store: store,
-            manuscript: session.manuscript
+            manuscript: session.manuscript,
+            bodyRange: .full
         )
     }
 
     /// 重新生成某条助手回复：旧内容留作上一个版本，新内容写进新版本。
     func regenerate(messageID: String, session: ProjectSession, store: AppStore) {
-        guard !isGenerating else { return }
+        guard !isGenerating, !isPreparing else { return }
+        guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID }),
+              session.payload.messages[index].role == .assistant else {
+            store.toast = "这条助手消息已经不存在了"
+            return
+        }
         activeStore = store
-        performRegenerate(
-            messageID: messageID,
+        session.clearInterrupted(messageID)
+        let previousVariant = session.payload.messages[index].selectedVariant
+        _ = start(
+            action: .regenerate(beforeIndex: index),
             session: session,
             store: store,
-            manuscript: session.manuscript
+            manuscript: session.manuscript,
+            bodyRange: .full,
+            regenerateFallbackVariant: previousVariant
         )
     }
 
-    /// 停止生成。取消发给 Task，流会在 `onTermination` 里中断网络请求，
-    /// 已经收到的部分内容保留。
+    /// 生成或准备中：界面上的编辑/删除动作都要禁用。
+    var isBusy: Bool { isGenerating || isPreparing }
+
+    /// 停止：准备阶段取消组装，生成阶段取消流。
     func stop() {
+        if isPreparing {
+            prepareTask?.cancel()
+            prepareTask = nil
+            isPreparing = false
+            return
+        }
         guard isGenerating else { return }
         stopRequested = true
         task?.cancel()
@@ -209,85 +235,26 @@ final class WriterController {
 
     /// 预算弹窗里点「裁剪正文后重试」。
     ///
-    /// 只裁发给模型的那份正文，`session.manuscript` 保持不变。
+    /// 裁剪与重新组装都放后台；失败时把指令还给输入框，并给出具体原因。
     func retryAfterTrimming(session: ProjectSession, store: AppStore) {
-        guard let action = pending, let provider = store.settings.activeProvider else {
+        guard let action = pending else {
             budgetAlert = nil
-            pending = nil
             return
         }
-
-        let limit = budget(for: provider).effectiveInputBudget
-        let manuscript = session.manuscript
-        guard let fullMessages = messages(
-            for: action,
-            session: session,
-            manuscript: manuscript,
-            bodyRange: .full
-        ) else {
+        guard let builderAction = builderAction(for: action, session: session) else {
             budgetAlert = nil
             restoreFailedRetry(action, store: store)
             store.errorMessage = "上下文预算信息已过期，请重新发送。"
             return
         }
-
-        // 超出的量从正文的 token 预算里扣掉，剩下的才是正文能占的空间。
-        let excess = TokenEstimator.estimate(messages: fullMessages) - limit
-        let manuscriptBudget = max(512, TokenEstimator.estimate(manuscript) - max(excess, 0))
-        let trimmed = WriterBudgeting.trimTail(manuscript, toTokens: manuscriptBudget)
-
-        guard !trimmed.isEmpty, trimmed != manuscript else {
-            budgetAlert = nil
-            restoreFailedRetry(action, store: store)
-            store.errorMessage = "上下文放不下：裁剪正文后仍然超出模型上下文窗。可以先回退几轮对话、精简正文，或在设置里调小输出上限。"
-            return
-        }
-
-        // 只发了正文末尾一段，提示词里的正文范围标注也要跟着改成「末尾 N 字」。
-        let trimmedRange = PromptLibrary.BodyRange.tail(
-            count: trimmed.unicodeScalars.count
-        )
-        guard let nextMessages = messages(
-            for: action,
+        _ = start(
+            action: builderAction,
             session: session,
-            manuscript: trimmed,
-            bodyRange: trimmedRange
-        ),
-            TokenEstimator.estimate(messages: nextMessages) <= limit else {
-            budgetAlert = nil
-            restoreFailedRetry(action, store: store)
-            store.errorMessage = "上下文放不下：只保留正文末尾 \(trimmed.count) 字仍然超出模型上下文窗，请在设置里调小输出上限。"
-            return
-        }
-
-        budgetAlert = nil
-        pending = nil
-
-        switch action {
-        case .send(let instruction):
-            _ = performSend(
-                instruction: instruction,
-                session: session,
-                store: store,
-                manuscript: trimmed,
-                bodyRange: trimmedRange
-            )
-        case .regenerate(let messageID):
-            performRegenerate(
-                messageID: messageID,
-                session: session,
-                store: store,
-                manuscript: trimmed,
-                bodyRange: trimmedRange
-            )
-        case .continuation:
-            performContinue(
-                session: session,
-                store: store,
-                manuscript: trimmed,
-                bodyRange: trimmedRange
-            )
-        }
+            store: store,
+            manuscript: session.manuscript,
+            bodyRange: .full,
+            retry: action
+        )
     }
 
     /// 重试失败时把指令还给输入框（只有「发送」有可恢复的文本）。
@@ -298,40 +265,63 @@ final class WriterController {
         pending = nil
     }
 
-    // MARK: - 三个入口的实现
+    // MARK: - 准备与提交
 
-    private func performSend(
-        instruction: String,
+    private struct Preparation {
+        /// 预算弹窗挂起的动作；提交成功前不清。
+        let action: PendingAction
+        /// 重新生成时旧版本的下标；生成成功后才加新版本。
+        let regenerateFallbackVariant: Int?
+        let client: any LLMClient
+        let provider: ProviderSetting
+    }
+
+    /// 拍快照、后台组装、回主线程提交。返回 false 表示连请求都没开始。
+    private func start(
+        action: WriterPromptAction,
         session: ProjectSession,
         store: AppStore,
         manuscript: String,
-        bodyRange: PromptLibrary.BodyRange = .full
+        bodyRange: PromptLibrary.BodyRange,
+        retry: PendingAction? = nil,
+        regenerateFallbackVariant: Int? = nil
     ) -> Bool {
         do {
             let (client, provider) = try activeClient(store: store)
-            let prepared = chatMessages(
-                instruction: instruction,
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
-            )
-            if let issue = budgetIssue(messages: prepared.messages, provider: provider) {
-                pending = .send(instruction)
-                budgetAlert = issue
-                return true
-            }
-            session.addUserMessage(instruction)
-            let assistant = session.beginAssistantMessage(model: provider.resolvedModel)
-            run(
-                client: client,
-                provider: provider,
-                prepared: prepared,
+            let snapshot = promptSnapshot(
+                action: action,
                 session: session,
                 store: store,
-                messageID: assistant.id,
-                isNewMessage: true,
-                fallbackVariant: nil
+                manuscript: manuscript,
+                bodyRange: bodyRange,
+                provider: provider
             )
+            let preparation = Preparation(
+                action: pendingAction(for: snapshot.action, messages: snapshot.messages),
+                regenerateFallbackVariant: regenerateFallbackVariant
+                    ?? fallbackVariant(for: snapshot.action, session: session),
+                client: client,
+                provider: provider
+            )
+            isPreparing = true
+            prepareTask?.cancel()
+            prepareTask = Task { @MainActor [weak self] in
+                let result = await Task.detached(priority: .userInitiated) {
+                    if retry == nil {
+                        return .prepared(WriterPromptBuilder.prepare(snapshot))
+                    }
+                    return WriterPromptBuilder.retryAfterTrimming(snapshot)
+                }.value
+                guard let self, !Task.isCancelled else { return }
+                self.isPreparing = false
+                self.prepareTask = nil
+                self.finishPreparation(
+                    result,
+                    preparation: preparation,
+                    session: session,
+                    store: store
+                )
+            }
             return true
         } catch {
             store.errorMessage = error.localizedDescription
@@ -339,29 +329,85 @@ final class WriterController {
         }
     }
 
-    private func performContinue(
+    /// 主线程拍值类型快照；组装工作不碰会话对象。
+    private func promptSnapshot(
+        action: WriterPromptAction,
         session: ProjectSession,
         store: AppStore,
         manuscript: String,
-        bodyRange: PromptLibrary.BodyRange = .full
+        bodyRange: PromptLibrary.BodyRange,
+        provider: ProviderSetting
+    ) -> WriterPromptSnapshot {
+        WriterPromptSnapshot(
+            action: action,
+            manuscript: manuscript,
+            messages: session.payload.messages,
+            world: session.payload.world,
+            assistantSupplement: session.payload.assistantSupplement,
+            settings: store.settings,
+            projectID: session.project.id,
+            enabledUniverseEntryIDs: session.payload.enabledUniverseEntryIDs,
+            bodyPromptSendWhole: session.payload.bodyPromptSendWhole,
+            bodyPromptTailCodePoints: session.payload.bodyPromptTailCodePoints,
+            continuationAnchor: session.payload.continuationAnchor,
+            explicitBodyRange: bodyRange,
+            inputBudget: budget(for: provider, settings: store.settings).effectiveInputBudget
+        )
+    }
+
+    private func finishPreparation(
+        _ result: WriterPromptRetryResult,
+        preparation: Preparation,
+        session: ProjectSession,
+        store: AppStore
     ) {
-        do {
-            let (client, provider) = try activeClient(store: store)
-            // 续写不新增用户气泡，直接接在现有对话后面。
-            let prepared = continueMessages(
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
-            )
-            if let issue = budgetIssue(messages: prepared.messages, provider: provider) {
-                pending = .continuation
-                budgetAlert = issue
+        let plan = budget(for: preparation.provider, settings: store.settings)
+        switch result {
+        case .cannotTrim:
+            budgetAlert = nil
+            restoreFailedRetry(preparation.action, store: store)
+            store.errorMessage = "上下文放不下：裁剪正文后仍然超出模型上下文窗。可以先回退几轮对话、精简正文，或在设置里调小输出上限。"
+        case .stillTooLarge(let characters):
+            budgetAlert = nil
+            restoreFailedRetry(preparation.action, store: store)
+            store.errorMessage = "上下文放不下：只保留正文末尾 \(characters) 字仍然超出模型上下文窗，请在设置里调小输出上限。"
+        case .prepared(let prepared):
+            if prepared.estimatedInputTokens > plan.effectiveInputBudget {
+                pending = preparation.action
+                budgetAlert = BudgetAlert(
+                    estimated: prepared.estimatedInputTokens,
+                    limit: plan.effectiveInputBudget,
+                    window: plan.contextWindow ?? 0,
+                    reserve: plan.outputBudget
+                )
                 return
             }
-            let assistant = session.beginAssistantMessage(model: provider.resolvedModel)
+            budgetAlert = nil
+            pending = nil
+            commit(
+                prepared,
+                preparation: preparation,
+                session: session,
+                store: store
+            )
+        }
+    }
+
+    private func commit(
+        _ prepared: WriterPreparedPrompt,
+        preparation: Preparation,
+        session: ProjectSession,
+        store: AppStore
+    ) {
+        switch preparation.action {
+        case .send(let instruction):
+            session.addUserMessage(instruction)
+            let assistant = session.beginAssistantMessage(
+                model: preparation.provider.resolvedModel
+            )
             run(
-                client: client,
-                provider: provider,
+                client: preparation.client,
+                provider: preparation.provider,
                 prepared: prepared,
                 session: session,
                 store: store,
@@ -369,203 +415,83 @@ final class WriterController {
                 isNewMessage: true,
                 fallbackVariant: nil
             )
-        } catch {
-            store.errorMessage = error.localizedDescription
-        }
-    }
-
-    private func performRegenerate(
-        messageID: String,
-        session: ProjectSession,
-        store: AppStore,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange = .full
-    ) {
-        guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID }),
-              session.payload.messages[index].role == .assistant else {
-            store.toast = "这条助手消息已经不存在了"
-            return
-        }
-        session.clearInterrupted(messageID)
-
-        do {
-            let (client, provider) = try activeClient(store: store)
-            let prepared = regenerateMessages(
-                beforeIndex: index,
-                session: session,
-                manuscript: manuscript,
-                bodyRange: bodyRange
+        case .continuation:
+            let assistant = session.beginAssistantMessage(
+                model: preparation.provider.resolvedModel
             )
-            if let issue = budgetIssue(messages: prepared.messages, provider: provider) {
-                pending = .regenerate(messageID)
-                budgetAlert = issue
+            run(
+                client: preparation.client,
+                provider: preparation.provider,
+                prepared: prepared,
+                session: session,
+                store: store,
+                messageID: assistant.id,
+                isNewMessage: true,
+                fallbackVariant: nil
+            )
+        case .regenerate(let messageID):
+            guard let index = session.payload.messages.firstIndex(where: {
+                $0.id == messageID
+            }), session.payload.messages[index].role == .assistant else {
+                store.toast = "这条助手消息已经不存在了"
                 return
             }
-            let previousVariant = session.payload.messages[index].selectedVariant
             // 新版本是空的并被选中，后面的 appendDelta 会写进它。
             session.addVariant(to: messageID)
             run(
-                client: client,
-                provider: provider,
+                client: preparation.client,
+                provider: preparation.provider,
                 prepared: prepared,
                 session: session,
                 store: store,
                 messageID: messageID,
                 isNewMessage: false,
-                fallbackVariant: previousVariant
-            )
-        } catch {
-            store.errorMessage = error.localizedDescription
-        }
-    }
-
-    // MARK: - 请求组装
-
-    /// 组装结果：发给模型的消息、来源块、被裁掉的历史条数。
-    private struct PreparedPrompt {
-        let messages: [LLMMessage]
-        let sourceIds: [String]
-        let omittedHistoryMessages: Int
-    }
-
-    /// 把全局设置（预设 / 技能 / 去 AI 味规则 / 语料库）与项目负载装配成
-    /// 规格 §1 的 14 个块。
-    /// 按原版 `bodyPrompt*` 决定这次请求发哪一段正文。
-    ///
-    /// 原版实测 `bodyPromptSendWhole = false`、`bodyPromptTailCodePoints = 5000`：
-    /// **续写只把正文末尾 5000 码点发过去**，不是全文。之前一律发全文，
-    /// 提示词和原版不一致，长书还会把上下文撑爆。
-    private func effectiveBody(
-        _ session: ProjectSession,
-        manuscript: String,
-        fallbackRange: PromptLibrary.BodyRange
-    ) -> (text: String, range: PromptLibrary.BodyRange) {
-        // 调用方显式给了裁剪范围（预算重试）就尊重它，正文也用调用方传进来的
-        // 那一份；这里再读 session.manuscript 会把裁剪结果丢掉。
-        if fallbackRange != .full {
-            return (manuscript, fallbackRange)
-        }
-        let whole = manuscript
-        if let anchor = session.payload.continuationAnchor,
-           anchor > 0, anchor <= (whole as NSString).length {
-            let prefix = (whole as NSString).substring(to: anchor)
-            return (prefix, .anchorPrefix(count: prefix.count))
-        }
-        if session.payload.bodyPromptSendWhole {
-            return (whole, .full)
-        }
-        let limit = max(256, session.payload.bodyPromptTailCodePoints)
-        return (PromptComposer.codePointTail(whole, limit: limit), .tail(count: limit))
-    }
-    private func assembly(
-        session: ProjectSession,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange
-    ) -> PromptAssembly {
-        // 真正发出去的正文按原版 bodyPrompt* 收口，不是调用方传进来的整篇。
-        let effective = effectiveBody(
-            session,
-            manuscript: manuscript,
-            fallbackRange: bodyRange
-        )
-        return PromptAssembly.from(
-            world: session.payload.world,
-            manuscript: effective.text,
-            assistantSupplement: session.payload.assistantSupplement,
-            settings: activeStore?.settings ?? AppSettings(),
-            projectID: session.project.id,
-            enabledUniverseEntryIDs: session.payload.enabledUniverseEntryIDs,
-            bodyRange: effective.range
-        )
-    }
-
-    private func chatMessages(
-        instruction: String,
-        session: ProjectSession,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange
-    ) -> PreparedPrompt {
-        let assembly = assembly(session: session, manuscript: manuscript, bodyRange: bodyRange)
-        let built = PromptComposer.writingMessages(
-            assembly: assembly,
-            history: llmMessages(session.payload.messages),
-            userInstruction: instruction
-        )
-        let trimmed = trimHistory(built, budget: budgetLimit())
-        return PreparedPrompt(
-            messages: trimmed.messages,
-            sourceIds: assembly.sourceIds,
-            omittedHistoryMessages: trimmed.omitted
-        )
-    }
-
-    /// 续写：不带用户输入，把正文末尾当作「已生成的末尾片段」喂回去，让模型从它
-    /// 后面接着写。Core 的 `continueFragmentMessages` 会自己取片段的最后 2000 个
-    /// 码点（对齐 Android 端 `b3/l.java:1963-1975`），这里传整份正文即可。
-    private func continueMessages(
-        session: ProjectSession,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange
-    ) -> PreparedPrompt {
-        let assembly = assembly(session: session, manuscript: manuscript, bodyRange: bodyRange)
-        let built = PromptComposer.continueFragmentMessages(
-            assembly: assembly,
-            history: llmMessages(session.payload.messages),
-            fragment: manuscript
-        )
-        let trimmed = trimHistory(built, budget: budgetLimit())
-        return PreparedPrompt(
-            messages: trimmed.messages,
-            sourceIds: assembly.sourceIds,
-            omittedHistoryMessages: trimmed.omitted
-        )
-    }
-
-    /// 重新生成时上下文只到这条回复之前。前一条如果是用户指令，它已经在
-    /// history 里，不再重复传 userInstruction；如果前面已经是助手回复
-    /// （比如这条本身就是「续写」生成的），就重跑同一条续写路径。
-    private func regenerateMessages(
-        beforeIndex index: Int,
-        session: ProjectSession,
-        manuscript: String,
-        bodyRange: PromptLibrary.BodyRange
-    ) -> PreparedPrompt {
-        let conversation = session.payload.messages
-        let prefix = index > 0 ? Array(conversation[..<index]) : []
-        let history = llmMessages(prefix)
-        let assembly = assembly(session: session, manuscript: manuscript, bodyRange: bodyRange)
-
-        let built: [LLMMessage]
-        if let last = history.last, last.role == "assistant" {
-            built = PromptComposer.continueFragmentMessages(
-                assembly: assembly,
-                history: history,
-                fragment: manuscript
-            )
-        } else {
-            built = PromptComposer.writingMessages(
-                assembly: assembly,
-                history: history,
-                userInstruction: nil
+                fallbackVariant: preparation.regenerateFallbackVariant
             )
         }
-        let trimmed = trimHistory(built, budget: budgetLimit())
-        return PreparedPrompt(
-            messages: trimmed.messages,
-            sourceIds: assembly.sourceIds,
-            omittedHistoryMessages: trimmed.omitted
-        )
     }
 
-    private func llmMessages(_ messages: [ChatMessage]) -> [LLMMessage] {
-        messages.compactMap { message -> LLMMessage? in
-            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !content.isEmpty else { return nil }
-            switch message.role {
-            case .user: return LLMMessage.user(content)
-            case .assistant: return LLMMessage.assistant(content)
-            case .system: return LLMMessage.system(content)
-            }
+    /// 快照里的动作 ↔ 预算弹窗挂起的动作。
+    private func pendingAction(
+        for action: WriterPromptAction,
+        messages: [ChatMessage]
+    ) -> PendingAction {
+        switch action {
+        case .send(let instruction):
+            return .send(instruction)
+        case .continueWriting:
+            return .continuation
+        case .regenerate(let index):
+            let id = messages.indices.contains(index) ? messages[index].id : ""
+            return .regenerate(id)
+        }
+    }
+
+    /// 重新生成失败时要回退到的旧版本下标。
+    private func fallbackVariant(
+        for action: WriterPromptAction,
+        session: ProjectSession
+    ) -> Int? {
+        guard case .regenerate(let index) = action,
+              session.payload.messages.indices.contains(index)
+        else { return nil }
+        return session.payload.messages[index].selectedVariant
+    }
+
+    private func builderAction(
+        for action: PendingAction,
+        session: ProjectSession
+    ) -> WriterPromptAction? {
+        switch action {
+        case .send(let text):
+            return .send(instruction: text)
+        case .continuation:
+            return .continueWriting
+        case .regenerate(let messageID):
+            guard let index = session.payload.messages.firstIndex(where: {
+                $0.id == messageID
+            }) else { return nil }
+            return .regenerate(beforeIndex: index)
         }
     }
 
@@ -581,8 +507,7 @@ final class WriterController {
 
     /// 预算推导，照抄原版 `L1/e3.java:22-55`：
     /// `effectiveInputBudget = min(inputBudget, contextWindow - outputBudget - 1024)`。
-    private func budget(for provider: ProviderSetting) -> PromptBudget {
-        let settings = activeStore?.settings ?? AppSettings()
+    private func budget(for provider: ProviderSetting, settings: AppSettings) -> PromptBudget {
         let window = settings.contextWindowTokens > 0
             ? settings.contextWindowTokens
             : TokenEstimator.contextWindow(for: provider.resolvedModel)
@@ -593,7 +518,7 @@ final class WriterController {
         ) {
             return made
         }
-        // 窗口连输出都放不下：退化成「输入预算为准」，后续 budgetIssue 会拦住。
+        // 窗口连输出都放不下：退化成「输入预算为准」，准备阶段的预算检查会拦住。
         return PromptBudget(
             inputBudget: settings.inputBudgetTokens,
             outputBudget: settings.reservedOutputTokens,
@@ -602,78 +527,12 @@ final class WriterController {
         )
     }
 
-    /// 当前供应方的有效输入预算。
-    private func budgetLimit() -> Int {
-        guard let provider = activeStore?.settings.activeProvider else {
-            return (activeStore?.settings ?? AppSettings()).inputBudgetTokens
-        }
-        return budget(for: provider).effectiveInputBudget
-    }
-
-    private func budgetIssue(messages: [LLMMessage], provider: ProviderSetting) -> BudgetAlert? {
-        let plan = budget(for: provider)
-        let estimated = TokenEstimator.estimate(messages: messages)
-        guard estimated > plan.effectiveInputBudget else { return nil }
-        return BudgetAlert(
-            estimated: estimated,
-            limit: plan.effectiveInputBudget,
-            window: plan.contextWindow ?? 0,
-            reserve: plan.outputBudget
-        )
-    }
-
-    /// 历史裁剪（原版 `L1/e3.java:172-198`）：按「用户轮」从末尾整轮加入，
-    /// 超预算就停；不拆散用户指令与助手回复。system 块和本轮用户指令永远保留。
-    private func trimHistory(
-        _ messages: [LLMMessage],
-        budget: Int
-    ) -> (messages: [LLMMessage], omitted: Int) {
-        guard messages.count > 1 else { return (messages, 0) }
-        var system: LLMMessage?
-        var tail: LLMMessage?
-        var history = messages
-        if history.first?.role == "system" {
-            system = history.removeFirst()
-        }
-        if history.last?.role == "user" {
-            tail = history.removeLast()
-        }
-
-        // 每个 turn 从 user 开始，带上其后的 assistant/system，直到下一个 user。
-        var turns: [[LLMMessage]] = []
-        for message in history {
-            if message.role == "user" || turns.isEmpty {
-                turns.append([message])
-            } else {
-                turns[turns.count - 1].append(message)
-            }
-        }
-
-        var used = (system.map { TokenEstimator.estimate($0.content) } ?? 0)
-            + (tail.map { TokenEstimator.estimate($0.content) } ?? 0)
-        var keptTurns: [[LLMMessage]] = []
-        for turn in turns.reversed() {
-            let cost = turn.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
-            if used + cost > budget { break }
-            used += cost
-            keptTurns.append(turn)
-        }
-        let kept = keptTurns.reversed().flatMap { $0 }
-        let omitted = history.count - kept.count
-
-        var result: [LLMMessage] = []
-        if let system { result.append(system) }
-        result.append(contentsOf: kept)
-        if let tail { result.append(tail) }
-        return (result, omitted)
-    }
-
     // MARK: - 流式
 
     private func run(
         client: any LLMClient,
         provider: ProviderSetting,
-        prepared: PreparedPrompt,
+        prepared: WriterPreparedPrompt,
         session: ProjectSession,
         store: AppStore,
         messageID: String,
@@ -705,7 +564,7 @@ final class WriterController {
         // 先落一次盘，保证进程在首个 3 秒窗口内被杀也能看到“生成中”。
         session.saveNow()
 
-        let plan = budget(for: provider)
+        let plan = budget(for: provider, settings: store.settings)
         let request = LLMRequest(
             model: provider.resolvedModel,
             messages: messages,
@@ -727,7 +586,8 @@ final class WriterController {
             maxTokens: request.maxTokens,
             inputBudgetTokens: plan.effectiveInputBudget,
             contextWindow: plan.contextWindow
-                ?? TokenEstimator.contextWindow(for: model)
+                ?? TokenEstimator.contextWindow(for: model),
+            estimatedInputTokens: prepared.estimatedInputTokens
         )
 
         task = Task { @MainActor in
@@ -988,8 +848,10 @@ final class WriterController {
         guard settings.autoConversationSummary, !autoSummarizing,
               let provider = settings.activeProvider else { return }
         let threshold = min(max(settings.conversationSummaryThresholdPercent, 1), 100)
-        let limit = budget(for: provider).effectiveInputBudget
-        let used = TokenEstimator.estimate(messages: llmMessages(session.payload.messages))
+        let limit = budget(for: provider, settings: settings).effectiveInputBudget
+        let used = TokenEstimator.estimate(
+            messages: PromptComposer.llmMessages(from: session.payload.messages)
+        )
         guard used * 100 >= limit * threshold else { return }
 
         let summarized = Set(session.payload.world.summarizedMessageIDs)
@@ -1062,32 +924,5 @@ final class WriterController {
                 bodyRange: bodyRange
             ).messages
         }
-    }
-}
-
-// MARK: - 正文裁剪
-
-/// 把正文裁到 token 预算内，保留末尾。
-///
-/// `TokenEstimator.trimTail` 的字符数是从预算出发向上收敛（`chars * 3 / 2`），
-/// 中文差不多 1 字 1 token，起点就等于预算，估算永远超一点，于是一路放大到原文，
-/// 等于没裁。这里改从「预算字符数的九成」起手、放不下再折半，能放下的尾部再交给
-/// `trimTail` 收口。Core 那边改之前，写作台的「裁剪正文」走这一条。
-private enum WriterBudgeting {
-    static func trimTail(_ text: String, toTokens budget: Int) -> String {
-        guard budget > 0 else { return "" }
-        guard TokenEstimator.estimate(text) > budget else { return text }
-
-        var chars = min(text.count, max(64, budget * 9 / 10))
-        while chars >= 64 {
-            let start = text.index(text.endIndex, offsetBy: -chars)
-            let slice = String(text[start...])
-            let trimmed = TokenEstimator.trimTail(slice, toTokens: budget)
-            if TokenEstimator.estimate(trimmed) <= budget {
-                return trimmed
-            }
-            chars /= 2
-        }
-        return ""
     }
 }

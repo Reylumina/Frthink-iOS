@@ -447,7 +447,7 @@ struct WriterPane: View {
             .onDisappear {
                 // 生成中内容变高也会让哨兵离开屏幕，不能算用户滚走；
                 // 生成结束后用户再往上翻，才暂停自动跟随。
-                if !controller.isGenerating {
+                if !controller.isBusy {
                     isAtBottom = false
                 }
             }
@@ -476,7 +476,7 @@ struct WriterPane: View {
         )
         let row = WriterMessageBubble(
             message: message,
-            isBusy: controller.isGenerating,
+            isBusy: controller.isBusy,
             isSelecting: selectionMode,
             isSelected: selectedMessageIDs.contains(message.id),
             isInterrupted: session.isInterrupted(message.id),
@@ -495,13 +495,13 @@ struct WriterPane: View {
                 } label: {
                     Label("多选", systemImage: "checklist")
                 }
-                .disabled(controller.isGenerating)
+                .disabled(controller.isBusy)
                 Button(role: .destructive) {
                     messageAction = .deleteMessage(message)
                 } label: {
                     Label("删除这条消息", systemImage: "trash")
                 }
-                .disabled(controller.isGenerating)
+                .disabled(controller.isBusy)
             }
         } else {
             row
@@ -528,7 +528,7 @@ struct WriterPane: View {
             titleLabel
         }
         .accessibilityLabel("当前模型 \(modelLabel)，点按切换")
-        .disabled(controller.isGenerating)
+        .disabled(controller.isBusy)
     }
 
     private var titleLabel: some View {
@@ -577,7 +577,7 @@ struct WriterPane: View {
                 WriterSelectionBar(
                     totalCount: session.payload.messages.count,
                     selectedCount: selectedMessageIDs.count,
-                    isBusy: controller.isGenerating,
+                    isBusy: controller.isBusy,
                     onToggleAll: {
                         if selectedMessageIDs.count == session.payload.messages.count {
                             selectedMessageIDs.removeAll()
@@ -792,7 +792,7 @@ struct WriterPane: View {
     }
 
     private func beginSelection(_ messageID: String) {
-        guard !controller.isGenerating else { return }
+        guard !controller.isBusy else { return }
         dismissKeyboard()
         selectionMode = true
         selectedMessageIDs.insert(messageID)
