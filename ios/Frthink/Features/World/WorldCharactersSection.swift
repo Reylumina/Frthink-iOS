@@ -173,13 +173,13 @@ struct WorldCharactersSection: View {
         .accessibilityLabel("新建人物")
     }
 
-    /// 从正文整理人物卡：增量与从头两种，和概览里是同一组动作。
+    /// 从正文整理人物卡：常规刷新与从头整理两种，和概览里是同一组动作。
     private var refreshMenu: some View {
         Menu {
             Button {
                 onRefresh?()
             } label: {
-                Label("增量刷新", systemImage: "arrow.triangle.2.circlepath")
+                Label("刷新人物卡", systemImage: "arrow.triangle.2.circlepath")
             }
             Button {
                 onRefreshFull?()

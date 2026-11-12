@@ -33,25 +33,26 @@ struct WriterComposerBar: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            generatingBanner
+        HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
+            Button {
+                sendContinuation()
+            } label: {
+                Image(systemName: "wand.and.stars")
+                    .font(Font.subheadline.weight(.medium))
+                    .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Theme.accentSoft))
+            }
+            .buttonStyle(.plain)
+            .disabled(controller.isGenerating || controller.isPreparing)
+            .accessibilityLabel("续写")
 
-            HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
-                Button {
-                    sendContinuation()
-                } label: {
-                    Image(systemName: "wand.and.stars")
-                        .font(Font.subheadline.weight(.medium))
-                        .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Theme.accentSoft))
-                }
-                .buttonStyle(.plain)
-                .disabled(controller.isGenerating || controller.isPreparing)
-                .accessibilityLabel("续写")
+            inputField
 
-                inputField
-
+            if controller.isPreparing {
+                ProgressView()
+                    .frame(width: 44, height: 44)
+            } else {
                 Button {
                     send()
                 } label: {
@@ -65,15 +66,12 @@ struct WriterComposerBar: View {
                 .disabled(!canSend)
                 .accessibilityLabel("发送")
             }
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.s)
         }
-        .glassSurface(radius: 0)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Theme.separator.opacity(0.6))
-                .frame(height: 0.5)
-        }
+        .padding(Theme.Spacing.s)
+        .glassSurface(radius: Theme.Radius.sheet)
+        .padding(.horizontal, Theme.Spacing.m)
+        .padding(.top, Theme.Spacing.s)
+        .padding(.bottom, Theme.Spacing.s)
         .onAppear {
             if autoFocus {
                 focused = true
@@ -90,29 +88,6 @@ struct WriterComposerBar: View {
         .onDisappear {
             // 切页/切书时把没落盘的草稿立刻写掉。
             saveDraft()
-        }
-    }
-
-    /// 生成中的顶部横幅：准备提示词/进度 + 停止。空闲时整段不出现。
-    @ViewBuilder
-    private var generatingBanner: some View {
-        if controller.isGenerating || controller.isPreparing {
-            HStack(spacing: Theme.Spacing.s) {
-                ProgressView().controlSize(.small)
-                Text(controller.isPreparing ? "正在整理提示词…" : "码字机正在写…")
-                    .font(Font.caption)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Button("停止") {
-                    controller.stop()
-                }
-                .font(Font.caption.weight(.medium))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, Theme.Spacing.s)
-            Divider().overlay(Theme.separator)
         }
     }
 
@@ -157,7 +132,10 @@ struct WriterComposerBar: View {
     }
 
     private var inputPlaceholder: String {
-        store.settings.activeProvider == nil
+        if controller.isPreparing {
+            return "码字机准备中…"
+        }
+        return store.settings.activeProvider == nil
             ? "先在设置里添加 AI 服务商"
             : "告诉码字机你想写什么、修改什么或重写什么…"
     }

@@ -92,13 +92,13 @@ struct LibraryProjectRow: View {
                             .lineLimit(1)
                     }
 
-                    HStack(spacing: Theme.Spacing.xs) {
+                    HStack(spacing: Theme.Spacing.s) {
                         Text(LibraryFormat.updatedText(project.updatedAt))
                         if let count = project.bodyCharacterCount, count > 0 {
-                            Text("· \(count.formatted()) 字")
+                            Text("\(count.formatted()) 字")
                         }
                         if branchCount > 1 {
-                            Text("· \(branchCount) 分支")
+                            Text("\(branchCount) 分支")
                         }
                     }
                     .font(Theme.numericSmall)

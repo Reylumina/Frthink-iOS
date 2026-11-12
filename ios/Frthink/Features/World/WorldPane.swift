@@ -101,7 +101,7 @@ struct WorldPane: View {
                     session: session,
                     isBusy: isWorldRefreshing,
                     isActionDisabled: busy != nil,
-                    onRefreshIncremental: { startWorldRefresh(forceFull: false) },
+                    onRefresh: { startWorldRefresh(forceFull: false) },
                     onRefreshFull: { startWorldRefresh(forceFull: true) },
                     onOpenTab: { newTab in
                         withAnimation(.snappy(duration: 0.2)) { tab = newTab }

@@ -73,13 +73,10 @@ enum WorldWorkflow {
         }
 
         let context = try WorldRequestContext.make(store: store)
-        let world = session.payload.world
-        let hasBaseline = !world.characters.isEmpty
-            || !world.styleTemplate.isEmpty
-            || !world.styleNotes.isEmpty
-            || !world.events.isEmpty
-            || world.lastRefreshedAt != nil
-        let incremental = hasBaseline && !forceFull
+        // APK 的「刷新人物卡」按钮走 z6=false（`M1/D1.java:60`）：契约不追加
+        // 增量句，也不是 P31 基线；已有卡片只作为 P30 的只读参考随请求带上。
+        // iOS 不再因为「有旧卡」就自动切换成增量模式，避免和原版提示词偏移。
+        let incremental = false
 
         let sourceHash = await Task.detached(priority: .userInitiated) {
             ContentHash.of(manuscript)

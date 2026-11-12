@@ -8,7 +8,7 @@ struct WorldSettingSection: View {
     var isBusy: Bool
     /// 任何世界任务在跑时都禁用入口，避免点了没反馈。
     var isActionDisabled: Bool = false
-    var onRefreshIncremental: () -> Void
+    var onRefresh: () -> Void
     var onRefreshFull: () -> Void
     /// 点资料计数直接切到对应分栏（人物卡/世界书/事件卡/规则）。
     var onOpenTab: (WorldTab) -> Void = { _ in }
@@ -28,7 +28,7 @@ struct WorldSettingSection: View {
             isPresented: $showingRefreshOptions,
             titleVisibility: .visible
         ) {
-            Button("增量刷新") { onRefreshIncremental() }
+            Button("刷新人物卡") { onRefresh() }
             Button("从头整理（重新分析全部正文）") { onRefreshFull() }
             Button("取消", role: .cancel) {}
         }

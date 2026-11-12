@@ -104,20 +104,8 @@ struct WriterMessageBubble: View {
 
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                header
-                content
-            }
-            .padding(.horizontal, Theme.Spacing.m + 2)
-            .padding(.vertical, Theme.Spacing.m)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .fill(Theme.card)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
-            )
+            header
+            content
             if !isSelecting {
                 footer
                     .padding(.horizontal, Theme.Spacing.xs)
@@ -137,7 +125,7 @@ struct WriterMessageBubble: View {
                     .lineLimit(1)
             }
             if isInterrupted {
-                Text("生成中断")
+                Text("已中断")
                     .font(Font.caption2.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, Theme.Spacing.s)
@@ -308,83 +296,73 @@ struct WriterStreamingBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                HStack(spacing: Theme.Spacing.s) {
-                    WriterAssistantBadge()
-                    ProgressView().controlSize(.mini)
-                    Text(statusText)
-                        .font(Font.caption)
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Spacer(minLength: 0)
-                    Text("\(controller.streamingCharacterCount.formatted()) 字")
-                        .font(Theme.numericSmall)
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
+            HStack(spacing: Theme.Spacing.s) {
+                WriterAssistantBadge()
+                Text("创作中")
+                    .font(Font.caption)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text("\(controller.streamingCharacterCount.formatted()) 字")
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Button {
+                    controller.stop()
+                } label: {
+                    Image(systemName: "stop.fill")
+                        .font(Font.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Theme.separator.opacity(0.35)))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("停止创作")
+            }
 
-                if controller.streamingText.isEmpty {
-                    if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                        // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
-                        // 时页面不能只挂一个转圈，看起来像卡死。
-                        Text(Self.recentLines(reasoning, limit: 6))
-                            .font(Theme.reply)
+            if controller.streamingText.isEmpty {
+                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                    // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
+                    // 时页面不能只挂一个转圈，看起来像卡死。
+                    Text(Self.recentLines(reasoning, limit: 6))
+                        .font(Theme.reply)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("……")
+                        .font(Theme.reply)
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
+                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                    DisclosureGroup(isExpanded: $reasoningExpanded) {
+                        Text(reasoning)
+                            .font(Theme.numeric)
                             .foregroundStyle(.secondary)
-                            .lineLimit(6)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text("……")
-                            .font(Theme.reply)
+                            .textSelection(.enabled)
+                    } label: {
+                        Text("思考过程（\(reasoning.count.formatted()) 字）")
+                            .font(Font.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
-                } else {
-                    if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                        DisclosureGroup(isExpanded: $reasoningExpanded) {
-                            Text(reasoning)
-                                .font(Theme.numeric)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        } label: {
-                            Text("思考过程 · \(reasoning.count.formatted()) 字")
-                                .font(Font.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-
-                    // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
-                    StreamingTextView(
-                        text: controller.streamingText,
-                        fontSize: DynamicTypeFont.bodySize(
-                            store.settings.bodyFontSize,
-                            dynamicTypeSize: dynamicTypeSize
-                        )
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
                 }
+
+                // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
+                StreamingTextView(
+                    text: controller.streamingText,
+                    fontSize: DynamicTypeFont.bodySize(
+                        store.settings.bodyFontSize,
+                        dynamicTypeSize: dynamicTypeSize
+                    )
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, Theme.Spacing.m + 2)
-            .padding(.vertical, Theme.Spacing.m)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .fill(Theme.card)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                    .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
-            )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
-    }
-
-    private var statusText: String {
-        guard controller.streamingText.isEmpty else { return "正在生成" }
-        let count = controller.streamingReasoningCharacterCount
-        return count > 0 ? "思考中 · \(count.formatted()) 字" : "思考中…"
     }
 
     /// 思考过程只显示末尾几行；全文仍留在展开区里。

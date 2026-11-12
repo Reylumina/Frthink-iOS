@@ -326,9 +326,6 @@ struct ReaderPane: View {
                 .font(Theme.numeric)
                 .foregroundStyle(.tertiary)
             if !document.blocks.isEmpty {
-                Text("·")
-                    .font(Theme.numeric)
-                    .foregroundStyle(.tertiary)
                 Text("\(document.characterCount) 字")
                     .font(Theme.numeric)
                     .foregroundStyle(.tertiary)

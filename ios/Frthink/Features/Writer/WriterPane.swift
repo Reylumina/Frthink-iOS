@@ -583,7 +583,6 @@ struct WriterPane: View {
     @ViewBuilder
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            Divider().overlay(Theme.separator)
             if selectionMode {
                 WriterSelectionBar(
                     totalCount: session.payload.messages.count,
