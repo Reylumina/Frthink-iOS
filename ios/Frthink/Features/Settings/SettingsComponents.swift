@@ -21,8 +21,7 @@ struct SettingsLabelRow: View {
             vertical
         }
         .contentShape(Rectangle())
-        .frame(minHeight: Theme.Layout.hitTarget)
-        .compactRowInsets()
+        .frame(minHeight: Theme.Layout.rowContentHeight)
     }
 
     private var horizontal: some View {

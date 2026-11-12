@@ -117,11 +117,12 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
-        /// 列表行上下内边距（§5.1）。行内容 44pt + 上下各 4pt = 52pt 行距。
-        static let rowInsetVertical: CGFloat = 4
-
-        /// 列表行左右内边距：系统 insetGrouped 的值，卡片边缘 16pt + 内容 20pt。
-        static let rowInsetHorizontal: CGFloat = 20
+        /// 列表行的最小内容高度（§5.1）。
+        ///
+        /// 行高 = 这个高度 + 系统的上下内边距。不要写成 44：系统在 iOS 26 上
+        /// 加了 22–30pt 内边距，44 的行会撑到 66–74pt，设置页六行就多占一屏。
+        /// 28 让带图标印章的行落在 50pt 上下，整行可点，热区仍然够。
+        static let rowContentHeight: CGFloat = 28
 
         /// 输入条里控件的行内高度：发送/停止圆、续写图标（§5.9）。
         /// 比 `controlHeight` 小一点：这一条浮在正文上，多一像素都在压字。

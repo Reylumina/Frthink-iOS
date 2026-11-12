@@ -12,27 +12,6 @@ extension View {
     }
 }
 
-// MARK: - 列表行
-
-extension View {
-    /// 列表行的显式内边距。
-    ///
-    /// 系统默认值在 iOS 26 的 insetGrouped 上把行内容（44pt）撑成了 74pt，
-    /// 设置页六行就多占一屏；这里收回 4pt，行距 52pt。显式写死是为了不再
-    /// 跟着系统版本变。左右 20pt 是量出来的系统值：卡片边缘 16pt，行内容
-    /// 从 36pt 起（截图 108px @3x），不写这个值行内容会比标题左移 4pt。
-    func compactRowInsets() -> some View {
-        listRowInsets(
-            EdgeInsets(
-                top: Theme.Layout.rowInsetVertical,
-                leading: Theme.Layout.rowInsetHorizontal,
-                bottom: Theme.Layout.rowInsetVertical,
-                trailing: Theme.Layout.rowInsetHorizontal
-            )
-        )
-    }
-}
-
 // MARK: - 行内控件
 
 /// 行内圆形图标按钮的可见部分：34pt 圆 + 居中符号（§5.1）。
@@ -252,8 +231,7 @@ struct AppSettingsRow: View {
             }
         }
         .contentShape(Rectangle())
-        .frame(minHeight: Theme.Layout.hitTarget)
-        .compactRowInsets()
+        .frame(minHeight: Theme.Layout.rowContentHeight)
     }
 }
 
