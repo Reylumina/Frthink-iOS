@@ -136,20 +136,17 @@ struct WorldRulesSection: View {
         Button {
             editing = kind
         } label: {
-            HStack(spacing: Theme.Spacing.m) {
-                IconTile(symbol: kind.symbol)
-                Text(kind.title)
-                    .font(Font.body)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: Theme.Spacing.s)
-                Text(kind.valueLabel(in: session.payload.world))
-                    .font(Theme.numeric)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: Theme.Spacing.s) {
+                // §2.4：二级页的列表行也用 Label，不加有色方块。
+                SettingsLabelRow(
+                    title: kind.title,
+                    symbol: kind.symbol,
+                    detail: kind.valueLabel(in: session.payload.world)
+                )
                 Image(systemName: "chevron.right")
                     .font(Font.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -38,14 +38,30 @@ struct WriterComposerBar: View {
             HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
                 continuationButton
                 inputField
-                if controller.isPreparing {
+                if controller.isGenerating {
+                    // 生成中主操作变成停止（§5.7）。
+                    // 页面上只留这一个停止入口，气泡头部不再放第二个。
+                    WriterComposerPrimaryButton(
+                        symbol: "stop.fill",
+                        label: "停止创作",
+                        isEnabled: true
+                    ) {
+                        controller.stop()
+                    }
+                } else if controller.isPreparing {
                     ProgressView()
                         .frame(
                             minWidth: Theme.Layout.hitTarget,
                             minHeight: Theme.Layout.hitTarget
                         )
                 } else {
-                    WriterSendButton(isEnabled: canSend) { send() }
+                    WriterComposerPrimaryButton(
+                        symbol: "paperplane.fill",
+                        label: "发送",
+                        isEnabled: canSend
+                    ) {
+                        send()
+                    }
                 }
             }
         }
@@ -199,26 +215,29 @@ private struct WriterComposerFieldSurface: ViewModifier {
     }
 }
 
-/// 发送按钮。iOS 26 是系统玻璃主操作（§5.4 一屏最多一个），17–25 是强调色实心圆钮。
-private struct WriterSendButton: View {
+/// 输入条右侧的主操作：发送 / 停止。
+/// iOS 26 是系统玻璃主操作（§5.4 一屏最多一个），17–25 是强调色实心圆钮。
+private struct WriterComposerPrimaryButton: View {
+    let symbol: String
+    let label: String
     let isEnabled: Bool
     let action: () -> Void
 
     var body: some View {
         if #available(iOS 26.0, *) {
-            label
+            button
                 .buttonStyle(.glassProminent)
                 .buttonBorderShape(.circle)
         } else {
-            label
+            button
                 .buttonStyle(.plain)
                 .background(isEnabled ? Theme.accent : Theme.separator, in: Circle())
         }
     }
 
-    private var label: some View {
+    private var button: some View {
         Button(action: action) {
-            Image(systemName: "paperplane.fill")
+            Image(systemName: symbol)
                 .font(Font.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(
@@ -228,6 +247,6 @@ private struct WriterSendButton: View {
                 .contentShape(Rectangle())
         }
         .disabled(!isEnabled)
-        .accessibilityLabel("发送")
+        .accessibilityLabel(label)
     }
 }

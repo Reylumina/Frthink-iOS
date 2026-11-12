@@ -38,38 +38,34 @@ struct WorldSettingSection: View {
 
     // MARK: - 刷新
 
+    /// 状态行只占一行：图标在文字前，状态/动作在行尾（DESIGN §5.1）。
+    /// 不放解释性副标题（§8.2），也不放 chevron——这一行不是导航。
     private var refreshSection: some View {
         Section {
             HStack(spacing: Theme.Spacing.s) {
                 Button {
                     showingRefreshOptions = true
                 } label: {
-                    HStack(spacing: Theme.Spacing.s) {
+                    HStack(spacing: Theme.Spacing.m) {
                         if isBusy {
                             ProgressView().controlSize(.mini)
                         } else {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(Font.footnote)
+                                .font(Theme.label)
                                 .foregroundStyle(Theme.accent)
                         }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("刷新人物卡")
-                                .font(Font.body)
-                                .foregroundStyle(.primary)
-                            Text(refreshStatusLine)
-                                .font(Font.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
+                        Text("刷新人物卡")
+                            .font(Theme.label)
+                            .foregroundStyle(.primary)
                         Spacer(minLength: Theme.Spacing.s)
                         if !isBusy {
-                            Image(systemName: "chevron.down")
-                                .font(Font.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
+                            StatusPill(
+                                text: refreshStatus.text,
+                                tone: refreshStatus.tone
+                            )
                         }
                     }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: Theme.Layout.hitTarget)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -147,19 +143,12 @@ struct WorldSettingSection: View {
             onOpenTab(tab)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                IconTile(symbol: symbol, size: 26)
-                Text(title)
-                    .font(Font.body)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: Theme.Spacing.s)
-                Text(value)
-                    .font(Theme.numeric)
-                    .foregroundStyle(.secondary)
+                // §2.4：列表行用 Label 对齐图标列，不加有色方块。
+                SettingsLabelRow(title: title, symbol: symbol, detail: value)
                 Image(systemName: "chevron.right")
                     .font(Font.caption2.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -167,36 +156,27 @@ struct WorldSettingSection: View {
 
     // MARK: - 状态
 
-    private var refreshStatusLine: String {
-        if isBusy {
-            return "正在整理人物卡，完成前可以先去别的分栏"
-        }
+    /// 行尾状态只留一句能扫的：未整理 / 已整理 / 未完成（§5.1、§8.2）。
+    private var refreshStatus: (text: String, tone: AppTone) {
         let world = session.payload.world
-        let total = session.manuscriptCharacterCount
-        if let date = world.lastRefreshedAt {
-            let stamp = date.formatted(date: .abbreviated, time: .shortened)
-            // 大书模式按码点推进，进度不是「段」而是「字」。
-            if world.analysisSourceCodePointCount >= WorldDigest.wholeTextCodePointThreshold {
-                let total = world.analysisSourceCodePointCount
-                let done = min(max(world.refreshedUpTo, 0), total)
-                if world.analysisWorldRefreshComplete {
-                    return "人物卡上次整理于 \(stamp)，已分析全部 \(total.formatted()) 字"
-                }
-                return "人物卡上次整理于 \(stamp)，已分析 \(done.formatted())/\(total.formatted()) 字"
-            }
-            let segmentCount = world.analysisSegmentCount
-            let done = world.completedAnalysisSegments.count
-            if segmentCount > 0 {
-                if done >= segmentCount {
-                    return "人物卡上次整理于 \(stamp)，已完成全部 \(segmentCount) 段"
-                }
-                return "人物卡上次整理于 \(stamp)，已完成 \(done)/\(segmentCount) 段"
-            }
-            if total == 0 {
-                return "人物卡上次整理于 \(stamp)"
-            }
-            return "人物卡上次整理于 \(stamp)，正文现有 \(total.formatted()) 字"
+        guard world.lastRefreshedAt != nil else {
+            return (text: "未整理", tone: .neutral)
         }
-        return total == 0 ? "人物卡还没整理过" : "人物卡还没整理过，正文现有 \(total.formatted()) 字"
+        return isRefreshIncomplete(world)
+            ? (text: "未完成", tone: .warning)
+            : (text: "已整理", tone: .neutral)
+    }
+
+    /// 上次刷新是否还有没整理完的段（大书模式看码点进度，分段模式看段数）。
+    private func isRefreshIncomplete(_ world: WorldBook) -> Bool {
+        if world.analysisSourceCodePointCount >= WorldDigest.wholeTextCodePointThreshold {
+            return !world.analysisWorldRefreshComplete
+        }
+        let total = world.analysisSegmentCount
+        guard total > 0 else { return false }
+        let done = Set(
+            world.completedAnalysisSegments.filter { $0 >= 0 && $0 < total }
+        ).count
+        return done < total
     }
 }

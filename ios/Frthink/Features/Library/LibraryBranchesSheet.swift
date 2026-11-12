@@ -32,6 +32,9 @@ struct LibraryBranchesSheet: View {
             .groupedPageBackground()
             .navigationTitle("分支")
             .navigationBarTitleDisplayMode(.inline)
+            // 这个 sheet 会写 `store.toast`（创建分支的结果），根视图的 toast 被
+            // 展示层盖住，所以在这一层再挂一次。
+            .sheetToast()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }

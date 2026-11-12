@@ -26,6 +26,8 @@ struct TranslationPane: View {
     /// 每轮跑批一个 token。中止后立刻再开一轮时，旧任务的收尾不会把新任务的状态抹掉。
     @State private var runID = UUID()
     @State private var importing = false
+    /// 跑批中点「关闭」先确认，不静默停掉一轮翻译。
+    @State private var confirmingStop = false
     /// 原文编辑区高度。@ScaledMetric 让大字号下它也随内容变高，不写死。
     @ScaledMetric(relativeTo: .body) private var sourceEditorHeight: CGFloat = 160
 
@@ -54,6 +56,10 @@ struct TranslationPane: View {
         // 翻译进行中下滑关闭会中止这一轮；用「关闭」明确退出。
         .interactiveDismissDisabled(isRunning)
         .sheetToast()
+        .onChange(of: isRunning) { _, running in
+            // 跑批自己结束（或已在别处停掉）时，不再留着「停止并关闭？」。
+            if !running { confirmingStop = false }
+        }
         .onChange(of: session.sourceText) { _, _ in
             session.saveSource()
         }
@@ -66,8 +72,18 @@ struct TranslationPane: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                SheetCloseButton { dismiss() }
+                SheetCloseButton(title: "关闭") { requestClose() }
             }
+        }
+        .confirmationDialog(
+            "停止并关闭？",
+            isPresented: $confirmingStop,
+            titleVisibility: .visible
+        ) {
+            Button("停止并关闭", role: .destructive) {
+                stopRunningAndClose()
+            }
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -248,6 +264,26 @@ struct TranslationPane: View {
         session.saveTranslations()
     }
 
+    /// 点「关闭」：跑批中先确认，不静默中止这一轮；空闲时直接关。
+    @MainActor
+    private func requestClose() {
+        if isRunning {
+            confirmingStop = true
+        } else {
+            dismiss()
+        }
+    }
+
+    /// 明确停止并关闭。`stop()` 会保留已完成段落、复位进度并给出结果句；
+    /// 若跑批在确认框打开期间已自行结束，就只关闭，不再多报一次「已停止」。
+    @MainActor
+    private func stopRunningAndClose() {
+        if isRunning {
+            stop()
+        }
+        dismiss()
+    }
+
     @MainActor
     private func rebuildPlan() {
         let current = session.sourceText
@@ -375,7 +411,7 @@ struct TranslationPane: View {
         runTask = nil
         isRunning = false
         session.saveTranslations()
-        store.toast = "已中止翻译"
+        store.toast = "已停止翻译"
     }
 
     /// 写回一段译文：同一个 owner/project/target/段号就覆盖，否则追加。

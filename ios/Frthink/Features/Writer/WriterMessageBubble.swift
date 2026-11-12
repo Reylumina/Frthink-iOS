@@ -311,7 +311,6 @@ struct WriterStreamingBubble: View {
 
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @ScaledMetric(relativeTo: .caption) private var stopMarkDiameter: CGFloat = 28
     @State private var reasoningExpanded = false
 
     private var bodyFontSize: CGFloat {
@@ -328,6 +327,8 @@ struct WriterStreamingBubble: View {
         .padding(.vertical, Theme.Spacing.xs)
     }
 
+    /// 生成中的状态行：只报「创作中 + 字数」。
+    /// 停止入口在输入条的主操作键上（§5.7），这里不再放第二个停止按钮。
     private var header: some View {
         HStack(spacing: Theme.Spacing.s) {
             WriterAssistantBadge()
@@ -340,22 +341,6 @@ struct WriterStreamingBubble: View {
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
                 .contentTransition(.numericText())
-            Button {
-                controller.stop()
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(Theme.badge)
-                    .foregroundStyle(.secondary)
-                    .frame(width: stopMarkDiameter, height: stopMarkDiameter)
-                    .background(Theme.accentSoft, in: Circle())
-                    .frame(
-                        minWidth: Theme.Layout.hitTarget,
-                        minHeight: Theme.Layout.hitTarget
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("停止创作")
         }
     }
 

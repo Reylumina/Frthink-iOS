@@ -122,7 +122,7 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 本地无 Swift 编译器，验证走三条通道。
 
 1. `script/swift_check.py` 做跨文件符号检查，可检测重复定义和缺失引用，无法检测类型错误。
-2. `-runSelfCheck` 在模拟器里跑 33 项纯逻辑检查；`Real Archive Verify` 用仓库内 fixture 跑导入、导出、重开、落盘读回。CI 断言 `ALL PASS`。
+2. `-runSelfCheck` 在模拟器里跑 65 项纯逻辑检查；`Real Archive Verify` 用仓库内 fixture 跑导入、导出、重开、落盘读回。CI 断言 `ALL PASS`。
 3. 截图流水线启动模拟器，逐 Tab 截图，人工检查。
 
 未覆盖项：联网路径、真机文件选择器、真机键盘和滚动、Android 端读取 iOS 导出的文件。这些仅能通过真机手测。

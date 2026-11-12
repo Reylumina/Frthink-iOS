@@ -10,6 +10,25 @@ enum WriterChatLayout {
     static let bottomAnchor = "writer-chat-bottom"
 }
 
+/// 多选的选择集运算。
+///
+/// 多选只作用于当前已加载的消息：对话按窗口只渲染最近 N 条，隐藏的历史行
+/// 既看不到也点不到，不能因为「全选」就被一起删掉。
+enum WriterSelection {
+    /// 「全选 / 取消全选」后的选择集。
+    ///
+    /// 当前选择集恰好就是可见集合时清空，否则只选可见的那些——
+    /// 历史里没显示的消息永远不会进选择集。
+    static func togglingAll(current: Set<String>, visible: Set<String>) -> Set<String> {
+        current == visible ? [] : visible
+    }
+
+    /// 消息列表变化后把选择集裁回还能看到的消息。
+    static func pruning(_ current: Set<String>, visible: Set<String>) -> Set<String> {
+        current.intersection(visible)
+    }
+}
+
 /// 多选条：替换输入条，只保留选择/删除/完成。
 struct WriterSelectionBar: View {
     let totalCount: Int

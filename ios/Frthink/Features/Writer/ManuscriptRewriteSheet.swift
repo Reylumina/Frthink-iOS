@@ -23,9 +23,17 @@ struct ManuscriptRewriteSheet: View {
     @State private var task: Task<Void, Never>?
     /// 每轮改写一个 token；停止后立刻再开始时，旧任务的收尾不会把新任务的状态抹掉。
     @State private var runID = UUID()
+    /// 有草稿或结果时关闭前确认放弃（§5.8）。
+    @State private var showDiscardConfirm = false
 
     private var trimmedResult: String {
         result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 有没有会丢的东西：未发送的要求、已经生成的结果。
+    private var hasUnsavedWork: Bool {
+        !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !trimmedResult.isEmpty
     }
 
     var body: some View {
@@ -77,10 +85,7 @@ struct ManuscriptRewriteSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        task?.cancel()
-                        dismiss()
-                    }
+                    Button("取消") { cancelTapped() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isRunning {
@@ -93,11 +98,20 @@ struct ManuscriptRewriteSheet: View {
                     }
                 }
             }
+            // 有未保存的指令或已经有生成结果时，下滑关闭会被半路丢掉；
+            // 只有「取消」这条明确入口能关，关闭前再确认一次（§5.8）。
+            .interactiveDismissDisabled(hasUnsavedWork || isRunning)
+            .confirmationDialog(
+                "放弃这次改写？",
+                isPresented: $showDiscardConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("放弃", role: .destructive) { close() }
+                Button("继续编辑", role: .cancel) {}
+            }
             .onDisappear {
                 task?.cancel()
             }
-            // 生成中下滑关闭会静默丢掉这次改写，禁止误触；用「停止」或「取消」退出。
-            .interactiveDismissDisabled(isRunning)
         }
     }
 
@@ -216,6 +230,21 @@ struct ManuscriptRewriteSheet: View {
         task?.cancel()
         task = nil
         isRunning = false
+    }
+
+    /// 「取消」：有草稿或结果时先确认放弃，否则直接关。
+    private func cancelTapped() {
+        if hasUnsavedWork || isRunning {
+            showDiscardConfirm = true
+        } else {
+            close()
+        }
+    }
+
+    private func close() {
+        task?.cancel()
+        task = nil
+        dismiss()
     }
 
     private func apply() {

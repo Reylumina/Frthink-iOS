@@ -85,6 +85,8 @@ struct LibraryInputSheet: View {
             .pageBackground()
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
+            // 重命名/改简介的结果句要在这个 sheet 里可见。
+            .sheetToast()
             .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

@@ -288,6 +288,9 @@ struct WorldCharactersSection: View {
     private struct CharacterRow: View {
         let card: CharacterCard
 
+        /// 头像圆圈的尺寸是控件尺寸，跟随 Dynamic Type 缩放（DESIGN §2.4）。
+        @ScaledMetric(relativeTo: .body) private var avatarSize: CGFloat = 44
+
         private var subtitle: String {
             card.identity.isEmpty ? card.personality : card.identity
         }
@@ -295,9 +298,9 @@ struct WorldCharactersSection: View {
         var body: some View {
             HStack(alignment: .top, spacing: Theme.Spacing.m) {
                 Image(systemName: "person.fill")
-                    .font(.system(size: 18, weight: .regular))
+                    .font(Theme.label)
                     .foregroundStyle(Color.secondary)
-                    .frame(width: 44, height: 44)
+                    .frame(width: avatarSize, height: avatarSize)
                     .background(Circle().fill(Theme.accentSoft))
                     .accessibilityHidden(true)
 

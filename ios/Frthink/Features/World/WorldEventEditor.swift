@@ -9,6 +9,8 @@ struct WorldEventEditor: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDelete = false
+    /// 标题冲突时点「取消」：确认放弃这份草稿。
+    @State private var confirmingDiscard = false
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: EventCard
 
@@ -37,6 +39,9 @@ struct WorldEventEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onDisappear { commitDraft() }
+        // 标题冲突且有未保存改动时不能滑走：滑走会走 onDisappear，草稿被静默丢掉。
+        // 用户必须先改标题，或点「取消」确认放弃。
+        .interactiveDismissDisabled(blocksDismissal)
         .confirmationDialog(
             "删除事件卡",
             isPresented: $confirmingDelete,
@@ -51,6 +56,13 @@ struct WorldEventEditor: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        if blocksDismissal {
+            ToolbarItem(placement: .cancellationAction) {
+                SheetCloseButton {
+                    confirmingDiscard = true
+                }
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Button("完成") {
                 commitDraft()
@@ -120,6 +132,14 @@ struct WorldEventEditor: View {
             }
         }
         .scrollContentBackground(.hidden)
+        .confirmationDialog(
+            "放弃未保存的修改？",
+            isPresented: $confirmingDiscard,
+            titleVisibility: .visible
+        ) {
+            Button("放弃修改", role: .destructive) { discardDraft() }
+            Button("继续编辑", role: .cancel) {}
+        }
     }
 
     @ViewBuilder
@@ -150,6 +170,34 @@ struct WorldEventEditor: View {
         )
     }
 
+    /// 已保存的那一版。用来区分「用户改过」与「只是打开看看」。
+    private var storedEvent: EventCard? {
+        session.payload.world.events.first { $0.id == eventID }
+    }
+
+    /// 有未保存改动，且标题与其它卡冲突：滑走会走 onDisappear，草稿被静默丢掉。
+    /// 只有这种状态需要拦住下滑并给一个明确的放弃入口。
+    private var blocksDismissal: Bool {
+        Self.shouldBlockDismissal(
+            draft: draft,
+            stored: storedEvent,
+            hasDuplicateTitle: hasDuplicateTitle
+        )
+    }
+
+    /// 离开前是否必须先处理草稿：标题冲突 + 有未保存改动。
+    ///
+    /// 没有改动时不需要拦（`onDisappear` 的自动保存本来就是空操作）；
+    /// 标题不冲突时也不用拦（滑走会正常保存）。
+    static func shouldBlockDismissal(
+        draft: EventCard,
+        stored: EventCard?,
+        hasDuplicateTitle: Bool
+    ) -> Bool {
+        guard let stored else { return false }
+        return draft != stored && hasDuplicateTitle
+    }
+
     /// 事件卡标题唯一性：合并与抽取都按 title 认事件，同名卡只能有一张。
     ///
     /// 保存侧校验（APK `str:17316`「事件名称重复，请先整理事件卡」）。空标题不拦：
@@ -173,7 +221,7 @@ struct WorldEventEditor: View {
         }) else { return }
         guard draft != session.payload.world.events[index] else { return }
         // 标题与其它卡冲突时整份草稿都不写：保存按钮已经禁用并给了行内原因，
-        // 滑走页面也按放弃处理，不让同名卡进库。
+        // 下滑也已被拦住，用户只能改标题或点「取消」确认放弃。
         guard !hasDuplicateTitle else { return }
         var event = draft
         event.updatedAt = Date()
@@ -183,6 +231,15 @@ struct WorldEventEditor: View {
     }
 
     // MARK: - 操作
+
+    /// 确认放弃后把草稿恢复成已保存的那版再关闭：`onDisappear` 的自动保存
+    /// 于是变成空操作，同名标题与其它未保存改动都不会进库。
+    private func discardDraft() {
+        if let storedEvent {
+            draft = storedEvent
+        }
+        dismiss()
+    }
 
     private func deleteEvent() {
         session.payload.world.events.removeAll { $0.id == eventID }

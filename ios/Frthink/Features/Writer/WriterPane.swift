@@ -21,8 +21,15 @@ struct WriterPane: View {
     @State private var controller = WriterController()
     /// 输入框文本与焦点都在子视图里，打字不触发整页重算。
     @State private var composer = WriterComposerModel()
-    /// 应用级撤销的 target（`UndoManager` 只认引用类型），由这里登记与清理。
-    @State private var undoTargets: [WriterUndoTarget] = []
+    /// 应用级撤销动作（`UndoManager` 只保存 unowned target），由这里登记与清理。
+    @State private var undoActions: [WriterBodyUndoAction] = []
+    /// 页面自带的「已插入正文 · 撤销」提示。
+    ///
+    /// 全局 toast 只有文字，放不下撤销按钮；这条只服务插入/追加这类可撤销动作，
+    /// 几秒后自动消失（§4.3）。
+    @State private var undoPrompt: WriterUndoPrompt?
+    /// 输入条（含多选条）的高度：撤销提示浮在它上面，不挤动对话内容。
+    @State private var bottomBarHeight: CGFloat = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
@@ -69,6 +76,13 @@ struct WriterPane: View {
 
         static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
         func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+
+    /// 带「撤销」的轻提示。一次只显示一条，几秒后自动消失。
+    fileprivate struct WriterUndoPrompt: Identifiable {
+        let id = UUID()
+        let text: String
+        let action: () -> Void
     }
 
     private enum MessageAction: Identifiable {
@@ -149,7 +163,34 @@ struct WriterPane: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { updateBottomBarHeight(proxy.size.height) }
+                                .onChange(of: proxy.size.height) { _, height in
+                                    updateBottomBarHeight(height)
+                                }
+                        }
+                    }
             }
+            // 撤销提示浮在输入条上方，不改变对话区高度（§4.3）。
+            .overlay(alignment: .bottom) {
+                if let prompt = undoPrompt {
+                    undoPromptView(prompt)
+                        .padding(.bottom, bottomBarHeight + Theme.Spacing.s)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                        .task(id: prompt.id) {
+                            try? await Task.sleep(for: .seconds(4))
+                            guard !Task.isCancelled else { return }
+                            undoPrompt = nil
+                        }
+                }
+            }
+            .themeAnimation(Theme.motionLayout, value: undoPrompt?.id)
             .onChange(of: controller.isGenerating) { _, active in
                 if active { exitSelection() }
             }
@@ -207,7 +248,7 @@ struct WriterPane: View {
         } message: {
             Text(messageAction?.messageText ?? "")
         }
-        .sheet(item: $activeSheet, onDismiss: resolveCursorAfterSheet) { sheet in
+        .sheet(item: $activeSheet, onDismiss: sheetDidDismiss) { sheet in
             sheetContent(for: sheet)
         }
         .fileImporter(
@@ -334,6 +375,11 @@ struct WriterPane: View {
         Array(session.payload.messages.suffix(visibleMessageCount))
     }
 
+    /// 已经加载出来的消息 id。多选只作用于这一批，隐藏的历史不进选择集。
+    private var selectableMessageIDs: Set<String> {
+        Set(windowedMessages.map(\.id))
+    }
+
     private var chatList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -409,6 +455,13 @@ struct WriterPane: View {
                 }
             }
             .onChange(of: session.payload.messages.count) { oldCount, newCount in
+                // 新消息会把窗口外的旧行挤出去：选择集裁回还能看到的那些。
+                if !selectedMessageIDs.isEmpty {
+                    selectedMessageIDs = WriterSelection.pruning(
+                        selectedMessageIDs,
+                        visible: selectableMessageIDs
+                    )
+                }
                 // 删除/回退会让内容变短，停在原偏移就会露出大片空白；变短时一律回到底部。
                 let shouldFollow = forceScrollToBottom || isAtBottom || newCount < oldCount
                 forceScrollToBottom = false
@@ -434,9 +487,10 @@ struct WriterPane: View {
             }
             .onChange(of: controller.streamingMessageID) { _, messageID in
                 // 生成结束：流式气泡换成正式气泡，整段按全文重新排版。
-                // 回底不依赖瞬时的 isAtBottom——底部哨兵可能在这一帧先被挤出屏幕。
+                // 只跟着还在底部的用户落底；已经上滑看历史时保持位置，
+                // 让「回到最新」按钮出现就行（§5.9）。
                 guard messageID == nil else { return }
-                isAtBottom = true
+                guard isAtBottom else { return }
                 settleAtBottom(proxy)
             }
             .overlay(alignment: .bottomTrailing) {
@@ -484,6 +538,41 @@ struct WriterPane: View {
     private func updateColumnWidth(_ width: CGFloat) {
         guard width > 0, width != columnWidth else { return }
         columnWidth = width
+    }
+
+    /// 输入条高度：撤销提示按它上浮，不挤动对话区。
+    private func updateBottomBarHeight(_ height: CGFloat) {
+        guard height > 0, height != bottomBarHeight else { return }
+        bottomBarHeight = height
+    }
+
+    /// 插入/追加成功后显示带「撤销」的轻提示（§4.3）。
+    private func presentUndoPrompt(_ text: String, undo: @escaping () -> Void) {
+        undoPrompt = WriterUndoPrompt(text: text, action: undo)
+    }
+
+    private func undoPromptView(_ prompt: WriterUndoPrompt) -> some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Text(prompt.text)
+                .font(Theme.label)
+                .foregroundStyle(.primary)
+            Button("撤销") {
+                undoPrompt = nil
+                prompt.action()
+            }
+            .font(Font.subheadline.weight(.semibold))
+            .foregroundStyle(Theme.accent)
+            .buttonStyle(.plain)
+            .frame(
+                minWidth: Theme.Layout.hitTarget,
+                minHeight: Theme.Layout.hitTarget
+            )
+            .contentShape(Rectangle())
+        }
+        .padding(.leading, Theme.Spacing.l)
+        .padding(.trailing, Theme.Spacing.xs)
+        .glassSurface(Capsule())
+        .accessibilityElement(children: .contain)
     }
 
     /// 正文栏宽度上限：字号 × 36，宽屏居中（§2.3、§5.3）。
@@ -694,15 +783,14 @@ struct WriterPane: View {
         VStack(spacing: 0) {
             if selectionMode {
                 WriterSelectionBar(
-                    totalCount: session.payload.messages.count,
+                    totalCount: selectableMessageIDs.count,
                     selectedCount: selectedMessageIDs.count,
                     isBusy: controller.isBusy,
                     onToggleAll: {
-                        if selectedMessageIDs.count == session.payload.messages.count {
-                            selectedMessageIDs.removeAll()
-                        } else {
-                            selectedMessageIDs = Set(session.payload.messages.map(\.id))
-                        }
+                        selectedMessageIDs = WriterSelection.togglingAll(
+                            current: selectedMessageIDs,
+                            visible: selectableMessageIDs
+                        )
                     },
                     onDelete: {
                         messageAction = .deleteSelected(selectedMessageIDs.count)
@@ -731,18 +819,18 @@ struct WriterPane: View {
             autoFocus: LaunchArguments.focusComposer
         )
         .sensoryFeedback(.impact(weight: .light), trigger: session.payload.messages.count) { _, _ in store.settings.hapticsEnabled }
+        // 弹窗只决定「怎么发」：用户气泡和挂起的发送都在控制器里保留着，
+        // 三条路径各自走 `dismissBudget`，取消才收回气泡、把指令放回输入框（§4.3）。
         .alert("上下文预算不足", isPresented: $budgetPresented) {
             Button("裁剪正文末尾后重试") {
                 controller.retryAfterTrimming(session: session, store: store)
             }
             Button("查看提示词回看") {
+                controller.dismissBudget(.inspectPrompt, session: session)
                 activeSheet = .snapshots
             }
             Button("取消", role: .cancel) {
-                if let text = controller.takePendingInstruction() {
-                    composer.text = text
-                }
-                controller.dismissBudgetAlert()
+                controller.dismissBudget(.cancel, session: session)
             }
         } message: {
             Text(controller.budgetAlert?.message ?? "模型上下文窗不足以同时预留输出和安全空间。")
@@ -772,46 +860,44 @@ struct WriterPane: View {
         let receipt = session.insertIntoManuscript(block, at: base)
         cursorOffset = base + (block as NSString).length
         cursorPlaced = true
-        registerBodyUndo(receipt, actionName: "插入正文")
-        store.toast = "已插入正文"
+        let action = registerBodyUndo(receipt, actionName: "插入正文")
+        presentUndoPrompt("已插入正文") {
+            action.undoViaButton()
+        }
     }
 
     /// 应用级动作登记进窗口的 UndoManager（§5.8）。
     ///
-    /// 撤销走系统栈：⌘Z / ⇧⌘Z、摇一摇和编辑菜单都能撤回，页面上不再放常驻按钮。
-    /// 闭包只捕获会话和 store，不捕获视图本身，避免把 `@State` 存储带进撤销栈。
-    private func registerBodyUndo(_ receipt: BodyAppendReceipt, actionName: String) {
-        guard let undoManager = WriterUndo.manager() else { return }
-        let session = self.session
-        let store = self.store
-        let target = WriterUndoTarget { [weak session] in
-            guard let session else { return }
-            // 撤销栈是后进先出；栈顶不是这次插入时说明中间有别的改动，不去误删。
-            guard session.payload.bodyAppendReceipts.last?.id == receipt.id else {
-                store.toast = "插入位置已被改动，无法撤销"
-                return
-            }
-            session.undoLastBodyAppend()
-            store.toast = "已撤销"
-        }
+    /// 撤销/重做是两个独立方法：撤销用插入回执删掉原文，重做按「位置 + 原文」
+    /// 插回去。撤销走系统栈：⌘Z / ⇧⌘Z、摇一摇和编辑菜单都能用上。
+    /// 窗口拿不到 `UndoManager` 时动作照样保留，页面的「撤销」提示直接调它。
+    private func registerBodyUndo(
+        _ receipt: BodyAppendReceipt,
+        actionName: String
+    ) -> WriterBodyUndoAction {
+        let action = WriterBodyUndoAction(
+            receipt: receipt,
+            actionName: actionName,
+            undoManager: WriterUndo.manager(),
+            session: session,
+            store: store
+        )
         // 撤销栈只持有 target 的 unowned 引用，页面必须自己保住它，
         // 所以不清空、不丢引用；离开页面时先摘动作再释放。
-        undoTargets.append(target)
-        undoManager.setActionName(actionName)
-        undoManager.registerUndo(withTarget: target) { target in
-            target.perform()
-        }
+        undoActions.append(action)
+        action.registerInitialUndo()
+        return action
     }
 
     /// 离开写作台时清掉本页登记的撤销动作：撤销栈挂在窗口上，
     /// 不清就会切到别的书之后撤回旧书正文。撤销栈只持 unowned 引用，
-    /// 摘不掉动作时宁可把盒子一起留着，也不能让它悬空。
+    /// 摘不掉动作时宁可把对象一起留着，也不能让它悬空。
     private func discardUndoActions() {
         guard let undoManager = WriterUndo.manager() else { return }
-        for target in undoTargets {
-            undoManager.removeAllActions(withTarget: target)
+        for action in undoActions {
+            undoManager.removeAllActions(withTarget: action)
         }
-        undoTargets.removeAll()
+        undoActions.removeAll()
     }
 
     /// 插入块前后补空行，避免和原文粘成一句。
@@ -864,6 +950,14 @@ struct WriterPane: View {
         case .bodyRange:
             WriterBodyRangeSheet(session: session)
         }
+    }
+
+    /// 浮层关闭后的收尾。
+    private func sheetDidDismiss() {
+        resolveCursorAfterSheet()
+        // 预算弹窗里点了「查看提示词回看」：挂起的发送和用户气泡都还在，
+        // 回到创作页再弹一次确认，指令不会丢在半路。
+        controller.republishBudgetAlert()
     }
 
     /// 浮层关闭后补上光标：负数表示阅读页没有放过插入点，按末尾处理。
@@ -955,8 +1049,10 @@ struct WriterPane: View {
             let receipt = session.appendToManuscript(message.content)
             cursorOffset = session.manuscriptLength
             cursorPlaced = true
-            registerBodyUndo(receipt, actionName: "追加到正文")
-            store.toast = "已追加到正文"
+            let action = registerBodyUndo(receipt, actionName: "追加到正文")
+            presentUndoPrompt("已追加到正文") {
+                action.undoViaButton()
+            }
         case .cleanup(let message):
             session.keepOnlySelectedVariant(for: message.id)
             store.toast = "已清理历史版本"

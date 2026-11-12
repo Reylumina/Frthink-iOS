@@ -1779,6 +1779,38 @@ enum SelfCheck {
             return "事件卡同名拦截 ok"
         }
 
+        // 事件卡：标题冲突且有未保存改动时不能滑走，否则 onDisappear 会把草稿静默丢掉。
+        check("world.eventEditorDiscardGuard") {
+            let stored = EventCard(id: "a", title: "雨夜来客", scene: "旧书店")
+            var draft = stored
+            draft.scene = "码头"
+            try expect(
+                WorldEventEditor.shouldBlockDismissal(
+                    draft: draft,
+                    stored: stored,
+                    hasDuplicateTitle: true
+                ),
+                "有改动且标题冲突时应拦住下滑"
+            )
+            try expect(
+                !WorldEventEditor.shouldBlockDismissal(
+                    draft: draft,
+                    stored: stored,
+                    hasDuplicateTitle: false
+                ),
+                "标题不冲突时不应拦住下滑"
+            )
+            try expect(
+                !WorldEventEditor.shouldBlockDismissal(
+                    draft: stored,
+                    stored: stored,
+                    hasDuplicateTitle: true
+                ),
+                "没有改动时不应拦住下滑"
+            )
+            return "事件卡下滑丢弃保护 ok"
+        }
+
         // 规则编辑页：AI 在页面开着时更新同一字段，没动过草稿就换成新值，
         // 动过就保留用户输入（否则「完成」会用旧草稿盖掉 AI 结果）。
         check("world.ruleDraftSync") {
@@ -1810,6 +1842,51 @@ enum SelfCheck {
                 "已摘要消息被重复消费：\(pending.map(\.id))"
             )
             return "手动更新只看未摘要消息 ok"
+        }
+
+        // 长期规则「停止」：请求返回后再取消，不能写摘要、不能新增历史版本；
+        // 调用方拿到 .cancelled 就跳过落盘。
+        check("world.rulesCancelKeepsSummary") {
+            var world = WorldBook()
+            _ = world.applySummaryUpdate(content: "旧规则", newKeys: [], now: 100)
+            let revisions = world.summaryPreviousRevisions
+            let updatedAt = world.summaryUpdatedAt
+            let selected = [ChatMessage(id: "u1", role: .user, content: "新要求")]
+
+            var cancelledWorld = world
+            let cancelledCommit = WorldRulesWorkflow.applyRulesResult(
+                "新规则",
+                selected: selected,
+                now: 200,
+                cancelled: true,
+                world: &cancelledWorld
+            )
+            try expect(
+                cancelledCommit == .cancelled,
+                "取消后应返回 cancelled，实际 \(cancelledCommit)"
+            )
+            try expect(cancelledWorld.longTermRules == "旧规则", "取消后规则被改写")
+            try expect(
+                cancelledWorld.summaryPreviousRevisions == revisions,
+                "取消后历史版本变了"
+            )
+            try expect(
+                cancelledWorld.summaryUpdatedAt == updatedAt,
+                "取消后更新时间变了"
+            )
+
+            // 对照：同一份结果未取消时会写入，证明上面的断言不是空转。
+            var appliedWorld = world
+            let appliedCommit = WorldRulesWorkflow.applyRulesResult(
+                "新规则",
+                selected: selected,
+                now: 200,
+                cancelled: false,
+                world: &appliedWorld
+            )
+            try expect(appliedCommit == .updated, "未取消时应写入，实际 \(appliedCommit)")
+            try expect(appliedWorld.longTermRules == "新规则", "未取消时没有写入")
+            return "取消不写摘要 / 不新增历史 ok"
         }
 
         // 素材断点：正文前缀没变才续跑，正文改过从头归纳。

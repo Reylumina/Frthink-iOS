@@ -150,9 +150,10 @@ struct RootView: View {
         }
         .preferredColorScheme(store.settings.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
-            // 切后台、控制中心下拉、来电都会先变 inactive；这时先把挂起编辑写盘。
+            // 切后台、控制中心下拉、来电都会先变 inactive；这时先把挂起编辑写盘，
+            // 并向系统申请后台额度，避免写到一半被挂起。
             if phase != .active {
-                Task { await store.flushDirtySessions() }
+                Task { await store.flushDirtySessionsInBackground() }
             }
         }
         // 「界面动画帧率」开关：关掉后这次事务里的所有动画都不播，

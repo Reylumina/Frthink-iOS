@@ -45,7 +45,15 @@ enum Theme {
     static let tintedFillOpacity: Double = 0.12
 
     /// 用户气泡：实底 + 反色文字，和系统「信息」的收发关系一致。
-    static let bubbleFill = Color.accentColor
+    ///
+    /// 底色是系统强调色压深 18%：原样的系统蓝配白字只有 4.0:1，达不到正文
+    /// 尺寸需要的 4.5:1（§5.6）。压深仍由系统色推导，不引入自定义色值。
+    static let bubbleFill: Color = {
+        if #available(iOS 18.0, *) {
+            return Color.accentColor.mix(with: .black, by: 0.18)
+        }
+        return Color.accentColor
+    }()
     static let bubbleForeground = Color.white
 
     // MARK: - 字体

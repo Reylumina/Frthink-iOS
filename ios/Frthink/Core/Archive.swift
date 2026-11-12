@@ -2114,11 +2114,14 @@ enum FrthinkArchive {
         if !archived("streamByDefault", "streamingResponses") {
             result.streamByDefault = local.streamByDefault
         }
-        if !archived("corpusEnabled", "corpusLibrary") {
-            result.corpusEnabled = local.corpusEnabled
-        }
-        if !archived("corpusLibraries", "corpusLibrary") {
+        // 语料库按「有没有条目」判断，而不是按键存在：Android 备份的顶层
+        // `corpusLibrary` 是 `CorpusLibrary?`、默认 null（spec 03 §5.1），仓库
+        // fixture 里也只有没有条目的空库节点。键在但没有任何条目时不算存档
+        // 提供了这个字段，否则全量导入会把本机语料清空并立刻落盘。
+        let hasCorpusContent = imported.corpusLibraries.contains { !$0.entries.isEmpty }
+        if !hasCorpusContent {
             result.corpusLibraries = local.corpusLibraries
+            result.corpusEnabled = local.corpusEnabled
         }
         if !archived("enabledUniverseEntryIDs") {
             result.enabledUniverseEntryIDs = local.enabledUniverseEntryIDs

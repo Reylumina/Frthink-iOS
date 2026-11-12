@@ -50,6 +50,12 @@ final class WriterController {
 
     /// 准备阶段的 Task；点停止或切页时取消。
     private var prepareTask: Task<Void, Never>?
+    /// 后台组装本身。`Task.detached` 不继承调用方取消，取消必须打到这个句柄上，
+    /// 否则停止后旧组装还在跑，立刻重发就会有两份 56 万字组装并发。
+    private var prepareAssemblyTask: Task<WriterPromptRetryResult, Error>?
+    /// 每次开始准备 +1。旧任务晚一步收尾时靠它认出自己已经过期，
+    /// 不去改新一轮的 `isPreparing` / `prepareTask`。
+    private var prepareGeneration = 0
 
     /// 非 nil 时弹上下文预算提示；由视图观察后弹 alert。
     private(set) var budgetAlert: BudgetAlert?
@@ -101,8 +107,33 @@ final class WriterController {
         }
     }
 
-    /// 预算不足时挂起、等用户确认的操作。
-    private var pending: PendingAction?
+    /// 预算不足时挂起的发送。
+    ///
+    /// 用户气泡在弹窗期间一直保留在会话里——只有「取消」和重试失败才收回，
+    /// 「查看提示词回看」只是离开弹窗，挂起状态原样保留，回来后再弹一次确认。
+    private struct SuspendedSend {
+        let action: PendingAction
+        /// 已经落盘的用户气泡；重试时复用它，不再加第二条。
+        let userMessageID: String?
+        /// 弹窗内容，回看结束后重新弹出时用同一份。
+        let alert: BudgetAlert
+    }
+
+    private var suspended: SuspendedSend?
+
+    /// 预算弹窗的关闭方式。
+    enum BudgetDismissal {
+        /// 先去看提示词回看：挂起的发送和用户气泡都保留。
+        case inspectPrompt
+        /// 用户明确取消：收回用户气泡，把指令还给输入框。
+        case cancel
+
+        /// 是否收回已经落盘的用户气泡。只有明确取消才收。
+        var retractsUserMessage: Bool { self == .cancel }
+
+        /// 是否把用户指令还给输入框。
+        var restoresInstruction: Bool { self == .cancel }
+    }
 
     /// 用户按过停止。流正常结束（没抛错）时也要按取消处理。
     private var stopRequested = false
@@ -204,8 +235,12 @@ final class WriterController {
     /// 停止：准备阶段取消组装，生成阶段取消流。
     func stop() {
         if isPreparing {
+            prepareGeneration &+= 1
             prepareTask?.cancel()
             prepareTask = nil
+            // detached 组装不继承取消，必须显式取消，否则停完立刻重发会并排跑两份。
+            prepareAssemblyTask?.cancel()
+            prepareAssemblyTask = nil
             isPreparing = false
             // 指令在准备开始时已经作为用户气泡落盘，这里不再把它吐回输入框，
             // 否则会和气泡里的同一句话重复。
@@ -216,30 +251,45 @@ final class WriterController {
         task?.cancel()
     }
 
-    /// 预算弹窗里点「取消」：把挂起的指令还给输入框，返回 nil 表示没有可恢复的输入。
-    func takePendingInstruction() -> String? {
-        defer { pending = nil }
-        if case .send(let text)? = pending {
-            return text
+    /// 预算弹窗的所有关闭路径都走这里，避免视图和控制器各改一半状态。
+    ///
+    /// - `.inspectPrompt`：只是先去看提示词回看，挂起的发送和用户气泡都保留；
+    /// - `.cancel`：用户明确取消，收回用户气泡并把指令还给输入框。
+    func dismissBudget(_ intent: BudgetDismissal, session: ProjectSession) {
+        if intent.retractsUserMessage, let suspended {
+            retractSend(
+                suspended.action,
+                userMessageID: suspended.userMessageID,
+                session: session
+            )
+            self.suspended = nil
         }
-        return nil
+        budgetAlert = nil
     }
 
-    func dismissBudgetAlert() {
-        budgetAlert = nil
+    /// 看完提示词回看回到创作页：挂起的发送还在，重新弹一次预算确认。
+    func republishBudgetAlert() {
+        guard let suspended else { return }
+        budgetAlert = suspended.alert
     }
 
     /// 预算弹窗里点「裁剪正文后重试」。
     ///
-    /// 裁剪与重新组装都放后台；失败时把指令还给输入框，并给出具体原因。
+    /// 裁剪与重新组装都放后台；用户气泡沿用弹窗前那一条，不再新增，
+    /// 失败时才收回并把指令还给输入框。
     func retryAfterTrimming(session: ProjectSession, store: AppStore) {
-        guard let action = pending else {
+        guard let suspended else {
             budgetAlert = nil
             return
         }
-        guard let builderAction = builderAction(for: action, session: session) else {
+        guard let builderAction = builderAction(for: suspended.action, session: session) else {
             budgetAlert = nil
-            restoreFailedRetry(action, store: store)
+            self.suspended = nil
+            retractSend(
+                suspended.action,
+                userMessageID: suspended.userMessageID,
+                session: session
+            )
             store.errorMessage = "上下文预算信息已过期，请重新发送。"
             return
         }
@@ -249,21 +299,38 @@ final class WriterController {
             store: store,
             manuscript: session.manuscript,
             bodyRange: .full,
-            retry: action
+            retry: suspended.action,
+            preparedUserMessageID: suspended.userMessageID
         )
-        if !started {
-            // 弹窗已经被点掉，不能再把挂起动作和旧提示留在状态里。
+        if started {
+            // 重试接管了那条用户气泡：挂起状态到此为止，后面的失败由
+            // `finishPreparation` 用 `Preparation` 里的回执处理。
             budgetAlert = nil
-            restoreFailedRetry(action, store: store)
+            self.suspended = nil
+        } else {
+            // 连请求都没开始：收回挂起的用户气泡，把指令还给输入框。
+            budgetAlert = nil
+            self.suspended = nil
+            retractSend(
+                suspended.action,
+                userMessageID: suspended.userMessageID,
+                session: session
+            )
         }
     }
 
-    /// 重试失败时把指令还给输入框（只有「发送」有可恢复的文本）。
-    private func restoreFailedRetry(_ action: PendingAction, store: AppStore) {
+    /// 这次发送没成：收回提前落盘的用户气泡，把指令还给输入框（只有「发送」有文本）。
+    private func retractSend(
+        _ action: PendingAction,
+        userMessageID: String?,
+        session: ProjectSession
+    ) {
+        if let userMessageID {
+            session.deleteMessage(userMessageID)
+        }
         if case .send(let text) = action {
             instructionToRestore = text
         }
-        pending = nil
     }
 
     // MARK: - 准备与提交
@@ -287,11 +354,12 @@ final class WriterController {
         manuscript: String,
         bodyRange: PromptLibrary.BodyRange,
         retry: PendingAction? = nil,
-        regenerateFallbackVariant: Int? = nil
+        regenerateFallbackVariant: Int? = nil,
+        preparedUserMessageID: String? = nil
     ) -> Bool {
         do {
             let (client, provider) = try activeClient(store: store)
-            let snapshot = promptSnapshot(
+            let snapshot = try promptSnapshot(
                 action: action,
                 session: session,
                 store: store,
@@ -301,8 +369,9 @@ final class WriterController {
             )
             // 先把用户气泡落盘：组装在 56 万字书上要几秒，这期间被杀掉不能让
             // 指令只活在一个 Task 里。历史快照已经取过，不会把这条重复带进去。
-            var userMessageID: String?
-            if case .send(let instruction) = action {
+            // 预算重试复用弹窗前已经落盘的那一条，不再加第二遍。
+            var userMessageID = preparedUserMessageID
+            if userMessageID == nil, case .send(let instruction) = action {
                 userMessageID = session.addUserMessage(instruction).id
                 session.saveNow()
             }
@@ -315,19 +384,44 @@ final class WriterController {
                 provider: provider
             )
             isPreparing = true
+            prepareGeneration &+= 1
+            let generation = prepareGeneration
             prepareTask?.cancel()
+            prepareAssemblyTask?.cancel()
+            // 组装是同步重活，放后台；取消必须显式打到这个任务的句柄上。
+            let assembly = Task.detached(priority: .userInitiated) { () throws in
+                if retry == nil {
+                    return WriterPromptRetryResult.prepared(
+                        try WriterPromptBuilder.prepareCancellable(snapshot)
+                    )
+                }
+                return try WriterPromptBuilder.retryAfterTrimming(snapshot)
+            }
+            prepareAssemblyTask = assembly
             prepareTask = Task { @MainActor [weak self] in
-                let result: WriterPromptRetryResult = await Task.detached(
-                    priority: .userInitiated
-                ) {
-                    if retry == nil {
-                        return WriterPromptRetryResult.prepared(
-                            WriterPromptBuilder.prepare(snapshot)
-                        )
-                    }
-                    return WriterPromptBuilder.retryAfterTrimming(snapshot)
-                }.value
-                guard let self, !Task.isCancelled else { return }
+                let result: WriterPromptRetryResult
+                do {
+                    result = try await assembly.value
+                } catch {
+                    // 旧一轮的准备晚一步收尾时不要碰新一轮的状态。
+                    guard let self, self.prepareGeneration == generation else { return }
+                    self.prepareAssemblyTask = nil
+                    self.isPreparing = false
+                    self.prepareTask = nil
+                    // 取消来自 stop()/重发：状态已经复位，不提交半成品、不弹错。
+                    guard !Task.isCancelled, !(error is CancellationError) else { return }
+                    self.retractSend(
+                        preparation.action,
+                        userMessageID: preparation.userMessageID,
+                        session: session
+                    )
+                    store.errorMessage = error.localizedDescription
+                    return
+                }
+                guard let self,
+                      self.prepareGeneration == generation,
+                      !Task.isCancelled else { return }
+                self.prepareAssemblyTask = nil
                 self.isPreparing = false
                 self.prepareTask = nil
                 self.finishPreparation(
@@ -345,6 +439,9 @@ final class WriterController {
     }
 
     /// 主线程拍值类型快照；组装工作不碰会话对象。
+    ///
+    /// 预算推导也在这里做完：窗口连输出都放不下时直接抛错，`start` 的 catch
+    /// 按原版文案报错并返回 false，不会带着一个假预算把请求发出去。
     private func promptSnapshot(
         action: WriterPromptAction,
         session: ProjectSession,
@@ -352,8 +449,9 @@ final class WriterController {
         manuscript: String,
         bodyRange: PromptLibrary.BodyRange,
         provider: ProviderSetting
-    ) -> WriterPromptSnapshot {
-        WriterPromptSnapshot(
+    ) throws -> WriterPromptSnapshot {
+        let plan = try budget(for: provider, settings: store.settings)
+        return WriterPromptSnapshot(
             action: action,
             manuscript: manuscript,
             messages: session.payload.messages,
@@ -366,7 +464,7 @@ final class WriterController {
             bodyPromptTailCodePoints: session.payload.bodyPromptTailCodePoints,
             continuationAnchor: session.payload.continuationAnchor,
             explicitBodyRange: bodyRange,
-            inputBudget: budget(for: provider, settings: store.settings).effectiveInputBudget
+            inputBudget: plan.effectiveInputBudget
         )
     }
 
@@ -376,34 +474,62 @@ final class WriterController {
         session: ProjectSession,
         store: AppStore
     ) {
-        let plan = budget(for: preparation.provider, settings: store.settings)
+        let plan: PromptBudget
+        do {
+            plan = try budget(for: preparation.provider, settings: store.settings)
+        } catch {
+            // 预算算不出来就不能发：收回用户气泡和挂起状态，按原版文案报错。
+            budgetAlert = nil
+            suspended = nil
+            retractSend(
+                preparation.action,
+                userMessageID: preparation.userMessageID,
+                session: session
+            )
+            store.errorMessage = error.localizedDescription
+            return
+        }
         switch result {
         case .cannotTrim:
             budgetAlert = nil
-            discardPreparedUserMessage(preparation, session: session)
-            restoreFailedRetry(preparation.action, store: store)
+            suspended = nil
+            retractSend(
+                preparation.action,
+                userMessageID: preparation.userMessageID,
+                session: session
+            )
             store.errorMessage = "上下文放不下：裁剪正文后仍然超出模型上下文窗。可以先回退几轮对话、精简正文，或在设置里调小输出上限。"
         case .stillTooLarge(let characters):
             budgetAlert = nil
-            discardPreparedUserMessage(preparation, session: session)
-            restoreFailedRetry(preparation.action, store: store)
+            suspended = nil
+            retractSend(
+                preparation.action,
+                userMessageID: preparation.userMessageID,
+                session: session
+            )
             store.errorMessage = "上下文放不下：只保留正文末尾 \(characters) 字仍然超出模型上下文窗，请在设置里调小输出上限。"
         case .prepared(let prepared):
             if prepared.estimatedInputTokens > plan.effectiveInputBudget {
-                discardPreparedUserMessage(preparation, session: session)
-                pending = preparation.action
-                budgetAlert = BudgetAlert(
+                // 气泡保留：弹窗只决定「怎么发」，用户点取消才收回（§4.3）。
+                let alert = BudgetAlert(
                     estimated: prepared.estimatedInputTokens,
                     limit: plan.effectiveInputBudget,
                     window: plan.contextWindow ?? 0,
                     reserve: plan.outputBudget
                 )
+                suspended = SuspendedSend(
+                    action: preparation.action,
+                    userMessageID: preparation.userMessageID,
+                    alert: alert
+                )
+                budgetAlert = alert
                 return
             }
             budgetAlert = nil
-            pending = nil
+            suspended = nil
             commit(
                 prepared,
+                plan: plan,
                 preparation: preparation,
                 session: session,
                 store: store
@@ -411,17 +537,9 @@ final class WriterController {
         }
     }
 
-    /// 预算弹窗或准备失败：把提前落盘的用户气泡收回去，文字由弹窗/输入框接管。
-    private func discardPreparedUserMessage(
-        _ preparation: Preparation,
-        session: ProjectSession
-    ) {
-        guard let id = preparation.userMessageID else { return }
-        session.deleteMessage(id)
-    }
-
     private func commit(
         _ prepared: WriterPreparedPrompt,
+        plan: PromptBudget,
         preparation: Preparation,
         session: ProjectSession,
         store: AppStore
@@ -435,6 +553,7 @@ final class WriterController {
             run(
                 client: preparation.client,
                 provider: preparation.provider,
+                plan: plan,
                 prepared: prepared,
                 session: session,
                 store: store,
@@ -449,6 +568,7 @@ final class WriterController {
             run(
                 client: preparation.client,
                 provider: preparation.provider,
+                plan: plan,
                 prepared: prepared,
                 session: session,
                 store: store,
@@ -468,6 +588,7 @@ final class WriterController {
             run(
                 client: preparation.client,
                 provider: preparation.provider,
+                plan: plan,
                 prepared: prepared,
                 session: session,
                 store: store,
@@ -534,23 +655,17 @@ final class WriterController {
 
     /// 预算推导，照抄原版 `L1/e3.java:22-55`：
     /// `effectiveInputBudget = min(inputBudget, contextWindow - outputBudget - 1024)`。
-    private func budget(for provider: ProviderSetting, settings: AppSettings) -> PromptBudget {
+    ///
+    /// 窗口连输出都放不下时 `PromptBudget.make` 抛 `BudgetError`；这里直接往上传，
+    /// 由 `start` 按原版文案报错并停下，不再退化成「输入预算为准」继续发超窗请求。
+    private func budget(for provider: ProviderSetting, settings: AppSettings) throws -> PromptBudget {
         let window = settings.contextWindowTokens > 0
             ? settings.contextWindowTokens
             : TokenEstimator.contextWindow(for: provider.resolvedModel)
-        if let made = try? PromptBudget.make(
+        return try PromptBudget.make(
             settings: settings,
             model: provider.resolvedModel,
             contextWindowOverride: window
-        ) {
-            return made
-        }
-        // 窗口连输出都放不下：退化成「输入预算为准」，准备阶段的预算检查会拦住。
-        return PromptBudget(
-            inputBudget: settings.inputBudgetTokens,
-            outputBudget: settings.reservedOutputTokens,
-            effectiveInputBudget: settings.inputBudgetTokens,
-            contextWindow: window
         )
     }
 
@@ -559,6 +674,7 @@ final class WriterController {
     private func run(
         client: any LLMClient,
         provider: ProviderSetting,
+        plan: PromptBudget,
         prepared: WriterPreparedPrompt,
         session: ProjectSession,
         store: AppStore,
@@ -591,7 +707,6 @@ final class WriterController {
         // 先落一次盘，保证进程在首个 3 秒窗口内被杀也能看到“生成中”。
         session.saveNow()
 
-        let plan = budget(for: provider, settings: store.settings)
         let request = LLMRequest(
             model: provider.resolvedModel,
             messages: messages,
@@ -880,7 +995,13 @@ final class WriterController {
         guard settings.autoConversationSummary, !autoSummarizing,
               let provider = settings.activeProvider else { return }
         let threshold = min(max(settings.conversationSummaryThresholdPercent, 1), 100)
-        let limit = budget(for: provider, settings: settings).effectiveInputBudget
+        let limit: Int
+        do {
+            limit = try budget(for: provider, settings: settings).effectiveInputBudget
+        } catch {
+            // 自动摘要只是后台维护：预算本身不成立时跳过，不额外弹错。
+            return
+        }
         let used = TokenEstimator.estimate(
             messages: PromptComposer.llmMessages(from: session.payload.messages)
         )

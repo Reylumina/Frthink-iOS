@@ -40,6 +40,15 @@ enum WorldBusy: Equatable {
     }
 }
 
+/// 世界任务登记令牌的持有盒。
+///
+/// 令牌来自「登记这个任务之后」，而任务闭包要读它，所以用引用盒子在
+/// 「登记」与「收尾」之间传递；闭包捕获的是盒子本身（`let`），不是可变局部变量。
+/// 只在主线程读写。
+private final class WorldTaskToken {
+    var value: UUID?
+}
+
 struct WorldPane: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
@@ -238,16 +247,25 @@ struct WorldPane: View {
     ///
     /// 任务登记到 `AppStore`，切书时由根视图取消；只靠视图 `@State` 的话，
     /// 视图销毁后任务还在对已经被驱逐的会话落盘。
+    ///
+    /// 登记返回令牌，收尾时用同一个令牌调用 `finishWorldTask(for:token:)`：
+    /// 切书后同一本书可能已经由新页面登记了另一个任务，旧任务只清自己那一条。
     private func startTrackedTask(_ work: @escaping @MainActor () async -> Void) {
+        // 令牌要在任务闭包里读，而它来自「登记这个任务之后」；用一个引用盒子
+        // 传递，避免闭包捕获可变的局部变量。
+        let token = WorldTaskToken()
         let task = Task { @MainActor in
             await work()
             self.worldTask = nil
-            // 不在这里清登记：切书后同一本书可能已经由新页面登记了另一个任务，
-            // 旧任务收尾时清掉会把新任务的取消入口一起丢掉。登记只由
-            // `registerWorldTask`（覆盖并取消前一个）和 `cancelWorldTask`（切书）维护。
+            if let value = token.value {
+                self.store.finishWorldTask(
+                    for: self.session.project.id,
+                    token: value
+                )
+            }
         }
         worldTask = task
-        store.registerWorldTask(task, for: session.project.id)
+        token.value = store.registerWorldTask(task, for: session.project.id)
     }
 
     /// 四类世界任务共用的入口：占位、进度、取消文案、错误上屏收在一处。

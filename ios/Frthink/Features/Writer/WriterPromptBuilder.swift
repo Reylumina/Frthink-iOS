@@ -51,9 +51,29 @@ enum WriterPromptRetryResult {
 
 enum WriterPromptBuilder {
 
-    /// 一次组装。纯函数，不碰会话与磁盘。
+    /// 一次组装。纯函数，不碰会话与磁盘；不做取消检查（自检这类纯逻辑调用用）。
     static func prepare(_ snapshot: WriterPromptSnapshot) -> WriterPreparedPrompt {
+        build(snapshot, checkpoint: {})
+    }
+
+    /// 可取消的组装：每个耗时阶段前检查任务取消。
+    ///
+    /// 56 万字时一次组装要几秒，用户点「停止」或改发别的内容后必须立刻退出，
+    /// 否则旧组装还在后台跑，新请求又起一份，两份同时读整本书。
+    static func prepareCancellable(_ snapshot: WriterPromptSnapshot) throws -> WriterPreparedPrompt {
+        try build(snapshot) {
+            try Task.checkCancellation()
+        }
+    }
+
+    /// 组装本体。`checkpoint` 在每个阶段前调用，调用方决定要不要检查取消。
+    private static func build(
+        _ snapshot: WriterPromptSnapshot,
+        checkpoint: () throws -> Void
+    ) rethrows -> WriterPreparedPrompt {
+        try checkpoint()
         let effective = effectiveBody(snapshot)
+        try checkpoint()
         let assembly = PromptAssembly.from(
             world: snapshot.world,
             manuscript: effective.text,
@@ -63,6 +83,7 @@ enum WriterPromptBuilder {
             enabledUniverseEntryIDs: snapshot.enabledUniverseEntryIDs,
             bodyRange: effective.range
         )
+        try checkpoint()
 
         let history: [LLMMessage]
         let built: [LLMMessage]
@@ -100,8 +121,14 @@ enum WriterPromptBuilder {
                 )
             }
         }
+        try checkpoint()
 
-        let trimmed = trimHistory(built, budget: snapshot.inputBudget)
+        let trimmed = try trimHistory(
+            built,
+            budget: snapshot.inputBudget,
+            checkpoint: checkpoint
+        )
+        try checkpoint()
         return WriterPreparedPrompt(
             messages: trimmed.messages,
             sourceIds: assembly.sourceIds,
@@ -111,11 +138,13 @@ enum WriterPromptBuilder {
     }
 
     /// 预算不足时把正文裁到末尾再组装。原逻辑在控制器里同步跑两遍组装，
-    /// 长书上点一次「裁剪后重试」会冻住界面；这里整体放后台。
-    static func retryAfterTrimming(_ snapshot: WriterPromptSnapshot) -> WriterPromptRetryResult {
+    /// 长书上点一次「裁剪后重试」会冻住界面；这里整体放后台，并且可以被打断。
+    static func retryAfterTrimming(_ snapshot: WriterPromptSnapshot) throws -> WriterPromptRetryResult {
+        try Task.checkCancellation()
         var full = snapshot
         full.explicitBodyRange = .full
-        let preparedFull = prepare(full)
+        let preparedFull = try prepareCancellable(full)
+        try Task.checkCancellation()
 
         // 预算基数必须用这次真正会发出去的正文片段：默认只发末尾 5000 码点，
         // 拿整本正文的估算去裁会把 50 万字的书裁到 55 万字，仍然超窗。
@@ -125,10 +154,11 @@ enum WriterPromptBuilder {
             512,
             TokenEstimator.estimate(body.text) - max(excess, 0)
         )
-        let trimmed = WriterBudgeting.trimTail(
+        let trimmed = try WriterBudgeting.trimTail(
             body.text,
             toTokens: manuscriptBudget
         )
+        try Task.checkCancellation()
         guard !trimmed.isEmpty, trimmed != body.text else {
             return .cannotTrim
         }
@@ -136,7 +166,8 @@ enum WriterPromptBuilder {
         var next = snapshot
         next.manuscript = trimmed
         next.explicitBodyRange = .tail(count: trimmed.unicodeScalars.count)
-        let prepared = prepare(next)
+        let prepared = try prepareCancellable(next)
+        try Task.checkCancellation()
         guard prepared.estimatedInputTokens <= snapshot.inputBudget else {
             return .stillTooLarge(characters: trimmed.count)
         }
@@ -174,8 +205,9 @@ enum WriterPromptBuilder {
     /// 超预算就停；不拆散用户指令与助手回复。system 块和本轮用户指令永远保留。
     private static func trimHistory(
         _ messages: [LLMMessage],
-        budget: Int
-    ) -> (messages: [LLMMessage], omitted: Int) {
+        budget: Int,
+        checkpoint: () throws -> Void
+    ) rethrows -> (messages: [LLMMessage], omitted: Int) {
         guard messages.count > 1 else { return (messages, 0) }
         var system: LLMMessage?
         var tail: LLMMessage?
@@ -201,6 +233,7 @@ enum WriterPromptBuilder {
             + (tail.map { TokenEstimator.estimate($0.content) } ?? 0)
         var keptTurns: [[LLMMessage]] = []
         for turn in turns.reversed() {
+            try checkpoint()
             let cost = turn.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
             if used + cost > budget { break }
             used += cost
@@ -224,12 +257,14 @@ enum WriterPromptBuilder {
 /// 等于没裁。这里改从「预算字符数的九成」起手、放不下再折半，能放下的尾部再交给
 /// `trimTail` 收口。
 enum WriterBudgeting {
-    static func trimTail(_ text: String, toTokens budget: Int) -> String {
+    static func trimTail(_ text: String, toTokens budget: Int) throws -> String {
         guard budget > 0 else { return "" }
         guard TokenEstimator.estimate(text) > budget else { return text }
 
         var chars = min(text.count, max(64, budget * 9 / 10))
         while chars >= 64 {
+            // 每次折半都要重跑一次二分估算，长正文上这一步最贵，先看有没有被取消。
+            try Task.checkCancellation()
             let start = text.index(text.endIndex, offsetBy: -chars)
             let slice = String(text[start...])
             let trimmed = TokenEstimator.trimTail(slice, toTokens: budget)

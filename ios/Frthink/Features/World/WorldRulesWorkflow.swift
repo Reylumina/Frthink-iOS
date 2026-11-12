@@ -101,6 +101,9 @@ enum WorldRulesWorkflow {
             if error.isLLMCancellation { throw CancellationError() }
             throw WorldRunError(message: "摘要未更新：\(error.localizedDescription)")
         }
+        // 请求期间用户可能点了停止：取消后不写规则、不落盘，按「已停止」上报。
+        // 其它三个世界流程都在 await 之后检查，这里以前漏了，点了停止仍会写摘要。
+        try Task.checkCancellation()
 
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
@@ -116,16 +119,55 @@ enum WorldRulesWorkflow {
             return RulesOutcome(updated: false)
         }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
+        // 先写副本：取消时连副本都不回写，摘要、历史版本和更新时间都不动。
+        var world = session.payload.world
+        switch Self.applyRulesResult(
+            text,
+            selected: selected,
+            now: now,
+            cancelled: Task.isCancelled,
+            world: &world
+        ) {
+        case .cancelled:
+            // 检查之后才到的取消：同样按「已停止」上报，不落盘。
+            throw CancellationError()
+        case .unchanged:
+            return RulesOutcome(updated: false)
+        case .updated:
+            session.payload.world = world
+            session.scheduleSave()
+            return RulesOutcome(updated: true)
+        }
+    }
+
+    // MARK: - 写回
+
+    /// 一次规则更新的写回结果。
+    enum RulesCommit: Equatable {
+        case updated
+        case unchanged
+        /// 用户在等请求期间点了停止：结果丢弃，摘要与历史版本都不动。
+        case cancelled
+    }
+
+    /// 把模型输出写回世界书。
+    ///
+    /// `cancelled` 为真时什么都不写并返回 `.cancelled`：用户点了「停止」以后，
+    /// 已经拿到的输出也不该改摘要、不该新增历史版本，更不该落盘。
+    static func applyRulesResult(
+        _ text: String,
+        selected: [ChatMessage],
+        now: Int64,
+        cancelled: Bool,
+        world: inout WorldBook
+    ) -> RulesCommit {
+        guard !cancelled else { return .cancelled }
         let keys = selected.map {
             SummaryKey.messageKey(id: $0.id, content: $0.content)
         }
-        let changed = session.payload.world.applySummaryUpdate(
-            content: text,
-            newKeys: keys,
-            now: now
-        )
-        session.scheduleSave()
-        return RulesOutcome(updated: changed)
+        return world.applySummaryUpdate(content: text, newKeys: keys, now: now)
+            ? .updated
+            : .unchanged
     }
 
     // MARK: - 输入

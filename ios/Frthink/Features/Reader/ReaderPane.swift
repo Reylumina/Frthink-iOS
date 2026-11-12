@@ -47,6 +47,11 @@ struct ReaderPane: View {
     @State private var isVisible = false
     /// 首帧到排版完成之间显示加载态，避免把「正在排版」误报成「正文还是空的」。
     @State private var isLoadingDocument = true
+    /// 章节在显示文本里的偏移（译文模式按长度比例折算）。跟 `document` 一起更新，
+    /// 不在 body 里逐帧重算——几千章的长篇也不让每帧都扫一遍章节表。
+    @State private var chapterDisplayOffsets: [Int] = []
+    /// 当前滚动位置落在第几章。随 `anchorOffset` 更新，body 里只读结果。
+    @State private var currentChapterIndex: Int?
 
     init(session: ProjectSession) {
         self.session = session
@@ -105,6 +110,10 @@ struct ReaderPane: View {
         }
         .onChange(of: modeRaw) { _, _ in
             if isVisible { scheduleRebuild(immediate: true) }
+        }
+        // 章节索引是后台扫描的派生数据，扫完或重扫后刷新一次折算结果。
+        .onChange(of: session.payload.chapters) { _, _ in
+            refreshChapterOffsets()
         }
         // 换书由 RootView 的 `.id(session.project.id)` 重建整页，这里不用再监听。
         // 搜索防抖：打字停下 220ms 再扫全文；输入变了或页面走了，上一轮自动取消。
@@ -316,6 +325,7 @@ struct ReaderPane: View {
             guard let start, start != anchorOffset else { return }
             anchorOffset = start
             lastOffset = start
+            refreshCurrentChapter()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -386,15 +396,10 @@ struct ReaderPane: View {
         )
     }
 
-    private var chapterOffsets: [Int] {
-        session.payload.chapters.map { displayOffset(for: $0) }
-    }
-
     private var currentChapterID: String? {
         let chapters = session.payload.chapters
         guard !chapters.isEmpty else { return nil }
-        let offsets = chapterOffsets
-        guard let index = offsets.lastIndex(where: { $0 <= anchorOffset + 1 }) else {
+        guard let index = currentChapterIndex, chapters.indices.contains(index) else {
             return chapters.first?.id
         }
         return chapters[index].id
@@ -403,11 +408,23 @@ struct ReaderPane: View {
     private var currentChapterTitle: String? {
         let chapters = session.payload.chapters
         guard !chapters.isEmpty else { return nil }
-        let offsets = chapterOffsets
-        guard let index = offsets.lastIndex(where: { $0 <= anchorOffset + 1 }) else {
+        guard let index = currentChapterIndex, chapters.indices.contains(index) else {
             return chapters.first?.title
         }
         return chapters[index].title
+    }
+
+    /// 章节偏移只在文档重建和章节表变化时算一次；body 里直接读缓存。
+    private func refreshChapterOffsets() {
+        chapterDisplayOffsets = session.payload.chapters.map { displayOffset(for: $0) }
+        refreshCurrentChapter()
+    }
+
+    /// 当前章按滚动锚点定位；滚动/跳转时才扫一遍，body 不做线性查找。
+    private func refreshCurrentChapter() {
+        currentChapterIndex = chapterDisplayOffsets.lastIndex(where: {
+            $0 <= anchorOffset + 1
+        })
     }
 
     /// 章节的 `location` 是原文里的 UTF-16 偏移。译文是把分段按顺序拼起来的，
@@ -425,7 +442,7 @@ struct ReaderPane: View {
     // MARK: - 跳转
 
     private func stepChapter(_ delta: Int) {
-        let offsets = chapterOffsets
+        let offsets = chapterDisplayOffsets
         guard !offsets.isEmpty else {
             store.toast = "正文里还没扫到章节标题"
             return
@@ -452,6 +469,7 @@ struct ReaderPane: View {
         let start = document.blocks[index].start
         anchorOffset = start
         lastOffset = start
+        refreshCurrentChapter()
         // 只写滚动位置绑定：它同时也是跳转驱动，避免和 scrollTo 抢位置。
         withAnimation(Theme.motion(Theme.motionSelection, reduceMotion: reduceMotion)) {
             scrolledBlockStart = start
@@ -561,19 +579,21 @@ struct ReaderPane: View {
                 return
             }
 
-            let text = mode == .translation
-                ? translationText
-                : session.manuscript
-            let manuscriptSnapshot = session.manuscript
+            // 译文模式只排版译文。章节位置折算所需的原文长度走元数据
+            // （`session.manuscriptLength` 在正文未加载时读 `body.meta`），
+            // 不再为了量长度去读 `session.manuscript`——那会把整本正文同步解密一遍。
+            let isTranslation = mode == .translation
+            let text = isTranslation ? translationText : session.manuscript
+            let sourceLength = isTranslation ? session.manuscriptLength : 0
             let result = await Task.detached(priority: .userInitiated) {
                 (
                     ReaderDocument(text: text),
-                    (manuscriptSnapshot as NSString).length
+                    (text as NSString).length
                 )
             }.value
             guard !Task.isCancelled else { return }
             document = result.0
-            manuscriptLength = result.1
+            manuscriptLength = isTranslation ? sourceLength : result.1
             applyRebuiltDocument(preferredOffset: preferredOffset)
         }
     }
@@ -586,11 +606,14 @@ struct ReaderPane: View {
             highlightMap = [:]
             matchIndex = 0
             isSearching = false
+            chapterDisplayOffsets = []
+            currentChapterIndex = nil
             return
         }
         let index = ReaderLocator.blockIndex(for: clamp(preferredOffset), in: document.blocks)
         anchorOffset = document.blocks[index].start
         scrolledBlockStart = anchorOffset
+        refreshChapterOffsets()
         performSearch()
     }
 }

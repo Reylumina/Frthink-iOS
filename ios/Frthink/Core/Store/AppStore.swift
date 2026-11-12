@@ -31,7 +31,8 @@ final class AppStore {
     ///
     /// 任务句柄原本只挂在 `WorldPane` 的 `@State` 上；切书后视图销毁、任务还在跑，
     /// 被驱逐的旧会话继续写同一个 `payload.json`。切书时这里统一取消。
-    @ObservationIgnored private var worldTasks: [String: Task<Void, Never>] = [:]
+    /// 令牌用来区分新旧任务：旧任务收尾时只能清掉自己那一条登记。
+    @ObservationIgnored private var worldTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
 
     init(fileStore: FileStore = FileStore()) {
         self.fileStore = fileStore
@@ -70,6 +71,20 @@ final class AppStore {
         }
     }
 
+    /// 同上，但向系统申请一点后台执行额度。
+    ///
+    /// `flushDirtySessions()` 是异步的：不申请额度的话，`scenePhase` 的 onChange
+    /// 立刻返回，进程可能在写盘途中被挂起，最后一段输入仍会丢。
+    func flushDirtySessionsInBackground() async {
+        let identifier = UIApplication.shared.beginBackgroundTask(withName: "flush-sessions")
+        defer {
+            if identifier != .invalid {
+                UIApplication.shared.endBackgroundTask(identifier)
+            }
+        }
+        await flushDirtySessions()
+    }
+
     /// 只保留当前书稿的会话缓存。切书时调用；非当前书先落盘再释放，
     /// 避免多本 56 万字书同时驻留内存，也避免旧会话的挂起保存盖住新书。
     func trimSessionCache(keeping keepIDs: Set<String>) async {
@@ -87,16 +102,25 @@ final class AppStore {
 
     /// 登记正在跑的世界任务；同一本书同时只允许一个。
     ///
-    /// 结束不清登记：下一次登记会覆盖并取消前一个，切书/删书走 `cancelWorldTask`。
-    /// 旧任务收尾时清掉登记会把同书的新任务一起摘掉，所以不提供「完成」入口。
-    func registerWorldTask(_ task: Task<Void, Never>, for projectID: String) {
-        worldTasks[projectID]?.cancel()
-        worldTasks[projectID] = task
+    /// 返回的令牌交给收尾方：任务结束时用同一个令牌调用 `finishWorldTask`，
+    /// 只会清掉自己那一条登记，不会误清同一本书后来新起任务。
+    @discardableResult
+    func registerWorldTask(_ task: Task<Void, Never>, for projectID: String) -> UUID {
+        worldTasks[projectID]?.task.cancel()
+        let token = UUID()
+        worldTasks[projectID] = (token, task)
+        return token
+    }
+
+    /// 任务收尾：只有令牌与登记一致时才移除。
+    func finishWorldTask(for projectID: String, token: UUID) {
+        guard worldTasks[projectID]?.token == token else { return }
+        worldTasks[projectID] = nil
     }
 
     /// 切书/删书时取消该项目在跑的世界任务。
     func cancelWorldTask(for projectID: String) {
-        worldTasks[projectID]?.cancel()
+        worldTasks[projectID]?.task.cancel()
         worldTasks[projectID] = nil
     }
 
