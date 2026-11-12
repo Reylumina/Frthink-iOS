@@ -1331,6 +1331,18 @@ enum FrthinkArchive {
             // settings / projects 是必填：原版的全量导入也接受
             // `writing-workspace-backup` 这个 format，书项目存档正好也叫这个，
             // 靠「有没有 settings」把两者分开，避免把本机设置清空。
+            // 缺键必须抛给 decodeFullBackup，不能在这里补 AppSettings()，
+            // 否则书项目存档会被当成全量备份，本机供应方与 Keychain 引用一起丢。
+            guard c.contains(.settings),
+                  (try? c.decodeNil(forKey: .settings)) != true else {
+                throw DecodingError.keyNotFound(
+                    CodingKeys.settings,
+                    DecodingError.Context(
+                        codingPath: c.codingPath,
+                        debugDescription: "全量备份缺少 settings"
+                    )
+                )
+            }
             // 先按 iOS 自己的结构宽松解，再用原版的真实字段覆盖。
             // Android 的 StoredSettings 键名和 iOS 不同，这一步是能不能把
             // 全局预设 / 技能 / 世界书 / 语料库读进来的关键。

@@ -836,8 +836,8 @@ final class WriterController {
             } else {
                 if isNewMessage {
                     session.deleteMessage(messageID)
-                } else if let fallbackVariant {
-                    session.selectVariant(fallbackVariant, for: messageID)
+                } else if fallbackVariant != nil {
+                    session.deleteSelectedVariant(for: messageID)
                 }
                 store.toast = "生成已停止"
             }
@@ -847,8 +847,8 @@ final class WriterController {
         if let failure {
             if isNewMessage {
                 session.deleteMessage(messageID)
-            } else if let fallbackVariant {
-                session.selectVariant(fallbackVariant, for: messageID)
+            } else if fallbackVariant != nil {
+                session.deleteSelectedVariant(for: messageID)
             }
             store.errorMessage = failure.localizedDescription
             return
@@ -858,8 +858,8 @@ final class WriterController {
         guard !produced.isEmpty else {
             if isNewMessage {
                 session.deleteMessage(messageID)
-            } else if let fallbackVariant {
-                session.selectVariant(fallbackVariant, for: messageID)
+            } else if fallbackVariant != nil {
+                session.deleteSelectedVariant(for: messageID)
             }
             store.errorMessage = "模型没有返回正文内容，请检查模型是否支持流式输出。"
             return

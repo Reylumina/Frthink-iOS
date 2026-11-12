@@ -246,6 +246,11 @@ struct WriterPane: View {
         }
         .onDisappear {
             dismissKeyboard()
+            // 切书会重建整个 WriterPane；不停掉旧任务会留下一个孤儿流继续写
+            // 旧会话的 payload，回去时又从磁盘开新会话，两份同时落盘。
+            if controller.isBusy {
+                controller.stop()
+            }
             controller.checkpoint(session: session)
         }
     }

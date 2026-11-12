@@ -600,6 +600,20 @@ enum SelfCheck {
             return "供应方与外观偏好保留 ok"
         }
 
+        // 书项目存档没有 settings，全量入口必须拒绝，不能补默认设置后接受。
+        check("archive.projectArchiveNotFull") {
+            let data = try FrthinkArchive.makeProjectArchive([])
+            do {
+                _ = try FrthinkArchive.readFullBackup(data)
+                throw Failure(message: "书项目存档被当成了全量备份")
+            } catch let error as FrthinkArchiveError {
+                guard case .notAnArchive(let isFull) = error, isFull else {
+                    throw Failure(message: "错误类型不对：\(error)")
+                }
+            }
+            return "书项目存档不会被全量入口接受"
+        }
+
         // 分段要带正确的码点范围：P27/P28/P29 靠它告诉模型本段在全文的位置
         check("world.chunkRanges") {
             let line = "第一卷 雨夜\n她把伞收起来，走进书店。\n\n"
@@ -1515,53 +1529,53 @@ enum SelfCheck {
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 
-        // 世界刷新契约：APK 的刷新按钮传 z6=false，不追加 P24/P26 增量句，
-        // 也不再生成 P31 只读基线；旧卡只走 P30 随请求带上。
+        // 世界刷新契约：APK 刷新入口传增量 true（C0592r0.java:35），
+        // 世界建立入口传 false（M1/D1.java:60）；两条支线不能混。
         check("world.refreshContract") {
             let cards = [CharacterCard(name: "林昭")]
-            let normal = PromptComposer.worldRefreshMessages(
-                existingCharacters: cards,
-                existingStyleTemplate: "旧模板",
-                digest: "雨夜正文",
-                incremental: false
-            )
-            let normalSystem = normal.first?.content ?? ""
-            let normalUser = normal.last?.content ?? ""
-            try expect(normalSystem.contains("林昭"), "非增量刷新丢了 P30 已有角色卡")
-            try expect(
-                !normalSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
-                "非增量刷新仍生成 P31 基线"
-            )
-            try expect(
-                !normalSystem.contains(PromptLibrary.incrementalCharacterClause),
-                "非增量刷新仍追加 P24 增量契约"
-            )
-            try expect(
-                !normalUser.contains("只返回正文中此前没有的新事实"),
-                "非增量刷新的 user 指令仍走 P28 增量口径"
-            )
-
-            let incremental = PromptComposer.worldRefreshMessages(
+            let refresh = PromptComposer.worldRefreshMessages(
                 existingCharacters: cards,
                 existingStyleTemplate: "旧模板",
                 digest: "雨夜正文",
                 incremental: true
             )
-            let incrementalSystem = incremental.first?.content ?? ""
-            let incrementalUser = incremental.last?.content ?? ""
+            let refreshSystem = refresh.first?.content ?? ""
+            let refreshUser = refresh.last?.content ?? ""
+            try expect(refreshSystem.contains("林昭"), "刷新丢了 P30 已有角色卡")
             try expect(
-                incrementalSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
-                "增量刷新没有生成 P31 基线"
+                refreshSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
+                "刷新没有生成 P31 基线"
             )
             try expect(
-                incrementalSystem.contains(PromptLibrary.incrementalCharacterClause),
-                "增量刷新没有追加 P24"
+                refreshSystem.contains(PromptLibrary.incrementalCharacterClause),
+                "刷新没有追加 P24 增量契约"
             )
             try expect(
-                incrementalUser.contains("只返回正文中此前没有的新事实"),
-                "增量刷新的 user 指令没有走 P28"
+                refreshUser.contains("只返回正文中此前没有的新事实"),
+                "刷新没有走 P28 增量指令"
             )
-            return "非增量 / 增量契约分流 ok"
+
+            let initial = PromptComposer.worldRefreshMessages(
+                existingCharacters: cards,
+                existingStyleTemplate: "旧模板",
+                digest: "雨夜正文",
+                incremental: false
+            )
+            let initialSystem = initial.first?.content ?? ""
+            let initialUser = initial.last?.content ?? ""
+            try expect(
+                !initialSystem.contains(PromptLibrary.readonlyIncrementalBaselineTitle),
+                "世界建立仍生成 P31 基线"
+            )
+            try expect(
+                !initialSystem.contains(PromptLibrary.incrementalCharacterClause),
+                "世界建立仍追加 P24"
+            )
+            try expect(
+                !initialUser.contains("只返回正文中此前没有的新事实"),
+                "世界建立的 user 指令仍走 P28"
+            )
+            return "刷新增量 / 建立非增量分流 ok"
         }
 
         // 提示词回看：大快照按 token 总量封顶，小快照仍按 30 条封顶
