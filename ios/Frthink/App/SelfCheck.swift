@@ -1608,7 +1608,7 @@ enum SelfCheck {
             let paragraphic = #"{"events":[{"title":"雨夜","development":"她推门。\n他抬头。\n\n两人对视。\n谁都没说话。","consequence":"相认。"}]}"#
             let split = try WorldJSON.parseEvents(paragraphic)
             try expect(
-                split[0].development == "她推门。他抬头。\n两人对视。谁都没说话。",
+                split[0].development == "她推门。他抬头。\n\n两人对视。谁都没说话。",
                 "空行分段未保留：\(split[0].development)"
             )
 

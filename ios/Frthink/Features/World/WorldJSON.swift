@@ -414,10 +414,12 @@ enum WorldJSON {
         }
         if !current.isEmpty { paragraphs.append(current) }
 
+        // 段间留一个空行：编辑区是 TextEditor，单个换行和折行分不出来，
+        // 只有空行才看得出「这是一段新的」。
         return paragraphs
             .map(mergedParagraph)
             .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+            .joined(separator: "\n\n")
     }
 
     /// 段内并句：行间缺分隔补「，」，段末补「。」，半角转全角。
