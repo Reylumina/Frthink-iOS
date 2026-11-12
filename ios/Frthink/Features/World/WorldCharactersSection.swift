@@ -233,7 +233,6 @@ struct WorldCharactersSection: View {
                 Text(groupFilterLabel)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(Font.caption2)
             }
             .font(Font.footnote)
             .foregroundStyle(.secondary)

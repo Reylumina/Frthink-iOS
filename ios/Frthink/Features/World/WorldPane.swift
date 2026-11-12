@@ -176,7 +176,6 @@ struct WorldPane: View {
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                             Image(systemName: "chevron.right")
-                                .font(Font.caption2.weight(.semibold))
                         }
                         .font(Font.footnote)
                         .foregroundStyle(.secondary)

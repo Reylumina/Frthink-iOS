@@ -146,7 +146,6 @@ struct WorldSettingSection: View {
                 // §2.4：列表行用 Label 对齐图标列，不加有色方块。
                 SettingsLabelRow(title: title, symbol: symbol, detail: value)
                 Image(systemName: "chevron.right")
-                    .font(Font.caption2.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())

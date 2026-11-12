@@ -168,8 +168,8 @@ struct ArchiveImportFlowView: View {
                     .lineLimit(2)
                 if book.isTrashed {
                     Text("回收站")
-                        .font(Font.caption2)
-                        .foregroundStyle(.orange)
+                        .font(Theme.badge)
+                        .foregroundStyle(AppTone.warning.color)
                 }
                 Spacer(minLength: 0)
                 Text("\(book.bodyCharacters.formatted()) 字")

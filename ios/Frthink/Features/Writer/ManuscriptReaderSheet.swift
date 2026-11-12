@@ -170,7 +170,6 @@ struct ManuscriptReaderSheet: View {
                     .font(Font.subheadline)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(Font.caption2)
             }
         }
         .buttonStyle(.plain)
