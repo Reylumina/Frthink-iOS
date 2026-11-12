@@ -88,6 +88,7 @@ struct RootView: View {
                 .tag(AppDestination.settings)
         }
         .tint(Theme.accent)
+        .minimizeTabBarOnScroll()
         .onAppear {
             // 截图流水线会带 -seedDemo：铺一份演示数据，否则截出来全是空状态。
             if DemoSeed.isRequested {
@@ -181,14 +182,7 @@ struct RootView: View {
         }
         .overlay(alignment: .bottom) {
             if let toast = store.toast {
-                ToastView(text: toast)
-                    .padding(.bottom, Theme.Spacing.xxl * 2)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .task(id: toast) {
-                        try? await Task.sleep(for: .seconds(2.2))
-                        guard !Task.isCancelled else { return }
-                        withAnimation { store.toast = nil }
-                    }
+                ToastPresenter(text: toast, bottomPadding: Theme.Spacing.xxl * 2)
             }
         }
         .overlay {
@@ -199,16 +193,13 @@ struct RootView: View {
         .overlay {
             if openingBook {
                 ProgressView("正在打开书稿…")
-                    .font(Font.subheadline)
+                    .font(Theme.labelSmall)
                     .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.vertical, Theme.Spacing.l)
-                    .background(.regularMaterial, in: RoundedRectangle(
-                        cornerRadius: Theme.Radius.large,
-                        style: .continuous
-                    ))
+                    .glassSurface(radius: Theme.Radius.large)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: store.toast)
+        .themeAnimation(Theme.motionLayout, value: store.toast)
     }
 
     // MARK: - Tab 外壳
@@ -254,8 +245,7 @@ struct RootView: View {
         } else {
             EmptyStateView(
                 symbol: "square.and.pencil",
-                title: "请选择或新建书稿",
-                message: "从书架里挑一本书，或者新建一个书项目。"
+                title: "请选择或新建书稿"
             )
         }
     }
@@ -270,9 +260,8 @@ struct RootView: View {
             openingPlaceholder
         } else {
             EmptyStateView(
-                symbol: "book",
-                title: "还没有选中书稿",
-                message: "原文与译文对照会显示在这里。"
+                symbol: "book.pages",
+                title: "还没有选中书稿"
             )
         }
     }
@@ -300,8 +289,7 @@ struct RootView: View {
         } else {
             EmptyStateView(
                 symbol: "point.3.connected.trianglepath.dotted",
-                title: "还没有选中书稿",
-                message: "世界书、人物卡、事件卡都挂在某一本书下面。"
+                title: "还没有选中书稿"
             )
         }
     }
@@ -311,7 +299,7 @@ struct RootView: View {
         VStack(spacing: Theme.Spacing.s) {
             ProgressView()
             Text("正在打开书稿…")
-                .font(Font.footnote)
+                .font(Theme.metadata)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

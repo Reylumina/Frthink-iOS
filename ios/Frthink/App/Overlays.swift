@@ -1,16 +1,43 @@
 import SwiftUI
 
-/// 底部轻提示。业务侧设 `AppStore.toast` 就会自动弹出并在 2 秒后消失。
+/// 底部轻提示。
+///
+/// 只写结果（「已插入正文」），一次一条，用系统材质浮在内容上，自动消失；
+/// 淡入淡出与位移统一走 `motionLayout`，减弱动态效果时只保留淡入淡出。
 struct ToastView: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(Font.footnote.weight(.medium))
-            .foregroundStyle(.white)
+            .font(Theme.label)
+            .foregroundStyle(.primary)
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, Theme.Spacing.s + 2)
-            .background(Capsule().fill(Color.black.opacity(0.78)))
+            .padding(.vertical, Theme.Spacing.m)
+            .glassSurface(Capsule())
+            .accessibilityAddTraits(.isStaticText)
+    }
+}
+
+/// 轻提示的展示与自动消失。根视图和 sheet 共用一份计时逻辑，
+/// 避免两处各写一个 `Task.sleep` 又要各管一遍取消。
+struct ToastPresenter: View {
+    let text: String
+    var bottomPadding: CGFloat = Theme.Spacing.xxl
+
+    @Environment(AppStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ToastView(text: text)
+            .padding(.bottom, bottomPadding)
+            .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            .task(id: text) {
+                try? await Task.sleep(for: .seconds(2.2))
+                guard !Task.isCancelled else { return }
+                withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
+                    store.toast = nil
+                }
+            }
     }
 }
 
@@ -24,8 +51,9 @@ struct ErrorBanner: View {
             HStack(alignment: .top, spacing: Theme.Spacing.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
                 Text(message)
-                    .font(Font.footnote)
+                    .font(Theme.metadata)
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -33,14 +61,16 @@ struct ErrorBanner: View {
                     Image(systemName: "xmark")
                         .font(Font.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(
+                            minWidth: Theme.Layout.hitTarget,
+                            minHeight: Theme.Layout.hitTarget
+                        )
                         .contentShape(Rectangle())
                 }
+                .accessibilityLabel("关闭")
             }
             .padding(Theme.Spacing.m)
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+            .glassSurface(radius: Theme.Radius.medium)
             .padding(Theme.Spacing.l)
             Spacer()
         }
@@ -55,14 +85,7 @@ struct SheetToastOverlay: ViewModifier {
     func body(content: Content) -> some View {
         content.overlay(alignment: .bottom) {
             if let toast = store.toast {
-                ToastView(text: toast)
-                    .padding(.bottom, Theme.Spacing.xxl)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .task(id: toast) {
-                        try? await Task.sleep(for: .seconds(2.2))
-                        guard !Task.isCancelled else { return }
-                        withAnimation { store.toast = nil }
-                    }
+                ToastPresenter(text: toast)
             }
         }
     }

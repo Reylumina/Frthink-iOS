@@ -123,11 +123,16 @@ enum Theme {
 
     /// 内容表面的形状。
     ///
-    /// iOS 26 起跟随容器同心（§3.3），更早版本回落到固定圆角；
-    /// 页面里不写 `#available` 分支。
+    /// iOS 26 起跟随容器同心（§3.3），并给一个最小圆角兜底；更早版本回落到
+    /// 固定圆角。页面里不写 `#available` 分支。
     static func containerShape(minimum: CGFloat = Radius.large) -> AnyShape {
         if #available(iOS 26.0, *) {
-            return AnyShape(ConcentricRectangle(corners: .concentric(minimum: minimum), isUniform: true))
+            return AnyShape(
+                ConcentricRectangle(
+                    corners: .concentric(minimum: .fixed(minimum)),
+                    isUniform: true
+                )
+            )
         }
         return AnyShape(RoundedRectangle(cornerRadius: minimum, style: .continuous))
     }
@@ -155,6 +160,11 @@ extension View {
     /// 只用在「浮在内容之上」的元素：输入条、浮层、工具栏按钮。
     func glassSurface(radius: CGFloat = Theme.Radius.large) -> some View {
         modifier(GlassSurfaceModifier(radius: radius))
+    }
+
+    /// 任意形状的玻璃表面，用于胶囊类的浮层。
+    func glassSurface<S: Shape>(_ shape: S) -> some View {
+        modifier(GlassShapeModifier(shape: shape))
     }
 
     /// 带「减弱动态效果」降级的隐式动画。
@@ -210,6 +220,18 @@ struct GlassSurfaceModifier: ViewModifier {
         } else {
             content
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+        }
+    }
+}
+
+struct GlassShapeModifier<S: Shape>: ViewModifier {
+    var shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content.background(.regularMaterial, in: shape)
         }
     }
 }

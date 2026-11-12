@@ -17,7 +17,8 @@ enum AppDestination: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .compose: return "square.and.pencil"
-        case .reader: return "book"
+        // `book.pages` 是新版字号的书本符号；`book` 的旧字形在 iOS 26 上显得过时。
+        case .reader: return "book.pages"
         case .world: return "point.3.connected.trianglepath.dotted"
         case .universe: return "sparkles"
         case .settings: return "gearshape"
