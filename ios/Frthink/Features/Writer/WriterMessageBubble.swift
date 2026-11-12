@@ -154,13 +154,21 @@ struct WriterMessageBubble: View {
 
     /// 已完成的回复：只有出现 `**`/`__` 时才解析行内 Markdown，
     /// 长对话里的普通正文保持纯文本，不每帧跑解析。
+    ///
+    /// 分段按段排版，段间留 `WriterTypography.paragraphSpacing`：整段当成一个
+    /// Text 时，模型输出里的空行会按整行高度排版，段间比阅读页松一倍。
     private var content: some View {
-        Group {
-            if message.content.isEmpty {
+        let paragraphs = WriterTypography.paragraphs(message.content)
+        return Group {
+            if paragraphs.isEmpty {
                 Text("（空回复）")
                     .foregroundStyle(.tertiary)
             } else {
-                MarkdownInline.text(message.content)
+                VStack(alignment: .leading, spacing: WriterTypography.paragraphSpacing) {
+                    ForEach(paragraphs.indices, id: \.self) { index in
+                        MarkdownInline.text(paragraphs[index])
+                    }
+                }
             }
         }
         .dynamicBodyFont(store.settings.bodyFontSize)

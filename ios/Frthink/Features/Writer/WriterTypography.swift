@@ -27,4 +27,20 @@ enum WriterTypography {
     static func bodyMaxWidth(size: CGFloat) -> CGFloat {
         ReaderStyle.bodyMaxWidth(size: size)
     }
+
+    /// 气泡里的段落间距（§2.3）。
+    ///
+    /// 原来正文用 `\n\n` 表示分段，空行按整行排版，段间实际有 37pt 左右，
+    /// 比阅读页的 12pt 松一倍。现在两处统一：气泡按段拆开、段间留这一个距离，
+    /// 流式气泡把同样的间距放进段落样式里，换气泡时高度不变。
+    static let paragraphSpacing: CGFloat = Theme.Spacing.m
+
+    /// 把正文拆成段落：按行拆、丢掉空行、去掉首尾空白。
+    ///
+    /// 模型输出用空行分段，段落本身不保留缩进和空行。
+    static func paragraphs(_ text: String) -> [String] {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 }

@@ -108,6 +108,9 @@ struct StreamingTextView: UIViewRepresentable {
         "\(fontSize)-\(lineSpacing)"
     }
 
+    /// 与完成态气泡同一套段落度量：WriterTypography.paragraphs 拆段、
+    /// paragraphSpacing 留白。段落之间用单换行，不再让空行占一整行行高；
+    /// 两处用同一份换算，生成结束换成正式气泡时整段高度不变，视口不会跳。
     private static func attributed(
         _ text: String,
         fontSize: CGFloat,
@@ -115,8 +118,10 @@ struct StreamingTextView: UIViewRepresentable {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
+        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing
+        let normalized = WriterTypography.paragraphs(text).joined(separator: "\n")
         return NSAttributedString(
-            string: text,
+            string: normalized,
             attributes: [
                 .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
                 .foregroundColor: UIColor.label,

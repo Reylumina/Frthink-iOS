@@ -140,7 +140,7 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 | 字号基数 | 外观设置的 `bodyFontSize`，默认 18pt，范围 13–28；经 `UIFontMetrics` 跟随 Dynamic Type，见 `Core/Design/DynamicTypeFont.swift` |
 | 阅读页字号 | 阅读设置单独可调，换算方式同上 |
 | 行高 | 默认 1.6 倍，换算统一走 `ReaderStyle.lineSpacing(size:lineHeight:)`；阅读页可调 1.2–2.0，其他正文场景固定 1.6 |
-| 段落 | 按原文换行分段。段距只能来自一处：原文空行或段落视图的间距，二者不叠加。不自动加首行缩进 |
+| 段落 | 按原文换行分段，空行只当分隔符，不占行高。段距只能来自一处：`WriterTypography.paragraphSpacing`（12pt）或段落视图的间距，二者不叠加。不自动加首行缩进 |
 | 行宽 | 每行不超过 36 个汉字。正文栏最大宽度 = 字号 × 36，超出时居中，两侧留白（§5.3） |
 | 对齐 | 左对齐。SwiftUI `Text` 不支持两端对齐，需要时只能包 UIKit 并设 `NSParagraphStyle.alignment = .justified`，目前不做 |
 | 颜色 | `.primary`。阅读页的黑底模式不跟随系统深浅色，前景用 `ReaderStyle.ink(dark:)` |
