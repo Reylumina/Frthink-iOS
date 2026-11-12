@@ -76,7 +76,7 @@ struct WorldSettingSection: View {
                     Button("停止") { onStop() }
                         .font(Font.footnote.weight(.semibold))
                         .buttonStyle(.borderless)
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
                 }
             }
         } header: {

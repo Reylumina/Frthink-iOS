@@ -18,10 +18,11 @@ struct ManuscriptScrollRequest: Equatable {
 /// 的东西：「插入正文」要插在真实光标处，章节跳转要滚到某个 UTF-16 偏移。两件事
 /// 都是写作台的核心操作，没有它们这个页面只能算半个功能。
 ///
-/// 文本仍然双向同步到 `session.updateManuscript(_:)`，`TextEditor` 的编辑体验不变。
+/// 文本仍然双向同步：主界面走 session.updateManuscript，窗口编辑页走
+/// session.updateEditorText，只写光标所在的那一段。
 struct ManuscriptTextEditor: UIViewRepresentable {
 
-    /// 正文。setter 由外部接到 `session.updateManuscript`。
+    /// 正文。setter 由外部接到 session.updateManuscript 或 session.updateEditorText。
     @Binding var text: String
 
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），此时按末尾处理。
@@ -48,7 +49,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     /// 用户亲手点过正文/挪过光标时回调；用来区分「默认文末」和「明确插入点」。
     var onCursorInteraction: (() -> Void)? = nil
 
-    /// 选区变化（读写都回调）。改写条只在编辑态、选区非空时出现。
+    /// 选区变化（读写都回调）。改写条在选区非空时出现。
     var onSelectionChange: ((NSRange) -> Void)? = nil
 
     /// 把 UITextView 自己的撤销栈交出去：编辑页的 ⋯ 菜单要用它显示「撤销 / 重做」。
@@ -139,8 +140,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var appliedRevision = -1
         /// 上一次回调过的选区长度；用来区分「光标移动」和「选区变化」。
         var lastSelectionLength = 0
-        /// 键盘「完成」按钮要能主动 resign，所以留一个弱引用。
-        /// 正文提交防抖：停止输入 200ms 才把整串交给 session。
+        /// 正文提交防抖：停止输入 400ms 才把整串交给 session。
         ///
         /// 56 万字的书，每敲一个键都 `textView.text` 取一次整串 + 让 SwiftUI
         /// 重算整页，输入法必然掉帧。这里只让 UITextView 自己刷新，停手再提交。
@@ -190,11 +190,8 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             }
         }
 
-        func textViewDidBeginEditing(_ textView: UITextView) {
-        }
-
         func textViewDidEndEditing(_ textView: UITextView) {
-            // 收起键盘/离开页面时立刻提交，绝不把最后 200ms 的输入丢掉。
+            // 收起键盘/离开页面时立刻提交，绝不把最后 400ms 的输入丢掉。
             pendingCommit?.cancel()
             pendingCommit = nil
             commitText(from: textView)

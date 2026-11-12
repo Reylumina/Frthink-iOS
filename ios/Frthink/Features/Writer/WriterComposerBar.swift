@@ -202,8 +202,8 @@ private struct WriterComposerShell<Content: View>: View {
     }
 }
 
-/// 输入框表面。iOS 26 用玻璃胶囊（由外层 `GlassEffectContainer` 归并），
-/// 17–25 用实底输入框胶囊——那一档整条已经是 `.bar`，内层再叠材质会糊成一片。
+/// 输入框表面。iOS 26 自己画玻璃胶囊（可点的玻璃声明成 interactive）；
+/// 17–25 用实底输入框胶囊——那一档整条已经是 bar 材质，内层再叠会糊成一片。
 private struct WriterComposerFieldSurface: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -217,7 +217,7 @@ private struct WriterComposerFieldSurface: ViewModifier {
 
 /// 输入条右侧的主操作：发送 / 停止。
 ///
-/// 直径 34pt 的强调色实心圆，不用 glassProminent：玻璃主操作会给 44pt 的
+/// 直径 34pt（主题里的行内高度 token）的强调色实心圆，不用 glassProminent：玻璃主操作会给 44pt 的
 /// 热区再包一圈内边距，@3x 下量出来的实心圆是 59pt，比输入框还高，圆心比
 /// 输入框中线高 12pt，整行看着是歪的。§5.4 的「一屏一个主操作」靠颜色和
 /// 位置表达，不靠放大。禁用时退回 field 底 + 次要色图标。

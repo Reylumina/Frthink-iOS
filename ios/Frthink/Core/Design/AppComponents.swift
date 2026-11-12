@@ -14,7 +14,7 @@ extension View {
 
 // MARK: - 行内控件
 
-/// 行内圆形图标按钮的可见部分：34pt 圆 + 居中符号（§5.1）。
+/// 行内圆形图标按钮的可见部分：36pt 圆 + 居中符号（§5.1）。
 ///
 /// 只画外形，热区由外层的 `CircleIconButton` 或调用方补到 44pt。
 /// 单独拆出来是因为 `Menu` 也要用同一个圆做 label。
@@ -34,7 +34,7 @@ struct CircleIconLabel: View {
     }
 }
 
-/// 行内圆形图标按钮：可见 34pt，热区 44pt（§5.1）。
+/// 行内圆形图标按钮：可见 36pt（Theme.Layout.controlHeight），热区 44pt（§5.1）。
 ///
 /// 世界页的排序、新建等一行里的圆钮都走这里，避免每处再抄一遍
 /// 「画圆 → 补热区 → contentShape」。
@@ -528,7 +528,7 @@ struct AppSecureField: View {
                     Image(systemName: reveals ? "eye.slash" : "eye")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -687,7 +687,8 @@ struct DestructiveActionRow: View {
                 Spacer(minLength: 0)
             }
             .font(.body)
-            .frame(minHeight: 44)
+            // 这是列表行：行高由内容 + 系统内边距给，不再撑到 44（§5.1）。
+            .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Rectangle())
         }
         .disabled(!isEnabled)

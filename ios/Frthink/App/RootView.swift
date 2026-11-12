@@ -194,15 +194,8 @@ struct RootView: View {
                 ErrorBanner(message: error) { store.errorMessage = nil }
             }
         }
-        .overlay {
-            if openingBook {
-                ProgressView("正在打开书稿…")
-                    .font(Theme.labelSmall)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.vertical, Theme.Spacing.l)
-                    .glassSurface(radius: Theme.Radius.large)
-            }
-        }
+        // 「正在打开书稿…」只留各 Tab 里的占位（openingPlaceholder）：
+        // 之前这里还有一个全屏玻璃浮层，两处同时出现在屏幕上。
         .themeAnimation(Theme.motionLayout, value: store.toast)
     }
 

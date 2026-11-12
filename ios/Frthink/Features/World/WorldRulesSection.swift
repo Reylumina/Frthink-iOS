@@ -171,7 +171,7 @@ struct WorldRulesSection: View {
                     .foregroundStyle(.primary)
                 Spacer(minLength: Theme.Spacing.s)
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: Theme.Layout.hitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
