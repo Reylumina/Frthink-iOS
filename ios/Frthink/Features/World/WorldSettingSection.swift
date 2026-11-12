@@ -138,10 +138,7 @@ struct WorldSettingSection: View {
             onOpenTab(tab)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                Image(systemName: symbol)
-                    .font(Font.footnote)
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 20)
+                IconTile(symbol: symbol, size: 26)
                 Text(title)
                     .font(Font.body)
                     .foregroundStyle(.primary)

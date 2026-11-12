@@ -92,22 +92,19 @@ struct LibraryProjectRow: View {
                             .lineLimit(1)
                     }
 
-                    HStack(spacing: Theme.Spacing.s) {
+                    HStack(spacing: Theme.Spacing.xs) {
                         Text(LibraryFormat.updatedText(project.updatedAt))
-                            .font(Theme.numericSmall)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
                         if let count = project.bodyCharacterCount, count > 0 {
-                            Text("\(count.formatted()) 字")
-                                .font(Theme.numericSmall)
-                                .foregroundStyle(.tertiary)
+                            Text("· \(count.formatted()) 字")
                         }
                         if branchCount > 1 {
-                            Label("\(branchCount) 分支", systemImage: "arrow.triangle.branch")
-                                .font(Theme.numericSmall)
-                                .foregroundStyle(.tertiary)
+                            Text("· \(branchCount) 分支")
                         }
                     }
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 }
 
                 Spacer(minLength: 40)
@@ -140,6 +137,7 @@ struct LibraryProjectRow: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .tint(.secondary)
             .accessibilityLabel("管理「\(project.shelfTitle)」")
         }
         .padding(.vertical, Theme.Spacing.xs)

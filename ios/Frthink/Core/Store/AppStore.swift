@@ -133,6 +133,8 @@ final class AppStore {
             sessions[p.id] = session
             return p
         } catch {
+            // 只写成功一半时清掉刚建的目录，避免下次启动书架里多一本空书。
+            try? fileStore.deleteProject(p.id)
             errorMessage = "创建失败：\(error.localizedDescription)"
             return nil
         }

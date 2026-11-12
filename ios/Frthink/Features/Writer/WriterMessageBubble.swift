@@ -87,8 +87,12 @@ struct WriterMessageBubble: View {
                 .padding(.horizontal, Theme.Spacing.m + 2)
                 .padding(.vertical, Theme.Spacing.s + 3)
                 .background(
-                    Theme.accentSoft,
+                    Theme.accent.opacity(0.12),
                     in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                        .strokeBorder(Theme.accent.opacity(0.10), lineWidth: 0.5)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
