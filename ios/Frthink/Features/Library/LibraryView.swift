@@ -39,7 +39,12 @@ struct LibraryView: View {
                     LibraryContinueRow(project: project) {
                         onOpen(project)
                     }
-                    .listRowInsets(EdgeInsets())
+                    .listRowInsets(EdgeInsets(
+                        top: Theme.Spacing.xs,
+                        leading: Theme.Spacing.l,
+                        bottom: Theme.Spacing.xs,
+                        trailing: Theme.Spacing.l
+                    ))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                 }

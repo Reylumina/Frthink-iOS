@@ -63,8 +63,8 @@ enum Theme {
     static let labelSmall = Font.subheadline
     /// 元信息：时间、字数、条数。最小只到 `.caption`。
     static let metadata = Font.caption
-    /// 极小号只用于角标，且不再小于 `.caption2`。
-    static let badge = Font.caption2.weight(.medium)
+    /// 角标：与小字同级，不低过 `.caption`。
+    static let badge = Font.caption.weight(.medium)
 
     /// 数字/版本号。
     static let numeric = Font.system(.footnote, design: .monospaced)
