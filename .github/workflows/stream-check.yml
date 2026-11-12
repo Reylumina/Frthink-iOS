@@ -54,7 +54,7 @@ jobs:
           xcrun simctl install "$DEVICE" "$APP"
 
       - name: Install image checker
-        run: python3 -m pip install --quiet pillow
+        run: python3 -m pip install --quiet --break-system-packages pillow
 
       - name: Run mock stream three times
         run: |
