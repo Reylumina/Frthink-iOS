@@ -76,7 +76,8 @@ struct WriterMessageBubble: View {
                     .font(Font.title3)
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                     .padding(Theme.Spacing.xs)
-                    .background(.regularMaterial, in: Circle())
+                    // 浮在内容上的选中标记也走统一玻璃入口，不在页面里直接铺材质（§1.6）。
+                    .glassSurface(Circle())
                     .offset(x: -2, y: -2)
             }
         }

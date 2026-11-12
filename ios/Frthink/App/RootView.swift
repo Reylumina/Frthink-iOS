@@ -323,11 +323,8 @@ struct RootView: View {
                     .font(Font.subheadline)
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
-            if let session, session.isDirty {
-                ProgressView().controlSize(.small)
-            }
-        }
+        // 右上角原来挂了一个「正在保存」的转圈：自动保存本来就该无感（§5.8），
+        // 它跟世界页的状态行、人物页的刷新行叠在一起，同一件事说三遍。
     }
 
     /// 阅读页多出来的翻译入口，对应原版阅读页的「翻译 / 停止翻译」。

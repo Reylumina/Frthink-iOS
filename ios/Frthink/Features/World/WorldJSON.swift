@@ -392,13 +392,37 @@ enum WorldJSON {
     /// 事件卡文本字段是叙述段落。模型可能一句一行、漏标点或写半角标点，
     /// 这里并段并补最小标点：行间缺分隔补「，」，段末补「。」，半角转全角。
     /// 纯英文段落按空格并段，不套中文标点。标题和人物不走这里。
+    ///
+    /// 空行是段落分隔：段内按上面的规则并成一句，段与段之间保留一个换行。
+    /// 以前把空行也当噪声滤掉，模型分好的段全被压成一整块，长「经过」读不动。
     static func prose(_ value: Any?) -> String {
         let lines = string(value)
             .components(separatedBy: .newlines)
             .map { stripListMarker($0.trimmingCharacters(in: .whitespaces)) }
-            .filter { !$0.isEmpty }
-        guard !lines.isEmpty else { return "" }
 
+        var paragraphs: [[String]] = []
+        var current: [String] = []
+        for line in lines {
+            if line.isEmpty {
+                if !current.isEmpty {
+                    paragraphs.append(current)
+                    current = []
+                }
+            } else {
+                current.append(line)
+            }
+        }
+        if !current.isEmpty { paragraphs.append(current) }
+
+        return paragraphs
+            .map(mergedParagraph)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    /// 段内并句：行间缺分隔补「，」，段末补「。」，半角转全角。
+    private static func mergedParagraph(_ lines: [String]) -> String {
+        guard !lines.isEmpty else { return "" }
         guard lines.contains(where: { containsHan($0) }) else {
             return lines.joined(separator: " ")
         }

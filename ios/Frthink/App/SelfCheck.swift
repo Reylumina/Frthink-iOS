@@ -1604,6 +1604,14 @@ enum SelfCheck {
                 "经过换行未并段：\(events[0].development)"
             )
 
+            // 空行是段落分隔：段内并句，段间保留换行，长「经过」不能压成一整块
+            let paragraphic = #"{"events":[{"title":"雨夜","development":"她推门。\n他抬头。\n\n两人对视。\n谁都没说话。","consequence":"相认。"}]}"#
+            let split = try WorldJSON.parseEvents(paragraphic)
+            try expect(
+                split[0].development == "她推门。他抬头。\n两人对视。谁都没说话。",
+                "空行分段未保留：\(split[0].development)"
+            )
+
             // 漏标点、半角标点、列表符号都要在解析时修好
             let messy = #"{"events":[{"title":"雨夜。","scene":"- 旧书店\n- 雨声很密","development":"她推门.\n他抬头!","consequence":"两人相认"}]}"#
             let fixed = try WorldJSON.parseEvents(messy)
