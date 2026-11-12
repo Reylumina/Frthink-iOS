@@ -55,6 +55,7 @@ struct TranslationPane: View {
         .onDisappear { shutdown() }
         // 翻译进行中下滑关闭会中止这一轮；用「关闭」明确退出。
         .interactiveDismissDisabled(isRunning)
+        .sheetToast()
         .onChange(of: session.sourceText) { _, _ in
             session.saveSource()
         }

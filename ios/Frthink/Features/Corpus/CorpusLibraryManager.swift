@@ -80,6 +80,7 @@ struct CorpusLibraryManagerSheet: View {
                 }
             }
         }
+        .sheetToast()
     }
 
     // MARK: - 行

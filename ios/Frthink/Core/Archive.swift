@@ -555,6 +555,7 @@ enum FrthinkArchive {
             if !plotEvents.isEmpty { return plotEvents }
             // 老存档只有标题，按标题还原成最小事件卡，至少不丢剧情节点。
             return (worldJSON?.events ?? [])
+                .map(\.title)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .map { EventCard(title: $0) }
@@ -944,8 +945,21 @@ enum FrthinkArchive {
         var materialSourceProgress: [String: RawMaterialProgress]?
         /// 新版 Android 的事件卡（`world.plotEvents`）。
         var plotEvents: [PlotEventJSON]?
-        /// 老版本的剧情事件只有标题字符串（`world.events`）。
-        var events: [String]?
+        /// 老版本的剧情事件只有标题字符串（`world.events`），也兼容误写成对象的情况。
+        struct LegacyEvent: Decodable {
+            var title: String
+
+            init(from decoder: Decoder) throws {
+                let single = try decoder.singleValueContainer()
+                if let text = try? single.decode(String.self) {
+                    title = text
+                    return
+                }
+                struct Object: Decodable { var title: String? }
+                title = (try? single.decode(Object.self))?.title ?? ""
+            }
+        }
+        var events: [LegacyEvent]?
         /// iOS 存档携带的人物分组；Android 无此键时缺省。
         var characterGroups: [GroupJSON]?
     }
