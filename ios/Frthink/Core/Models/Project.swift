@@ -6,7 +6,7 @@ import Foundation
 /// epoch 毫秒，这里用 `Date`，落盘走 ISO8601）。
 struct Project: Identifiable, Codable, Hashable {
     /// 导入、新建或旧数据缺标题时统一显示的占位书名。
-    static let untitledTitle = Project.untitledTitle
+    static let untitledTitle = "未命名书项目"
 
     var id: String
     var title: String

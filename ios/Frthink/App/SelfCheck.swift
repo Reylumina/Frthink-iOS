@@ -514,6 +514,7 @@ enum SelfCheck {
             snapshot["characterGroups"] = [
                 ["id": "group-1", "name": "主角组", "enabled": true],
             ]
+            snapshot["world"] = ["events": ["旧事件一", "旧事件二"]]
             projects[0]["snapshot"] = snapshot
             payload["projects"] = projects
             let data = try ArchiveFixture.envelope(payload: payload)
@@ -537,7 +538,12 @@ enum SelfCheck {
                 first.snapshot.projectPayload.world.characterGroups.first?.name == "主角组",
                 "顶层人物分组没有映射"
             )
-            return "译文 / 共享世界书 / 分组 ok"
+            try expect(
+                first.snapshot.projectPayload.world.events.map(\.title)
+                    == ["旧事件一", "旧事件二"],
+                "旧事件字符串没有映射"
+            )
+            return "译文 / 共享世界书 / 分组 / 旧事件 ok"
         }
 
         // Android 备份没有 providers 键：导入后必须保留本机供应方与外观偏好
@@ -612,7 +618,15 @@ enum SelfCheck {
                 project: project,
                 payload: payload,
                 sourceText: "",
-                translations: [],
+                translations: [
+                    TranslationSegment(
+                        owner: "owner",
+                        project: project.id,
+                        sourceHash: "hash-1",
+                        segment: 0,
+                        payload: "第一段译文"
+                    )
+                ],
                 universeEntries: []
             )
             let data = try FrthinkArchive.makeFullArchive(
@@ -634,7 +648,14 @@ enum SelfCheck {
                 restored.world.styleNotes == "STYLE_NOTE",
                 "导出后文风笔记丢失：\(restored.world.styleNotes)"
             )
-            return "消息多版本 / 文风笔记往返 ok"
+            let restoredTranslation = reopened.projects[0].translations.first
+            try expect(
+                restoredTranslation?.payload == "第一段译文"
+                    && restoredTranslation?.segment == 0
+                    && restoredTranslation?.project == project.id,
+                "导出后译文分段丢失或归属错位"
+            )
+            return "消息多版本 / 文风笔记 / 译文往返 ok"
         }
 
         // 10 · 解码失败要说出缺哪个键

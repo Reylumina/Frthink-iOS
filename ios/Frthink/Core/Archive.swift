@@ -235,7 +235,10 @@ enum FrthinkArchive {
             try c.encode(synopsis, forKey: .synopsis)
             try c.encode(snapshot, forKey: .snapshot)
             try c.encode(sourceText, forKey: .sourceText)
-            try c.encode(translations, forKey: .translations)
+            try c.encode(
+                translations.map(ArchivedTranslationEntry.init),
+                forKey: .translations
+            )
             // 同时写 iOS 的 body/kind 和 Android 的 content：两端各取所需。
             try c.encode(
                 universeEntries.map { entry in
@@ -970,6 +973,32 @@ enum FrthinkArchive {
         var chunkHash: String?
         var text: String?
         var model: String?
+    }
+
+    /// 导出时的译文条目：同时写 iOS 的 `segment`/`payload` 与 Android 的
+    /// `index`/`text`，两端都能直接读回，不会把译文丢在跨端迁移路上。
+    private struct ArchivedTranslationEntry: Encodable {
+        var id: String
+        var owner: String
+        var project: String
+        var target: String
+        var sourceHash: String
+        var segment: Int
+        var payload: String
+        var index: Int
+        var text: String
+
+        init(_ segment: TranslationSegment) {
+            self.id = segment.id
+            self.owner = segment.owner
+            self.project = segment.project
+            self.target = segment.target
+            self.sourceHash = segment.sourceHash
+            self.segment = segment.segment
+            self.payload = segment.payload
+            self.index = segment.segment
+            self.text = segment.payload
+        }
     }
 
     private struct CharacterJSON: Decodable {

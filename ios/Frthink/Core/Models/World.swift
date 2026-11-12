@@ -156,7 +156,18 @@ struct WorldBook: Codable {
         characters = (try? c.decode([CharacterCard].self, forKey: .characters)) ?? []
         characterGroups =
             (try? c.decode([CharacterGroup].self, forKey: .characterGroups)) ?? []
-        events = (try? c.decode([EventCard].self, forKey: .events)) ?? []
+        // 事件卡：正常是对象数组；更早的存档/Android 旧版可能写成字符串数组，
+        // 此时不能整段丢掉，按标题还原成最小事件卡。
+        let objectEvents = (try? c.decode([EventCard].self, forKey: .events)) ?? []
+        if objectEvents.isEmpty {
+            let legacyEvents = (try? c.decode([String].self, forKey: .events)) ?? []
+            events = legacyEvents
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { EventCard(title: $0) }
+        } else {
+            events = objectEvents
+        }
         corpus = (try? c.decode([CorpusEntry].self, forKey: .corpus)) ?? []
         worldbookEntries =
             (try? c.decode([WorldbookEntry].self, forKey: .worldbookEntries)) ?? []
