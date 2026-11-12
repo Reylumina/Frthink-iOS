@@ -1,0 +1,87 @@
+name: Stream Check
+
+# 用 DEBUG 的本地 URLProtocol 伪装 SSE，走真实的 OpenAICompatibleClient 与
+# WriterController；同一台模拟器连续跑三次，截图 + 完成标记都通过才算数。
+# 这不是真实网络生成，但能覆盖流式解析、增量排版、结束态和首屏空白。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-stream:
+    name: Mock SSE stream x3
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Boot simulator
+        run: |
+          set -euo pipefail
+          DEVICE="$(xcrun simctl list devices available -j \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print([x["udid"] for xs in d.values() for x in xs if "iPhone" in x["name"]][0])')"
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ios/Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Debug \
+            -destination "id=$DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            build
+
+      - name: Install
+        run: |
+          set -euo pipefail
+          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
+          xcrun simctl install "$DEVICE" "$APP"
+
+      - name: Install image checker
+        run: python3 -m pip install --quiet pillow
+
+      - name: Run mock stream three times
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots logs
+          for i in 1 2 3; do
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            xcrun simctl launch --console-pty "$DEVICE" com.frthink.app \
+              -seedDemo -initialTab 创作 -mockStream -mockAutoSend \
+              > "logs/stream-$i.log" 2>&1 &
+            LAUNCH_PID=$!
+            sleep 14
+            xcrun simctl io "$DEVICE" screenshot "screenshots/stream-$i.png"
+            xcrun simctl terminate "$DEVICE" com.frthink.app || true
+            wait "$LAUNCH_PID" || true
+            echo "--- run $i ---"
+            grep -q "MOCK STREAM DONE" "logs/stream-$i.log"
+            python3 script/check_stream_shot.py "screenshots/stream-$i.png"
+          done
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-stream-evidence
+          path: |
+            screenshots
+            logs
+          if-no-files-found: ignore
+          retention-days: 14

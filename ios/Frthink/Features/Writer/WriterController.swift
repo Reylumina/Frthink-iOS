@@ -866,6 +866,11 @@ final class WriterController {
         }
 
         session.finishAssistantMessage(messageID, model: model)
+        #if DEBUG
+        if LaunchArguments.mockStream {
+            print("[MOCK STREAM DONE] chars=\(produced.count)")
+        }
+        #endif
         maybeAutoSummarize(session: session, store: store)
     }
 

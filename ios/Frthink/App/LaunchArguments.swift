@@ -20,6 +20,10 @@ enum LaunchArguments {
     static var opensWorldCard: Bool { contains("-openWorldCard") }
     static var focusComposer: Bool { contains("-focusComposer") }
     static var streamPreview: Bool { contains("-streamPreview") }
+    /// DEBUG：用本地 URLProtocol 伪装 SSE，走真实客户端与控制器。
+    static var mockStream: Bool { contains("-mockStream") }
+    /// DEBUG：进入创作页后自动发一条指令。
+    static var mockAutoSend: Bool { contains("-mockAutoSend") }
     static var seedsDemo: Bool { contains("-seedDemo") }
     static var runsSelfCheck: Bool { contains("-runSelfCheck") }
 

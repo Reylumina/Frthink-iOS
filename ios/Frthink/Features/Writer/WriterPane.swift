@@ -39,6 +39,9 @@ struct WriterPane: View {
     /// 多选删除：条目选择态、选中的消息 id。
     @State private var selectionMode = false
     @State private var selectedMessageIDs: Set<String> = []
+    #if DEBUG
+    @State private var didMockSend = false
+    #endif
 
     private enum WriterSheet: String, Identifiable {
         case manuscript
@@ -241,6 +244,17 @@ struct WriterPane: View {
                 「这个……」她把信捡起来，指尖有点抖。窗外的雨声突然变得很远，整间书店像是被谁按下了静音键。
                 """
                 controller.debugStartPreview(text: preview, messageID: message.id)
+            }
+            if LaunchArguments.mockStream, LaunchArguments.mockAutoSend, !didMockSend {
+                didMockSend = true
+                Task { @MainActor in
+                    await Task.yield()
+                    _ = controller.send(
+                        "写一段雨夜旧书店的正文，让林昭发现一封信。",
+                        session: session,
+                        store: store
+                    )
+                }
             }
             #endif
         }

@@ -38,6 +38,9 @@ final class AppStore {
         self.settings = fileStore.loadSettings()
         reload()
         refreshAPIKeyCache()
+        #if DEBUG
+        installMockProviderIfRequested()
+        #endif
         memoryObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil,
@@ -386,6 +389,25 @@ final class AppStore {
     }
 
     // MARK: - 当前供应方
+
+    #if DEBUG
+    /// 模拟器流式测试用的假供应方：只改内存设置，不写 Keychain、不落盘。
+    private func installMockProviderIfRequested() {
+        guard LaunchArguments.mockStream else { return }
+        let provider = ProviderSetting(
+            id: "mock-stream-provider",
+            kind: .deepseek,
+            baseURL: "https://mock.frthink.local/v1",
+            model: "mock-stream",
+            temperature: 0.7,
+            maxTokens: 8192,
+            stream: true
+        )
+        settings.providers = [provider]
+        settings.activeProviderID = provider.id
+        apiKeyCache[provider.id] = "mock-key"
+    }
+    #endif
 
     func clientForActiveProvider() throws -> any LLMClient {
         guard let provider = settings.activeProvider else {
