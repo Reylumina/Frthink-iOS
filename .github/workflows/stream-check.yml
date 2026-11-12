@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p screenshots logs
-          python3 script/mock_sse_server.py > logs/server.log 2>&1 &
+          python3 .github/scripts/mock_sse_server.py > logs/server.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           for _ in $(seq 1 30); do
@@ -81,7 +81,7 @@ jobs:
             wait "$LAUNCH_PID" || true
             echo "--- run $i ---"
             grep -q "MOCK STREAM DONE" "logs/stream-$i.log"
-            python3 script/check_stream_shot.py "screenshots/stream-$i.png"
+            python3 .github/scripts/check_stream_shot.py "screenshots/stream-$i.png"
           done
 
       - name: Upload evidence
