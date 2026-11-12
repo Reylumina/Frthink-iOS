@@ -134,7 +134,7 @@ struct WorldCharactersSection: View {
             }
         }
         .padding(.horizontal, Theme.Spacing.m)
-        .frame(minHeight: 36)
+        .frame(minHeight: Theme.Layout.controlHeight)
         .background(Theme.field)
         .clipShape(Capsule())
     }
@@ -150,8 +150,9 @@ struct WorldCharactersSection: View {
             Image(systemName: "arrow.up.arrow.down")
                 .font(Font.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
                 .background(Circle().fill(Theme.field))
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Circle())
         }
         .accessibilityLabel("排序")
@@ -165,8 +166,9 @@ struct WorldCharactersSection: View {
             Image(systemName: "plus")
                 .font(Font.footnote.weight(.semibold))
                 .foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
+                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
                 .background(Circle().fill(Theme.accentSoft))
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

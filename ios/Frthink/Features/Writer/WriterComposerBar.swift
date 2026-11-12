@@ -35,7 +35,9 @@ struct WriterComposerBar: View {
     var body: some View {
         // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。
         WriterComposerShell {
-            HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
+            // 三件控件同一条中轴：输入框随行数长高时，两侧按钮跟着居中，
+            // 不再按底边对齐：底对齐时圆钮会被玻璃内边距顶高一截。
+            HStack(alignment: .center, spacing: Theme.Spacing.s) {
                 continuationButton
                 inputField
                 if controller.isGenerating {
@@ -50,10 +52,7 @@ struct WriterComposerBar: View {
                     }
                 } else if controller.isPreparing {
                     ProgressView()
-                        .frame(
-                            minWidth: Theme.Layout.hitTarget,
-                            minHeight: Theme.Layout.hitTarget
-                        )
+                        .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 } else {
                     WriterComposerPrimaryButton(
                         symbol: "paperplane.fill",
@@ -84,7 +83,7 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 辅助按钮：续写。只有一个图标，热区按 §5.1 补到 44pt。
+    /// 辅助按钮：续写。图标按输入条的行内高度画，热区仍是 44pt（§5.1）。
     private var continuationButton: some View {
         Button {
             sendContinuation()
@@ -92,10 +91,8 @@ struct WriterComposerBar: View {
             Image(systemName: "wand.and.stars")
                 .font(Font.subheadline.weight(.medium))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                .frame(
-                    minWidth: Theme.Layout.hitTarget,
-                    minHeight: Theme.Layout.hitTarget
-                )
+                .frame(width: Theme.Layout.inlineControl, height: Theme.Layout.inlineControl)
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -110,6 +107,7 @@ struct WriterComposerBar: View {
             .focused($focused)
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
+            .frame(minHeight: Theme.Layout.inlineControl)
             .modifier(WriterComposerFieldSurface())
     }
 
@@ -216,7 +214,11 @@ private struct WriterComposerFieldSurface: ViewModifier {
 }
 
 /// 输入条右侧的主操作：发送 / 停止。
-/// iOS 26 是系统玻璃主操作（§5.4 一屏最多一个），17–25 是强调色实心圆钮。
+///
+/// 直径 34pt 的强调色实心圆，不用 glassProminent：玻璃主操作会给 44pt 的
+/// 热区再包一圈内边距，@3x 下量出来的实心圆是 59pt，比输入框还高，圆心比
+/// 输入框中线高 12pt，整行看着是歪的。§5.4 的「一屏一个主操作」靠颜色和
+/// 位置表达，不靠放大。禁用时退回 field 底 + 次要色图标。
 private struct WriterComposerPrimaryButton: View {
     let symbol: String
     let label: String
@@ -224,28 +226,16 @@ private struct WriterComposerPrimaryButton: View {
     let action: () -> Void
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            button
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.circle)
-        } else {
-            button
-                .buttonStyle(.plain)
-                .background(isEnabled ? Theme.accent : Theme.separator, in: Circle())
-        }
-    }
-
-    private var button: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(Font.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(
-                    minWidth: Theme.Layout.hitTarget,
-                    minHeight: Theme.Layout.hitTarget
-                )
-                .contentShape(Rectangle())
+                .foregroundStyle(isEnabled ? Color.white : Color.secondary)
+                .frame(width: Theme.Layout.inlineControl, height: Theme.Layout.inlineControl)
+                .background(Circle().fill(isEnabled ? Theme.accent : Theme.field))
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(label)
     }

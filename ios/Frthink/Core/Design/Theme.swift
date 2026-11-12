@@ -111,6 +111,17 @@ enum Theme {
         static let formMaxWidth: CGFloat = 640
         /// 可点热区的最小边长（§5.1）。
         static let hitTarget: CGFloat = 44
+
+        /// 同一行控件的可见高度：搜索框、次操作胶囊、圆形图标按钮（§5.1）。
+        /// 圆形按钮按它画圆，外面再留 `hitTarget` 的热区。
+        static let controlHeight: CGFloat = 36
+
+        /// 列表行上下内边距（§5.11）。行内容 44pt + 上下各 4pt = 52pt 行距。
+        static let rowInsetVertical: CGFloat = 4
+
+        /// 输入条里控件的行内高度：输入框、发送/停止圆、续写图标（§5.9）。
+        /// 比 `controlHeight` 小一点：这一条浮在正文上，多一像素都在压字。
+        static let inlineControl: CGFloat = 34
     }
 
     // MARK: - 动效
@@ -289,8 +300,10 @@ struct EmptyStateView: View {
             }
 
             if let actionTitle, let action {
+                // 空态里的动作是这一屏唯一能做的事，但不是「主操作」那种实心块：
+                // 与世界里事件卡、人物卡两栏的空态保持一致（§5.4、§5.7）。
                 Button(actionTitle, action: action)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.regular)
                     .padding(.top, Theme.Spacing.xs)
             }

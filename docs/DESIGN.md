@@ -94,14 +94,14 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 |---|---|---|
 | 标签栏、导航栏、工具栏 | 系统默认（自动是玻璃），不设自定义背景 | 系统默认 |
 | 工具栏按钮 | 系统默认的玻璃分组；相关按钮放在同一组，组间用 `ToolbarSpacer(.fixed)` | 系统默认 |
-| 底部输入条 | 输入框和发送按钮各自是玻璃胶囊，放在同一个 `GlassEffectContainer` 里；不铺满宽底条 | `.bar` 材质满宽底条 |
+| 底部输入条 | 输入框是玻璃胶囊，发送键是 34pt 的强调色实心圆，放在同一个 `GlassEffectContainer` 里；不铺满宽底条 | `.bar` 材质满宽底条 |
 | sheet、菜单、popover | 系统默认，不设 `presentationBackground` | 系统默认 |
 | 浮层按钮（如回到底部） | `.buttonStyle(.glass)` | `.regularMaterial` 圆形底 |
 | 内容：气泡、卡片、正文 | 不用玻璃 | 不用材质 |
 
 - 自定义玻璃一律走 `glassSurface(radius:)`，它在 17–25 回落 `.regularMaterial`。不要手画半透明背景冒充玻璃。
 - 相邻的多个玻璃元素放进同一个 `GlassEffectContainer`，单个不用。
-- 主操作的玻璃按钮用 `.buttonStyle(.glassProminent)`，一屏最多一个，和 §5.4 的按钮分层一致。
+- 主操作的玻璃按钮用 `.buttonStyle(.glassProminent)`，一屏最多一个，和 §5.4 的按钮分层一致。输入条的发送键例外：玻璃主操作会把它撑到 59pt（44pt 热区加玻璃内边距），比输入框还高，所以那一处用 34pt 实心圆（§5.9）。
 - 滚动内容在浮起控件下方经过时，用 `scrollEdgeEffectStyle(.soft, for:)` 保证控件可读，不要在控件下面垫渐变或色条。
 
 ## 2. 字体、排版与图标
@@ -259,6 +259,8 @@ HStack {
 
 - 不给文字写死 `.frame(width:height:)`，Dynamic Type 放大时会裁字。图标、封面、控件可以有固定尺寸，但要用 `@ScaledMetric`。
 - 可点目标的热区至少 44×44pt。图标按钮看起来可以小，热区用 `.frame(minWidth: 44, minHeight: 44)` 加 `.contentShape(Rectangle())` 扩大，不能只放大图标。
+- 同一行里的控件可见高度统一成 `Theme.Layout.controlHeight`（36pt）：搜索框、次要操作胶囊、圆形图标按钮。圆形按钮按 36pt 画圆，外面再包一层 44pt 的透明框，所以行高是 44、视觉是 36，三者对齐。
+- 列表行距 52pt：行内容 44pt，上下各 4pt，用 `compactRowInsets()`。系统默认会撑到 74pt，一屏少两行。
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
 
@@ -302,6 +304,7 @@ HStack {
 | 层 | 样式 | 数量 |
 |---|---|---|
 | 主操作 | `PrimaryActionButton`（`.borderedProminent`）；浮在内容上时用 `.glassProminent` | 一屏最多一个 |
+| 输入条发送键 | 34pt 强调色实心圆（`Theme.Layout.inlineControl`），不用玻璃主操作 | 一屏一个 |
 | 次操作 | `SecondaryActionButton`（`.bordered`）；浮在内容上时用 `.glass` | 不限，并排不超过两个 |
 | 行内动作 | 纯文字按钮，`.borderless` | 不限 |
 | 破坏性 | `DestructiveActionRow`，放在页面最后一个独立 Section | 一页一个 |
@@ -359,7 +362,8 @@ HStack {
 - 不加自定义的「完成」键盘工具条。
 - 滚动区用 `.scrollDismissesKeyboard(.interactively)`。
 - 底部输入条放在 `.safeAreaInset(edge: .bottom)` 里，键盘避让交给系统。输入条的材质见 §1.6。
-- 输入条里只有一个输入框、一个发送/停止按钮，加最多一个辅助按钮。
+- 输入条里只有一个输入框、一个发送/停止按钮，加最多一个辅助按钮。三件控件同高：可见高度都是 `Theme.Layout.inlineControl`（34pt），按中轴对齐，热区仍是 44pt。
+- 输入框最小高度 34pt，随行数长高（最多 5 行）；多行时两侧按钮保持居中。
 
 ### 5.10 页面级别
 
@@ -388,7 +392,7 @@ HStack {
 | `ChapterNavigationRow` | 阅读目录和写作台章节表共用的章节行 |
 | `IconTile`、`ProviderIcon` | 一级分类图标、服务商图标 |
 | `SheetCloseButton`、`SheetConfirmButton` | sheet/编辑页的关闭与确认（iOS 26 由系统画 ×/✓） |
-| `FloatingGlassButton` | 浮在内容上的图标按钮（回到最新、回到底部） |
+| `FloatingGlassButton` | 浮在内容上的按钮：不传 `title` 是圆钮，传了是「图标 + 文字」胶囊（和圆形发送键同屏时用胶囊） |
 | `SettingsLabelRow` | 二级以下页面的导航行：`Label` + 行尾值，无障碍字号下自动竖排 |
 | `WriterTypography` | 气泡与正文的字号/行距/宽度换算，和 `ReaderStyle` 共用同一套公式 |
 | `glassSurface(radius:)`、`glassSurface(_ shape:)` | 唯一的自定义玻璃入口 |

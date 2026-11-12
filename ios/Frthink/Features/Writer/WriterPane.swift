@@ -501,7 +501,12 @@ struct WriterPane: View {
                 // 只在离开底部时出现；浮在内容上的玻璃按钮（§1.6、§5.4）。
                 ZStack {
                     if !isAtBottom {
-                        FloatingGlassButton(symbol: "arrow.down", label: "回到最新") {
+                        // 带文字的胶囊，不和一个圆形的发送键抢同一种形态（§5.11）。
+                        FloatingGlassButton(
+                            symbol: "chevron.down",
+                            label: "回到最新",
+                            title: "最新"
+                        ) {
                             isAtBottom = true
                             scrollToBottom(
                                 proxy,

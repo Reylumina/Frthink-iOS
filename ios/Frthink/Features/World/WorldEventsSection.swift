@@ -76,7 +76,7 @@ struct WorldEventsSection: View {
             }
         }
         .padding(.horizontal, Theme.Spacing.m)
-        .frame(minHeight: 36)
+        .frame(minHeight: Theme.Layout.controlHeight)
         .background(Theme.field)
         .clipShape(Capsule())
     }
@@ -98,7 +98,7 @@ struct WorldEventsSection: View {
             }
             .foregroundStyle(isBusy ? Color.secondary : Theme.accent)
             .padding(.horizontal, Theme.Spacing.m)
-            .frame(minHeight: 36)
+            .frame(minHeight: Theme.Layout.controlHeight)
             .background(Theme.field, in: Capsule())
         }
         .buttonStyle(.plain)
@@ -112,8 +112,10 @@ struct WorldEventsSection: View {
             Image(systemName: "plus")
                 .font(Font.footnote.weight(.semibold))
                 .foregroundStyle(Theme.accent)
-                .frame(width: 44, height: 44)
+                .frame(width: Theme.Layout.controlHeight, height: Theme.Layout.controlHeight)
                 .background(Circle().fill(Theme.accentSoft))
+                // 可见圆 36pt，热区仍是 44pt（§5.1）。
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

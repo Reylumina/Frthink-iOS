@@ -29,27 +29,20 @@ struct UniversePane: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text("全局预设、共享世界书与 Skill")
-                .font(Theme.metadata)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.vertical, Theme.Spacing.s)
-
-            Group {
-                if entries.isEmpty {
-                    EmptyStateView(
-                        symbol: "sparkles",
-                        title: "还没有宇宙资料",
-                        actionTitle: "新建宇宙资料",
-                        action: startCreating
-                    )
-                } else {
-                    list
-                }
+        Group {
+            if entries.isEmpty {
+                EmptyStateView(
+                    symbol: "sparkles",
+                    title: "还没有宇宙资料",
+                    actionTitle: "新建宇宙资料",
+                    action: startCreating
+                )
+            } else {
+                list
             }
         }
+        // 整页铺满：空态靠这一层居中，底板才不会只画出内容那一窄条（§1.5）。
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .groupedPageBackground()
         .settingsFormColumn()
         .navigationDestination(for: UniverseEntry.self) { entry in

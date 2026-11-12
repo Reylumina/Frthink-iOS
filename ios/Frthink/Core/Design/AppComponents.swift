@@ -12,6 +12,26 @@ extension View {
     }
 }
 
+// MARK: - 列表行
+
+extension View {
+    /// 列表行的显式内边距。
+    ///
+    /// 系统默认值在 iOS 26 的 insetGrouped 上把行内容（44pt）撑成了 74pt，
+    /// 设置页六行就多占一屏；这里收回 4pt，行距 52pt。显式写死是为了不再
+    /// 跟着系统版本变。左右 16pt 与分区卡片的内边距对齐。
+    func compactRowInsets() -> some View {
+        listRowInsets(
+            EdgeInsets(
+                top: Theme.Layout.rowInsetVertical,
+                leading: Theme.Spacing.l,
+                bottom: Theme.Layout.rowInsetVertical,
+                trailing: Theme.Spacing.l
+            )
+        )
+    }
+}
+
 // MARK: - 语义色
 
 /// 状态色调。
@@ -138,6 +158,7 @@ struct AppSettingsRow: View {
         }
         .contentShape(Rectangle())
         .frame(minHeight: Theme.Layout.hitTarget)
+        .compactRowInsets()
     }
 }
 
@@ -710,13 +731,18 @@ struct SheetConfirmButton: View {
 }
 
 // MARK: - 浮层按钮
-/// 浮在内容上的图标按钮（回到最新、回到底部）。
+/// 浮在内容上的按钮（回到最新、回到底部）。
 ///
 /// iOS 26 用系统的玻璃按钮样式，17–25 回落到系统材质胶囊；系统补不了的
 /// 是「浮在滚动内容上方」这一层，所以只封装样式和热区，不带业务。
+///
+/// 传 title 时是「图标 + 文字」的胶囊，不传是圆钮。会和一个圆形主操作
+/// （输入条的发送键）同屏出现的地方要用胶囊：两个一样大的玻璃圆叠在一起，
+/// 用户分不清哪个是发送、哪个是跳转。
 struct FloatingGlassButton: View {
     let symbol: String
     let label: String
+    var title: String? = nil
     var isEnabled = true
     let action: () -> Void
 
@@ -732,11 +758,23 @@ struct FloatingGlassButton: View {
 
     private var button: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 36, height: 36)
+            if let title {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: symbol)
+                        .font(Font.caption.weight(.semibold))
+                    Text(title)
+                        .font(Font.caption.weight(.medium))
+                }
+                .padding(.horizontal, Theme.Spacing.m)
+                .frame(minHeight: Theme.Layout.inlineControl)
                 .contentShape(Rectangle())
-                .padding(Theme.Spacing.xs)
+            } else {
+                Image(systemName: symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
+                    .padding(Theme.Spacing.xs)
+            }
         }
         .disabled(!isEnabled)
         .accessibilityLabel(label)
