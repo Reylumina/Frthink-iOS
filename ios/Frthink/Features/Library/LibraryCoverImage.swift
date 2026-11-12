@@ -34,26 +34,16 @@ struct LibraryCoverImage: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
-                .strokeBorder(Theme.separator.opacity(0.45), lineWidth: 0.5)
-        }
         .task(id: payload) { await loadThumbnail() }
         .accessibilityLabel("封面：\(displayTitle)")
     }
 
+    /// 没有封面时的书脊标记：一枚单色符号，不加描边和装饰线。
     private var placeholderMark: some View {
-        VStack(spacing: Theme.Spacing.xs) {
-            Image(systemName: "book.closed.fill")
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(Color.white.opacity(0.9))
-                .accessibilityHidden(true)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.35))
-                .frame(width: 14, height: 1)
-        }
-        .padding(Theme.Spacing.xs)
+        Image(systemName: "book.pages")
+            .font(.callout.weight(.regular))
+            .foregroundStyle(Color.white.opacity(0.9))
+            .accessibilityHidden(true)
     }
 
     private var placeholderColor: Color {

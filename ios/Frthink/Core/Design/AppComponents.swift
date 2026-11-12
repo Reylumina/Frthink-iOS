@@ -50,12 +50,8 @@ struct IconTile: View {
             .foregroundStyle(tint)
             .frame(width: size, height: size)
             .background(
-                tint.opacity(0.12),
+                tint.opacity(Theme.tintedFillOpacity),
                 in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                    .strokeBorder(tint.opacity(0.10), lineWidth: 0.5)
             )
             .accessibilityHidden(true)
     }
@@ -134,14 +130,14 @@ struct AppSettingsRow: View {
             Spacer(minLength: Theme.Spacing.s)
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.footnote)
+                    .font(Theme.label)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                     .lineLimit(1)
             }
         }
         .contentShape(Rectangle())
-        .padding(.vertical, 2)
+        .frame(minHeight: Theme.Layout.hitTarget)
     }
 }
 
@@ -165,10 +161,12 @@ struct AppValueRow: View {
                 .foregroundStyle(.primary)
             Spacer(minLength: Theme.Spacing.s)
             Text(value)
-                .font(.system(.footnote, design: .monospaced))
+                .font(Theme.label)
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
+        .frame(minHeight: Theme.Layout.hitTarget)
     }
 }
 
@@ -181,11 +179,11 @@ struct StatusPill: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.semibold))
+            .font(Theme.badge)
             .foregroundStyle(tone.color)
             .padding(.horizontal, Theme.Spacing.s)
             .padding(.vertical, 2)
-            .background(Capsule().fill(tone.color.opacity(0.12)))
+            .background(Capsule().fill(tone.color.opacity(Theme.tintedFillOpacity)))
             .accessibilityLabel(text)
     }
 }
@@ -321,7 +319,7 @@ struct AppTextField: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             FieldCaption(
                 title: title,
                 count: showsCount ? "\(text.count) 字" : nil,
@@ -366,7 +364,7 @@ struct AppTextArea: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             FieldCaption(
                 title: title,
                 count: showsCount ? "\(text.count) 字" : nil,
@@ -401,7 +399,7 @@ struct AppSecureField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             FieldCaption(title: title)
 
             HStack(spacing: Theme.Spacing.s) {
@@ -471,7 +469,7 @@ struct AppTextEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             if showsCount {
                 HStack {
                     Spacer(minLength: 0)
@@ -668,5 +666,40 @@ struct ChapterNavigationRow: View {
         }
         .padding(.vertical, Theme.Spacing.xs)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - 浮层按钮
+
+/// 浮在内容上的图标按钮（回到最新、回到底部）。
+///
+/// iOS 26 用系统的玻璃按钮样式，17–25 回落到系统材质胶囊；系统补不了的
+/// 是「浮在滚动内容上方」这一层，所以只封装样式和热区，不带业务。
+struct FloatingGlassButton: View {
+    let symbol: String
+    let label: String
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            button.buttonStyle(.glass)
+        } else {
+            button
+                .background(.regularMaterial, in: Capsule())
+                .clipShape(Capsule())
+        }
+    }
+
+    private var button: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+                .padding(Theme.Spacing.xs)
+        }
+        .disabled(!isEnabled)
+        .accessibilityLabel(label)
     }
 }

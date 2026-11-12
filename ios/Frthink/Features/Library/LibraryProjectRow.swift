@@ -17,11 +17,6 @@ struct LibraryContinueRow: View {
                 )
                 .frame(width: 56, height: 74)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
-                )
-                .shadow(color: Theme.cardShadow, radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(project.shelfTitle)
@@ -68,11 +63,6 @@ struct LibraryProjectRow: View {
                 )
                 .frame(width: 52, height: 70)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
-                )
-                .shadow(color: Theme.cardShadow, radius: 6, y: 3)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: Theme.Spacing.xs) {

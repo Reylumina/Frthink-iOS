@@ -40,6 +40,11 @@ enum ReaderStyle {
         max(0, size * CGFloat(lineHeight - 1))
     }
 
+    /// 正文栏最大宽度：每行不超过 36 个汉字（DESIGN §2.3、§5.3）。
+    static func bodyMaxWidth(size: CGFloat) -> CGFloat {
+        size * 36
+    }
+
     /// 命中高亮底色。
     static func highlightColor(current: Bool) -> Color {
         current ? Theme.accent.opacity(0.5) : Theme.accent.opacity(0.26)

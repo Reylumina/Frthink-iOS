@@ -1,11 +1,14 @@
 import SwiftUI
 
 /// 设计系统：系统语义色、系统字体、系统动效。
+///
+/// 数值和用法以 `docs/DESIGN.md` 为准。新增 token 先写进文档，再补到这里；
+/// 页面里不直接写颜色、字号、时长。
 enum Theme {
 
     // MARK: - 颜色
 
-    /// 系统强调色。
+    /// 系统强调色，全应用唯一的全局 tint。
     static let accent = Color.accentColor
 
     /// 选中态淡底。
@@ -36,31 +39,37 @@ enum Theme {
     /// 分隔线用系统值，自动适配深浅色。
     static let separator = Color(uiColor: .separator)
 
-    /// 卡片投影。浅色下给一点浮起感，深色下几乎不可见。
-    static let cardShadow = Color.black.opacity(0.07)
+    /// 有色淡底的统一透明度：胶囊、选中态、图标底。
+    ///
+    /// 用户气泡不在此列，它用实底表达角色（见 `Theme.Bubble`）。
+    static let tintedFillOpacity: Double = 0.12
+
+    /// 用户气泡：实底 + 反色文字，和系统「信息」的收发关系一致。
+    static let bubbleFill = Color.accentColor
+    static let bubbleForeground = Color.white
 
     // MARK: - 字体
 
     /// 正文。系统字体，跟随 Dynamic Type。
-    static let prose = Font.system(.body)
+    static let prose = Font.body
     /// 助手回复。
-    static let reply = Font.system(.callout)
+    static let reply = Font.callout
 
     /// 标题。
-    static let heading = Font.system(.title3).weight(.semibold)
+    static let heading = Font.title3.weight(.semibold)
 
     /// 界面文字。无衬线、系统字号。
     static let label = Font.body
     static let labelEmphasis = Font.headline
     static let labelSmall = Font.subheadline
-    /// 元信息：时间、字数、条数。最小只到 `.caption`。
-    static let metadata = Font.caption
-    /// 角标：与小字同级，不低过 `.caption`。
-    static let badge = Font.caption.weight(.medium)
+    /// 元信息：时间、字数、条数。§2.1 规定为 `.footnote`。
+    static let metadata = Font.footnote
+    /// 胶囊、角标。
+    static let badge = Font.caption.weight(.semibold)
 
-    /// 数字/版本号。
-    static let numeric = Font.system(.footnote, design: .monospaced)
-    static let numericSmall = Font.system(.caption, design: .monospaced)
+    /// 数字/版本号：比例字形，只让数字等宽，避免刷新时跳动。
+    static let numeric = Font.footnote.monospacedDigit()
+    static let numericSmall = Font.caption.monospacedDigit()
 
     /// 小标题（区块名）。
     static let sectionTitle = Font.footnote.weight(.semibold)
@@ -88,12 +97,40 @@ enum Theme {
     enum Layout {
         /// 顶栏标题（书名 + 模型）的最大宽度，避免长模型名挤压两侧按钮。
         static let navTitleMaxWidth: CGFloat = 220
+        /// 常规宽度下对话列的最大宽度（§5.3）。
+        static let chatMaxWidth: CGFloat = 720
+        /// 常规宽度下表单页的最大宽度（§5.3）。
+        static let formMaxWidth: CGFloat = 640
+        /// 可点热区的最小边长（§5.1）。
+        static let hitTarget: CGFloat = 44
     }
 
     // MARK: - 动效
 
-    /// 选中、开关。
+    /// 选中、开关、分段切换、聚焦。
     static let motionSelection = Animation.snappy(duration: 0.2)
+    /// 展开收起、搜索栏、toast、列表增删。
+    static let motionLayout = Animation.smooth
+    /// 直接操作的结果，一屏最多一个。
+    static let motionEmphasis = Animation.bouncy
+
+    /// 「减弱动态效果」下把动效降级为空，调用方照常写 `withAnimation(Theme.motion(...))`。
+    static func motion(_ animation: Animation, reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : animation
+    }
+
+    // MARK: - 形状
+
+    /// 内容表面的形状。
+    ///
+    /// iOS 26 起跟随容器同心（§3.3），更早版本回落到固定圆角；
+    /// 页面里不写 `#available` 分支。
+    static func containerShape(minimum: CGFloat = Radius.large) -> AnyShape {
+        if #available(iOS 26.0, *) {
+            return AnyShape(ConcentricRectangle(corners: .concentric(minimum: minimum), isUniform: true))
+        }
+        return AnyShape(RoundedRectangle(cornerRadius: minimum, style: .continuous))
+    }
 }
 
 // MARK: - 容器
@@ -104,23 +141,63 @@ extension View {
         background(Theme.pageBackgroundColor.ignoresSafeArea())
     }
 
-    /// 卡片表面：同色底、细描边 + 轻投影，靠层次而不是重色分区。
+    /// 卡片表面：只做填充和连续圆角（§1.5）。
+    ///
+    /// 浅色下 `.secondarySystemBackground` 放在白底上已经能看出边界，不需要
+    /// 描边或投影；只有「增强对比度」时才补一圈系统分隔线。
     func cardSurface(radius: CGFloat = Theme.Radius.large) -> some View {
-        background(Theme.card)
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Theme.separator.opacity(0.55), lineWidth: 0.5)
-            )
-            .shadow(color: Theme.cardShadow, radius: 8, y: 3)
+        modifier(CardSurfaceModifier(radius: radius))
     }
 
     /// 玻璃表面。
     ///
     /// iOS 26 起用系统的 Liquid Glass；更早的版本回落到材质。
-    /// 只用在「浮在内容之上」的元素：输入条、浮层、气泡。
+    /// 只用在「浮在内容之上」的元素：输入条、浮层、工具栏按钮。
     func glassSurface(radius: CGFloat = Theme.Radius.large) -> some View {
         modifier(GlassSurfaceModifier(radius: radius))
+    }
+
+    /// 带「减弱动态效果」降级的隐式动画。
+    func themeAnimation<V: Equatable>(_ animation: Animation, value: V) -> some View {
+        modifier(ThemeAnimationModifier(animation: animation, value: value))
+    }
+
+    /// 标签栏随下滚收起（仅 iOS 26）。
+    @ViewBuilder
+    func minimizeTabBarOnScroll() -> some View {
+        if #available(iOS 26.0, *) {
+            tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            self
+        }
+    }
+
+    /// 滚动内容经过浮起控件时的边缘柔化（仅 iOS 26）。
+    @ViewBuilder
+    func softScrollEdge() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectStyle(.soft, for: .all)
+        } else {
+            self
+        }
+    }
+}
+
+struct CardSurfaceModifier: ViewModifier {
+    var radius: CGFloat
+
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(Theme.card)
+            .clipShape(shape)
+            .overlay {
+                if contrast == .increased {
+                    shape.strokeBorder(Theme.separator, lineWidth: 1)
+                }
+            }
     }
 }
 
@@ -137,9 +214,23 @@ struct GlassSurfaceModifier: ViewModifier {
     }
 }
 
+struct ThemeAnimationModifier<V: Equatable>: ViewModifier {
+    var animation: Animation
+    var value: V
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(Theme.motion(animation, reduceMotion: reduceMotion), value: value)
+    }
+}
+
+// MARK: - 空状态
+
 /// 空状态。
 ///
-/// 图标印章 + 标题 + 一句说明；用系统符号和语义色，不画插画。
+/// 用系统字形层级表达空，不加色块、描边和投影；字号走 `.largeTitle` 跟随
+/// Dynamic Type，不写死像素。
 struct EmptyStateView: View {
     let symbol: String
     let title: String
@@ -150,26 +241,18 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
             Image(systemName: symbol)
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 64, height: 64)
-                .background(
-                    Theme.accentSoft,
-                    in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                        .strokeBorder(Theme.accent.opacity(0.12), lineWidth: 0.5)
-                )
-                .shadow(color: Theme.cardShadow, radius: 10, y: 4)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
 
             Text(title)
-                .font(Font.headline)
+                .font(Theme.labelEmphasis)
                 .foregroundStyle(.primary)
+                .multilineTextAlignment(.center)
 
             if !message.isEmpty {
                 Text(message)
-                    .font(Font.subheadline)
+                    .font(Theme.labelSmall)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -183,8 +266,7 @@ struct EmptyStateView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.xxl)
         .padding(.horizontal, Theme.Spacing.l)
     }
 }
-
