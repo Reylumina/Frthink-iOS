@@ -10,7 +10,7 @@ enum DemoSeed {
     static let primaryTitle = "雨夜之后"
 
     static var isRequested: Bool {
-        ProcessInfo.processInfo.arguments.contains("-seedDemo")
+        LaunchArguments.seedsDemo
     }
 
     /// 已经播过种就不再重复。

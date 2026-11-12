@@ -77,7 +77,7 @@ struct LibraryView: View {
             #if DEBUG
             // 截图流水线：`-openTrash` 在书架出现后推进回收站。
             guard !didApplyLaunch,
-                  ProcessInfo.processInfo.arguments.contains("-openTrash")
+                  LaunchArguments.opensTrash
             else { return }
             didApplyLaunch = true
             try? await Task.sleep(for: .milliseconds(350))

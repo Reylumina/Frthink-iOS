@@ -160,11 +160,7 @@ struct ReaderPane: View {
     #if DEBUG
     /// 截图流水线：`-readerPanel display|chapters|search` 直接打开对应面板。
     private func applyLaunchPanel() {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-readerPanel"),
-              index + 1 < args.count
-        else { return }
-        switch args[index + 1] {
+        switch LaunchArguments.readerPanel {
         case "display": showSettings = true
         case "chapters": showChapters = true
         case "search": showSearch = true

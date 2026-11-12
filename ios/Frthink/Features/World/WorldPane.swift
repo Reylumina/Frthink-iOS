@@ -71,10 +71,7 @@ struct WorldPane: View {
 
     #if DEBUG
     private static var launchTab: WorldTab? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-worldTab"), index + 1 < args.count
-        else { return nil }
-        switch args[index + 1] {
+        switch LaunchArguments.worldTab {
         case "setting": return .setting
         case "worldbook": return .worldbook
         case "characters": return .characters

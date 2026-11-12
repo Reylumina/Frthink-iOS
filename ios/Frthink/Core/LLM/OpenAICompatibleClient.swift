@@ -240,13 +240,9 @@ final class OpenAICompatibleClient: LLMClient {
 
     // MARK: - 一次性
 
-    func complete(_ request: LLMRequest) async throws -> String {
-        var req = request
-        req.stream = false
-        let urlRequest = try makeRequest(
-            path: "/chat/completions",
-            body: req.jsonBody(isDeepSeek: provider.isDeepSeek, kind: provider.kind, providerLevel: provider.effectiveThinkingLevel)
-        )
+    /// 发一次请求并把 HTTP 状态收口：取消归一、非 2xx 带原文。
+    /// 一次性补全、探针和模型列表共用，避免三处各写一遍状态码判断。
+    private func send(_ urlRequest: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let data: Data
         let response: URLResponse
         do {
@@ -257,7 +253,6 @@ final class OpenAICompatibleClient: LLMClient {
             if error.isLLMCancellation { throw LLMError.cancelled }
             throw error
         }
-
         guard let http = response as? HTTPURLResponse else {
             throw LLMError.decoding("拿不到 HTTP 状态码")
         }
@@ -267,6 +262,22 @@ final class OpenAICompatibleClient: LLMClient {
                 body: String(data: data, encoding: .utf8) ?? ""
             )
         }
+        return (data, http)
+    }
+
+    /// `/chat/completions` 的非流式响应。返回解码结果和原文，正文/思考的判断留给调用方。
+    private func completionPayload(_ request: LLMRequest) async throws -> (CompletionResponse, String) {
+        var req = request
+        req.stream = false
+        let urlRequest = try makeRequest(
+            path: "/chat/completions",
+            body: req.jsonBody(
+                isDeepSeek: provider.isDeepSeek,
+                kind: provider.kind,
+                providerLevel: provider.effectiveThinkingLevel
+            )
+        )
+        let (data, _) = try await send(urlRequest)
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let decoded = try? JSONDecoder().decode(CompletionResponse.self, from: data) else {
             throw LLMError.emptyResponse(detail: Self.clip(raw))
@@ -274,11 +285,17 @@ final class OpenAICompatibleClient: LLMClient {
         if let streamError = decoded.error {
             throw LLMError.streamError(detail: streamError.detail)
         }
-        let message = decoded.choices?.first?.message
+        return (decoded, raw)
+    }
+
+    func complete(_ request: LLMRequest) async throws -> String {
+        let (decoded, raw) = try await completionPayload(request)
+        let choice = decoded.choices?.first
         if request.failOnLength,
-           decoded.choices?.first?.finish_reason?.lowercased() == "length" {
+           choice?.finish_reason?.lowercased() == "length" {
             throw LLMError.truncated(detail: "finish_reason=length")
         }
+        let message = choice?.message
         let text = message?.content ?? message?.text ?? message?.output_text ?? ""
         if text.isEmpty {
             // 思考型模型可能只回 reasoning_content。这不是坏响应，
@@ -302,17 +319,7 @@ final class OpenAICompatibleClient: LLMClient {
     // MARK: - 模型列表
 
     func listModels() async throws -> [String] {
-        let request = try makeRequest(path: "/models", body: nil)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw LLMError.http(
-                status: http.statusCode,
-                body: String(data: data, encoding: .utf8) ?? ""
-            )
-        }
+        let (data, _) = try await send(try makeRequest(path: "/models", body: nil))
         guard let decoded = try? JSONDecoder().decode(ModelListResponse.self, from: data) else {
             throw LLMError.decoding("模型列表结构不符合预期")
         }
@@ -323,7 +330,7 @@ final class OpenAICompatibleClient: LLMClient {
 
     func testConnection() async throws {
         // 探针只验证地址、Key、模型名。max_tokens 给足，避免思考型模型只回 reasoning。
-        var probe = LLMRequest(
+        let probe = LLMRequest(
             model: provider.resolvedModel,
             messages: [.user("你好")],
             stream: false,
@@ -335,31 +342,8 @@ final class OpenAICompatibleClient: LLMClient {
 
     /// HTTP 200 且能解成 completion 即连通；只有 reasoning_content 也算正常。
     private func probeOnly(_ request: LLMRequest) async throws -> String {
-        var req = request
-        req.stream = false
-        let urlRequest = try makeRequest(
-            path: "/chat/completions",
-            body: req.jsonBody(
-                isDeepSeek: provider.isDeepSeek,
-                kind: provider.kind,
-                providerLevel: provider.effectiveThinkingLevel
-            )
-        )
-        let (data, response) = try await session.data(for: urlRequest)
-
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw LLMError.http(
-                status: http.statusCode,
-                body: String(data: data, encoding: .utf8) ?? ""
-            )
-        }
-        let raw = String(data: data, encoding: .utf8) ?? ""
-        guard let decoded = try? JSONDecoder().decode(CompletionResponse.self, from: data),
-              let choice = decoded.choices?.first
-        else {
+        let (decoded, raw) = try await completionPayload(request)
+        guard let choice = decoded.choices?.first else {
             throw LLMError.emptyResponse(detail: Self.clip(raw))
         }
         // 正文或思考，有一样就算这条链路是通的。

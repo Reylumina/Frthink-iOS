@@ -205,18 +205,12 @@ struct SettingsView: View {
     }
 
     private static var launchCategory: SettingsCategory? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-settingsPage"),
-              index + 1 < args.count
-        else { return nil }
-        return SettingsCategory(rawValue: args[index + 1])
+        LaunchArguments.settingsPage.flatMap(SettingsCategory.init(rawValue:))
     }
 
     private static var launchEditor: SettingsEditorRoute? {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-settingsEditor"),
-              index + 1 < args.count
-        else { return nil }
-        return SettingsEditorRoute(rawValue: args[index + 1].lowercased())
+        LaunchArguments.settingsEditor.flatMap {
+            SettingsEditorRoute(rawValue: $0.lowercased())
+        }
     }
 }

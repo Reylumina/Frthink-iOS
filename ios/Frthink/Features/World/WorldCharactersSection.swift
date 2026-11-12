@@ -73,7 +73,7 @@ struct WorldCharactersSection: View {
     #if DEBUG
     /// 截图流水线：`-openWorldCard first` 打开列表里的第一张人物卡。
     private func applyLaunchCard() {
-        guard ProcessInfo.processInfo.arguments.contains("-openWorldCard"),
+        guard LaunchArguments.opensWorldCard,
               route == nil,
               let first = filteredCards.first
         else { return }

@@ -10,10 +10,7 @@ struct RootView: View {
 
     /// 从启动参数里读初始 Tab。
     static var launchDestination: AppDestination {
-        let args = ProcessInfo.processInfo.arguments
-        guard let index = args.firstIndex(of: "-initialTab"), index + 1 < args.count
-        else { return .compose }
-        return AppDestination(rawValue: args[index + 1]) ?? .compose
+        AppDestination(rawValue: LaunchArguments.initialTab ?? "") ?? .compose
     }
 
     /// 启动时先按上次打开的书落位；演示数据要另选主书，留给 onAppear。
@@ -105,7 +102,7 @@ struct RootView: View {
                 }
                 #if DEBUG
                 // 书架截图：直接打开书稿选择器（可再带 -openTrash 进回收站）。
-                if ProcessInfo.processInfo.arguments.contains("-openLibrary") {
+                if LaunchArguments.opensLibrary {
                     libraryVisible = true
                 }
                 #endif

@@ -222,7 +222,14 @@ struct WriterPane: View {
             }
 
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-streamPreview") {
+            if LaunchArguments.writerFocus == "manuscript" {
+                // 截图流水线要拍「正文单区」：等首帧排版完再拉 sheet，避免 sheet 抢在列表前面。
+                Task { @MainActor in
+                    await Task.yield()
+                    openSheet(.manuscript)
+                }
+            }
+            if LaunchArguments.streamPreview {
                 let message = session.beginAssistantMessage(model: "stream-preview")
                 let preview = """
                 林昭把梯子挪到最里侧的书架前。灰尘在手电的光柱里浮着，像静止的雪。
@@ -613,7 +620,7 @@ struct WriterPane: View {
             onContinue: {
                 startContinuation()
             },
-            autoFocus: ProcessInfo.processInfo.arguments.contains("-focusComposer")
+            autoFocus: LaunchArguments.focusComposer
         )
         .sensoryFeedback(.impact(weight: .light), trigger: session.payload.messages.count) { _, _ in store.settings.hapticsEnabled }
         .alert("上下文预算不足", isPresented: $budgetPresented) {

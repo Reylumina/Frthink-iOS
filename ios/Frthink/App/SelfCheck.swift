@@ -11,7 +11,7 @@ import Foundation
 enum SelfCheck {
 
     static var isRequested: Bool {
-        ProcessInfo.processInfo.arguments.contains("-runSelfCheck")
+        LaunchArguments.runsSelfCheck
     }
 
     private struct Failure: Error {
