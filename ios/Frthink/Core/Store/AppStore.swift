@@ -100,12 +100,6 @@ final class AppStore {
         worldTasks[projectID] = nil
     }
 
-    /// 切书/删书时取消该项目在跑的世界任务。
-    func cancelWorldTask(for projectID: String) {
-        worldTasks[projectID]?.cancel()
-        worldTasks[projectID] = nil
-    }
-
     // MARK: - 书架
 
     func reload() {
