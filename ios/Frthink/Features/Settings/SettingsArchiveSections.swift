@@ -20,7 +20,7 @@ struct SettingsProjectArchiveSection: View {
         Section {
             Picker("书项目", selection: $selectedProjectID) {
                 ForEach(store.activeProjects) { project in
-                    Text(project.title.isEmpty ? "未命名书项目" : project.title)
+                    Text(project.title.isEmpty ? Project.untitledTitle : project.title)
                         .tag(Optional(project.id))
                 }
             }

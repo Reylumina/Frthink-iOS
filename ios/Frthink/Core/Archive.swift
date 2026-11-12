@@ -1314,6 +1314,8 @@ enum FrthinkArchive {
             dict["globalPreset"] = settings.globalPreset
             dict["aiFlavorRules"] = settings.aiFlavorRules
             dict["worldBuildInstruction"] = settings.worldBuildInstruction
+            dict["plotOutlineInstruction"] = settings.plotOutlineInstruction
+            dict["imitationInstruction"] = settings.imitationInstruction
             dict["inputBudgetTokens"] = settings.inputBudgetTokens
             dict["outputBudgetTokens"] = settings.reservedOutputTokens
             dict["autoConversationSummary"] = settings.autoConversationSummary
@@ -1506,6 +1508,12 @@ enum FrthinkArchive {
             }
             if let worldBuildInstruction, !worldBuildInstruction.isEmpty {
                 settings.worldBuildInstruction = worldBuildInstruction
+            }
+            if let plotOutlineInstruction, !plotOutlineInstruction.isEmpty {
+                settings.plotOutlineInstruction = plotOutlineInstruction
+            }
+            if let imitationInstruction, !imitationInstruction.isEmpty {
+                settings.imitationInstruction = imitationInstruction
             }
             if let inputBudgetTokens, inputBudgetTokens > 0 {
                 settings.inputBudgetTokens = min(max(inputBudgetTokens, 1024), 1_000_000)
@@ -1889,7 +1897,7 @@ enum FrthinkArchive {
         for backup in backups {
             let project = Project(
                 id: backup.projectId,
-                title: backup.title.isEmpty ? "未命名书项目" : backup.title,
+                title: backup.title.isEmpty ? Project.untitledTitle : backup.title,
                 synopsis: backup.synopsis,
                 updatedAt: Date(),
                 revision: 0,

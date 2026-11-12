@@ -807,6 +807,9 @@ final class ProjectSession {
     func refreshDerivedValues() {
         // 正文还没按需加载时不做任何派生计算，避免把空串当成全文。
         guard bodyLoaded || !payload.manuscript.isEmpty else { return }
+        // 章节已经扫过就不再整本重扫：56 万字的正则扫描放在每次进入写作台
+        // 的 onAppear 里，代价太大，而结果本来也会被 `isEmpty` 丢掉。
+        guard payload.chapters.isEmpty else { return }
         let snapshot = payload.manuscript
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
@@ -814,9 +817,7 @@ final class ProjectSession {
             }.value
             guard let self, self.payload.manuscript == snapshot else { return }
             self.manuscriptCharacterCount = result.0
-            if self.payload.chapters.isEmpty {
-                self.payload.chapters = result.1
-            }
+            self.payload.chapters = result.1
         }
     }
 
@@ -920,11 +921,6 @@ final class ProjectSession {
         var message = payload.messages[index]
         message.model = model ?? message.model
         payload.messages[index] = message
-        scheduleSave()
-    }
-
-    func removeMessage(_ messageID: String) {
-        payload.messages.removeAll { $0.id == messageID }
         scheduleSave()
     }
 

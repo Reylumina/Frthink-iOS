@@ -5,6 +5,9 @@ import Foundation
 /// 字段与 Android 端 `projects` 表一一对应（`updatedAt`/`trashedAt` 在那边是
 /// epoch 毫秒，这里用 `Date`，落盘走 ISO8601）。
 struct Project: Identifiable, Codable, Hashable {
+    /// 导入、新建或旧数据缺标题时统一显示的占位书名。
+    static let untitledTitle = Project.untitledTitle
+
     var id: String
     var title: String
     var synopsis: String

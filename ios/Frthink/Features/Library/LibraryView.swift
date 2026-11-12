@@ -81,6 +81,7 @@ struct LibraryView: View {
             else { return }
             didApplyLaunch = true
             try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             showTrashOnLaunch = true
             #endif
         }
@@ -242,8 +243,8 @@ struct LibraryView: View {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         // 空书名在列表里会显示为「未命名书项目」；直接把它写成正式标题，
         // 避免列表与重命名弹窗里出现两种名字。
-        let finalTitle = trimmed.isEmpty ? "未命名书项目" : trimmed
-        let project = store.createProject(title: finalTitle)
+        let finalTitle = trimmed.isEmpty ? Project.untitledTitle : trimmed
+        guard let project = store.createProject(title: finalTitle) else { return }
         guard store.activeProjects.contains(where: { $0.id == project.id }) else { return }
         store.toast = "已新建「\(project.shelfTitle)」"
         onOpen(project)

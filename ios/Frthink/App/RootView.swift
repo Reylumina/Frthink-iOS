@@ -189,6 +189,7 @@ struct RootView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .task(id: toast) {
                         try? await Task.sleep(for: .seconds(2.2))
+                        guard !Task.isCancelled else { return }
                         withAnimation { store.toast = nil }
                     }
             }

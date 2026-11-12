@@ -27,7 +27,7 @@ extension Project {
     /// 新建时允许空书名；列表与回收站只显示占位，不写回模型。
     var shelfTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "未命名书项目" : trimmed
+        return trimmed.isEmpty ? Project.untitledTitle : trimmed
     }
 }
 

@@ -113,9 +113,10 @@ final class AppStore {
         projects.filter { $0.isTrashed }
     }
 
+    /// 新建书稿。落盘失败返回 nil：调用方不应该拿着一个磁盘上不存在的项目去开会话。
     @discardableResult
-    func createProject(title: String) -> Project {
-        var p = Project(title: title.isEmpty ? "未命名书项目" : title)
+    func createProject(title: String) -> Project? {
+        var p = Project(title: title.isEmpty ? Project.untitledTitle : title)
         p.branchRootId = p.id
         do {
             try fileStore.saveProject(p)
@@ -133,7 +134,7 @@ final class AppStore {
             return p
         } catch {
             errorMessage = "创建失败：\(error.localizedDescription)"
-            return p
+            return nil
         }
     }
 
@@ -220,7 +221,8 @@ final class AppStore {
         }
     }
 
-    func touch(_ project: Project) {        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
+    func touch(_ project: Project) {
+        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
         var p = projects[idx]
         p.updatedAt = Date()
         p.revision += 1

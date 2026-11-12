@@ -263,6 +263,10 @@ struct AppSettings: Codable {
     var summaryModel: String
     /// 「世界建立」：改写 P18「世界建立要求」的正文；空串表示用出厂值。
     var worldBuildInstruction: String
+    /// 「剧情归纳预设」：改写 P19 素材归纳的正文；空串表示用出厂值。
+    var plotOutlineInstruction: String
+    /// 「仿写归纳预设」：改写 P19 素材归纳的正文；空串表示用出厂值。
+    var imitationInstruction: String
     /// 自动对话摘要（APK `autoConversationSummary`）。
     var autoConversationSummary: Bool
     /// 摘要触发阈值（百分比）。
@@ -291,6 +295,8 @@ struct AppSettings: Codable {
         translationProviderID: String = "",
         summaryModel: String = "",
         worldBuildInstruction: String = "",
+        plotOutlineInstruction: String = "",
+        imitationInstruction: String = "",
         autoConversationSummary: Bool = true,
         conversationSummaryThresholdPercent: Int = 95,
         excludeAssistantChatHistory: Bool = false,
@@ -322,6 +328,8 @@ struct AppSettings: Codable {
         self.translationProviderID = translationProviderID
         self.summaryModel = summaryModel
         self.worldBuildInstruction = worldBuildInstruction
+        self.plotOutlineInstruction = plotOutlineInstruction
+        self.imitationInstruction = imitationInstruction
         self.autoConversationSummary = autoConversationSummary
         self.conversationSummaryThresholdPercent = conversationSummaryThresholdPercent
         self.excludeAssistantChatHistory = excludeAssistantChatHistory
@@ -387,6 +395,10 @@ struct AppSettings: Codable {
         summaryModel = (try? c.decode(String.self, forKey: .summaryModel)) ?? ""
         worldBuildInstruction =
             (try? c.decode(String.self, forKey: .worldBuildInstruction)) ?? ""
+        plotOutlineInstruction =
+            (try? c.decode(String.self, forKey: .plotOutlineInstruction)) ?? ""
+        imitationInstruction =
+            (try? c.decode(String.self, forKey: .imitationInstruction)) ?? ""
         autoConversationSummary =
             (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? true
         conversationSummaryThresholdPercent =

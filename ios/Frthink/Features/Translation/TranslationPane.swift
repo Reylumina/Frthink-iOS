@@ -53,6 +53,8 @@ struct TranslationPane: View {
         .groupedPageBackground()
         .onAppear { bootstrap() }
         .onDisappear { shutdown() }
+        // 翻译进行中下滑关闭会中止这一轮；用「关闭」明确退出。
+        .interactiveDismissDisabled(isRunning)
         .onChange(of: session.sourceText) { _, _ in
             session.saveSource()
         }

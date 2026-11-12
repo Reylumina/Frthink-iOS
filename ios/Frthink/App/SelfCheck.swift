@@ -276,6 +276,11 @@ enum SelfCheck {
             }, "顶层 corpusLibrary 没导入")
             try expect(backup.settings.inputBudgetTokens == 100_000,
                        "输入预算没导入：\(backup.settings.inputBudgetTokens)")
+            try expect(
+                backup.settings.plotOutlineInstruction == "FIXTURE_PLOT_INSTRUCTION"
+                    && backup.settings.imitationInstruction == "FIXTURE_IMITATION",
+                "剧情/仿写归纳预设没有导入"
+            )
 
             // 写盘 + 读回：证明落盘链路真的能跑，而不只是解码成功。
             let root = FileManager.default.temporaryDirectory

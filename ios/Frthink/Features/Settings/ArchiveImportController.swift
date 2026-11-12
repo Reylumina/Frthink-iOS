@@ -49,7 +49,7 @@ enum ArchiveImportStage: Equatable {
         case .decoding:
             return "解压并校验存档结构…"
         case .restoring(let index, let total, let title):
-            let safeTitle = title.isEmpty ? "未命名书项目" : title
+            let safeTitle = title.isEmpty ? Project.untitledTitle : title
             return "第 \(index + 1)/\(total) 本 · \(safeTitle)"
         case .mergingSettings:
             return "预设、技能、世界书与预算…"
@@ -126,7 +126,7 @@ final class ArchiveImportController {
             let backups = archive.projects
             let overrides = backups
                 .filter { controller.existingIDs.contains($0.projectId) }
-                .map { $0.title.isEmpty ? "未命名书项目" : $0.title }
+                .map { $0.title.isEmpty ? Project.untitledTitle : $0.title }
             if overrides.isEmpty {
                 try await controller.restore(backups)
             } else {
@@ -151,7 +151,7 @@ final class ArchiveImportController {
                 // 只有书项目、没有设置：按项目导入处理，别清空本机设置。
                 let overrides = payload.projects
                     .filter { controller.existingIDs.contains($0.projectId) }
-                    .map { $0.title.isEmpty ? "未命名书项目" : $0.title }
+                    .map { $0.title.isEmpty ? Project.untitledTitle : $0.title }
                 if overrides.isEmpty {
                     try await controller.restore(payload.projects)
                 } else {

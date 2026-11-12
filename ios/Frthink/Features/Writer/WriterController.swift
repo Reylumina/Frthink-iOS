@@ -100,9 +100,6 @@ final class WriterController {
             return .milliseconds(60)
         }
     }
-    /// 本次请求所属的 store。组消息时要读全局设置（预设 / 技能 / 去 AI 味规则 / 语料库），
-    /// 这几个值在 `AppSettings` 里，而消息组装函数拿不到 store，所以在这里存一份。
-    private weak var activeStore: AppStore?
 
     /// 预算不足时挂起、等用户确认的操作。
     private var pending: PendingAction?
@@ -160,7 +157,6 @@ final class WriterController {
     func send(_ text: String, session: ProjectSession, store: AppStore) -> Bool {
         let instruction = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instruction.isEmpty, !isGenerating, !isPreparing else { return false }
-        activeStore = store
         return start(
             action: .send(instruction: instruction),
             session: session,
@@ -173,7 +169,6 @@ final class WriterController {
     /// 续写：不带用户输入，从正文末尾接着写（正文末尾片段作为 assistant 回灌）。
     func continueWriting(session: ProjectSession, store: AppStore) {
         guard !isGenerating, !isPreparing else { return }
-        activeStore = store
         _ = start(
             action: .continueWriting,
             session: session,
@@ -191,7 +186,6 @@ final class WriterController {
             store.toast = "这条助手消息已经不存在了"
             return
         }
-        activeStore = store
         session.clearInterrupted(messageID)
         let previousVariant = session.payload.messages[index].selectedVariant
         _ = start(
@@ -812,7 +806,7 @@ final class WriterController {
                 store.toast = "生成已停止，已收到的部分内容保存在原气泡"
             } else {
                 if isNewMessage {
-                    session.removeMessage(messageID)
+                    session.deleteMessage(messageID)
                 } else if let fallbackVariant {
                     session.selectVariant(fallbackVariant, for: messageID)
                 }
@@ -823,7 +817,7 @@ final class WriterController {
 
         if let failure {
             if isNewMessage {
-                session.removeMessage(messageID)
+                session.deleteMessage(messageID)
             } else if let fallbackVariant {
                 session.selectVariant(fallbackVariant, for: messageID)
             }
@@ -834,7 +828,7 @@ final class WriterController {
         // 只有思考过程、没有正文：空气泡没有意义，按失败处理。
         guard !produced.isEmpty else {
             if isNewMessage {
-                session.removeMessage(messageID)
+                session.deleteMessage(messageID)
             } else if let fallbackVariant {
                 session.selectVariant(fallbackVariant, for: messageID)
             }
@@ -859,12 +853,12 @@ final class WriterController {
         guard used * 100 >= limit * threshold else { return }
 
         let summarized = Set(session.payload.world.summarizedMessageIDs)
-        let pending = session.payload.messages
+        let unsummarized = session.payload.messages
             .filter { $0.role == .user && !summarized.contains($0.id) }
             .suffix(12)
-        guard !pending.isEmpty else { return }
+        guard !unsummarized.isEmpty else { return }
 
-        let pendingMessages = Array(pending).filter {
+        let pendingMessages = Array(unsummarized).filter {
             !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         guard !pendingMessages.isEmpty else { return }

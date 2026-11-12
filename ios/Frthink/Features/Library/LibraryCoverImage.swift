@@ -17,7 +17,7 @@ struct LibraryCoverImage: View {
 
     private var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "未命名书项目" : trimmed
+        return trimmed.isEmpty ? Project.untitledTitle : trimmed
     }
 
     var body: some View {

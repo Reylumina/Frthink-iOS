@@ -22,7 +22,7 @@ struct SettingsLongTermRulesPage: View {
             Section {
                 Picker("当前书", selection: $selectedProjectID) {
                     ForEach(store.activeProjects) { project in
-                        Text(project.title.isEmpty ? "未命名书项目" : project.title)
+                        Text(project.title.isEmpty ? Project.untitledTitle : project.title)
                             .tag(Optional(project.id))
                     }
                 }

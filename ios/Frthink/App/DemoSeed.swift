@@ -18,7 +18,7 @@ enum DemoSeed {
     static func seedIfNeeded(store: AppStore) {
         guard isRequested, store.projects.isEmpty else { return }
 
-        let project = store.createProject(title: primaryTitle)
+        guard let project = store.createProject(title: primaryTitle) else { return }
         let session = store.openSession(for: project)
 
         store.setSynopsis(project, to: "一个关于旧书店与未寄出的信的故事。")
@@ -144,15 +144,18 @@ enum DemoSeed {
         session.saveNow()
 
         // 书架截图需要不止一本书：再补两本进行中、一条分支和一本回收站里的旧稿。
-        let second = store.createProject(title: "长夜将尽")
-        store.setSynopsis(second, to: "民国背景的悬疑长篇，双线叙事。")
-        let third = store.createProject(title: "海边的房间")
-        store.setSynopsis(third, to: "关于回声、潮汐与记忆的短篇集。")
+        if let second = store.createProject(title: "长夜将尽") {
+            store.setSynopsis(second, to: "民国背景的悬疑长篇，双线叙事。")
+        }
+        if let third = store.createProject(title: "海边的房间") {
+            store.setSynopsis(third, to: "关于回声、潮汐与记忆的短篇集。")
+        }
         _ = store.duplicate(project)
 
-        let trashed = store.createProject(title: "旧稿 · 未命名实验")
-        store.setSynopsis(trashed, to: "试写的开头，暂时放进回收站。")
-        store.trash(trashed)
+        if let trashed = store.createProject(title: "旧稿 · 未命名实验") {
+            store.setSynopsis(trashed, to: "试写的开头，暂时放进回收站。")
+            store.trash(trashed)
+        }
     }
 
     private static func makeMessage(role: ChatMessage.Role, text: String) -> ChatMessage {

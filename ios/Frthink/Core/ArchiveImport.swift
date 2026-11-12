@@ -26,7 +26,7 @@ extension FrthinkArchive.ProjectBackup {
         let payload = snapshot.projectPayload
         return ArchiveBookSummary(
             id: projectId,
-            title: title.isEmpty ? "未命名书项目" : title,
+            title: title.isEmpty ? Project.untitledTitle : title,
             bodyCharacters: payload.manuscript.count,
             messageCount: payload.messages.count,
             characterCardCount: payload.world.characters.count,

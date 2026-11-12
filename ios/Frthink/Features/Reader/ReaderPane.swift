@@ -101,7 +101,7 @@ struct ReaderPane: View {
         .onChange(of: modeRaw) { _, _ in
             if isVisible { scheduleRebuild(immediate: true) }
         }
-        .onChange(of: session.project.id) { _, _ in reloadProject() }
+        // 换书由 RootView 的 `.id(session.project.id)` 重建整页，这里不用再监听。
         // 搜索防抖：打字停下 220ms 再扫全文；输入变了或页面走了，上一轮自动取消。
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(220))
@@ -466,6 +466,8 @@ struct ReaderPane: View {
         let start = document.blocks[index].start
         anchorOffset = start
         lastOffset = start
+        // 同步滚动位置绑定，避免它用旧段落把刚跳到的位置再拉回去。
+        scrolledBlockStart = start
         jump = ReaderJump(offset: start, animated: true)
     }
 
@@ -529,19 +531,6 @@ struct ReaderPane: View {
         anchorOffset = max(0, lastOffset)
         if document.blocks.isEmpty { isLoadingDocument = true }
         scheduleRebuild(immediate: true)
-    }
-
-    /// 换书时视图身份不变、`@State` 会留下来，必须手动清一遍再按新书的位置恢复。
-    private func reloadProject() {
-        document = .empty
-        translationText = ""
-        manuscriptLength = 0
-        query = ""
-        matches = []
-        highlightMap = [:]
-        matchIndex = 0
-        anchorOffset = 0
-        prepare()
     }
 
     /// 后台重排。56 万字的切块、逐块 substring、字数统计，全都不能在主线程做——
@@ -610,6 +599,7 @@ struct ReaderPane: View {
         }
         let index = ReaderLocator.blockIndex(for: clamp(preferredOffset), in: document.blocks)
         anchorOffset = document.blocks[index].start
+        scrolledBlockStart = anchorOffset
         jump = ReaderJump(offset: anchorOffset, animated: false)
         performSearch()
     }
