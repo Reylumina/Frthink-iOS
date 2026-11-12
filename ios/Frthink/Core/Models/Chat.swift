@@ -73,6 +73,55 @@ struct TranslationSegment: Identifiable, Codable, Hashable {
     var payload: String
     var updatedAt: Date
 
+    private enum CodingKeys: String, CodingKey {
+        case id, owner, project, target, sourceHash, segment, payload, updatedAt
+        // Android 存档用 index/text；只读不写，方便同一份 JSON 两端都能解。
+        case index, text
+    }
+
+    /// 存档导出与 Android 共用一份 JSON：对方可能不写 `updatedAt`，
+    /// 缺省时按当前时间补，不能让一条时间戳把整段译文丢掉。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        owner = (try? c.decode(String.self, forKey: .owner)) ?? ""
+        project = (try? c.decode(String.self, forKey: .project)) ?? ""
+        target = (try? c.decode(String.self, forKey: .target)) ?? Self.defaultTarget
+        // Android 把正文译文记成 `body`，映射成本机目标语言标记。
+        if target.isEmpty || target == "body" {
+            target = Self.defaultTarget
+        }
+        let hash = (try? c.decode(String.self, forKey: .sourceHash)) ?? ""
+        guard !hash.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .sourceHash,
+                in: c,
+                debugDescription: "译文缺少 sourceHash"
+            )
+        }
+        sourceHash = hash
+        segment = (try? c.decode(Int.self, forKey: .segment))
+            ?? (try? c.decode(Int.self, forKey: .index))
+            ?? 0
+        payload = (try? c.decode(String.self, forKey: .payload))
+            ?? (try? c.decode(String.self, forKey: .text))
+            ?? ""
+        updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? Date()
+    }
+
+    /// 内部落盘只写 iOS 键，不把 Android 的 index/text 冗余写进 translations.json。
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(owner, forKey: .owner)
+        try c.encode(project, forKey: .project)
+        try c.encode(target, forKey: .target)
+        try c.encode(sourceHash, forKey: .sourceHash)
+        try c.encode(segment, forKey: .segment)
+        try c.encode(payload, forKey: .payload)
+        try c.encode(updatedAt, forKey: .updatedAt)
+    }
+
     init(
         id: String = UUID().uuidString,
         owner: String,

@@ -530,18 +530,26 @@ enum FrthinkArchive {
         // 事件卡：Android 的新版本把剧情事件放在 `world.plotEvents`
         // （`PlotEventCard`），老版本放 `world.events` 字符串数组。两者都读，
         // 前者是真正能还原成事件卡的那份。
-        let events: [EventCard] = (worldJSON?.plotEvents ?? []).compactMap { raw in
-            guard let title = raw.title, !title.isEmpty else { return nil }
-            return EventCard(
-                id: raw.id ?? UUID().uuidString,
-                title: title,
-                scene: raw.scene ?? "",
-                characters: raw.characters ?? [],
-                cause: raw.cause ?? "",
-                development: raw.development ?? "",
-                consequence: raw.consequence ?? ""
-            )
-        }
+        let events: [EventCard] = {
+            let plotEvents = (worldJSON?.plotEvents ?? []).compactMap { raw -> EventCard? in
+                guard let title = raw.title, !title.isEmpty else { return nil }
+                return EventCard(
+                    id: raw.id ?? UUID().uuidString,
+                    title: title,
+                    scene: raw.scene ?? "",
+                    characters: raw.characters ?? [],
+                    cause: raw.cause ?? "",
+                    development: raw.development ?? "",
+                    consequence: raw.consequence ?? ""
+                )
+            }
+            if !plotEvents.isEmpty { return plotEvents }
+            // 老存档只有标题，按标题还原成最小事件卡，至少不丢剧情节点。
+            return (worldJSON?.events ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { EventCard(title: $0) }
+        }()
 
         let groups: [CharacterGroup] = {
             // Android 把 characterGroups 放在 snapshot 顶层；旧 iOS 存档写在 world 里，
@@ -927,6 +935,8 @@ enum FrthinkArchive {
         var materialSourceProgress: [String: RawMaterialProgress]?
         /// 新版 Android 的事件卡（`world.plotEvents`）。
         var plotEvents: [PlotEventJSON]?
+        /// 老版本的剧情事件只有标题字符串（`world.events`）。
+        var events: [String]?
         /// iOS 存档携带的人物分组；Android 无此键时缺省。
         var characterGroups: [GroupJSON]?
     }

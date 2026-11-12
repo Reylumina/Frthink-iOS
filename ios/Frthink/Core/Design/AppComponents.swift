@@ -416,7 +416,13 @@ struct AppSecureField: View {
                 .accessibilityLabel(title)
 
                 Button {
+                    // TextField 与 SecureField 切换会换控件身份，光标和焦点会丢；
+                    // 记住切换前的聚焦状态，替身出现后把焦点还回去。
+                    let wasFocused = focused
                     reveals.toggle()
+                    if wasFocused {
+                        Task { @MainActor in focused = true }
+                    }
                 } label: {
                     Image(systemName: reveals ? "eye.slash" : "eye")
                         .font(.footnote)

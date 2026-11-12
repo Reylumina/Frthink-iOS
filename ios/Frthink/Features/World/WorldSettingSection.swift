@@ -176,6 +176,9 @@ struct WorldSettingSection: View {
     // MARK: - 状态
 
     private var refreshStatusLine: String {
+        if isBusy {
+            return "正在刷新人物卡，完成前可以先去别的分栏"
+        }
         let world = session.payload.world
         let total = session.manuscriptCharacterCount
         if let date = world.lastRefreshedAt {

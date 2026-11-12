@@ -51,6 +51,9 @@ final class WriterController {
     /// 准备阶段的 Task；点停止或切页时取消。
     private var prepareTask: Task<Void, Never>?
 
+    /// 准备阶段暂存的用户指令。用户在组装完成前点停止时，把它还给输入框。
+    private var preparingInstruction: String?
+
     /// 非 nil 时弹上下文预算提示；由视图观察后弹 alert。
     private(set) var budgetAlert: BudgetAlert?
 
@@ -207,6 +210,11 @@ final class WriterController {
             prepareTask?.cancel()
             prepareTask = nil
             isPreparing = false
+            // 提示词还没组装完就取消：把用户刚发出的指令放回输入框，别让文字凭空消失。
+            if let text = preparingInstruction {
+                instructionToRestore = text
+                preparingInstruction = nil
+            }
             return
         }
         guard isGenerating else { return }
@@ -298,6 +306,11 @@ final class WriterController {
                 provider: provider
             )
             isPreparing = true
+            if case .send(let instruction) = action {
+                preparingInstruction = instruction
+            } else {
+                preparingInstruction = nil
+            }
             prepareTask?.cancel()
             prepareTask = Task { @MainActor [weak self] in
                 let result: WriterPromptRetryResult = await Task.detached(
@@ -360,6 +373,8 @@ final class WriterController {
         store: AppStore
     ) {
         let plan = budget(for: preparation.provider, settings: store.settings)
+        // 到这里已经能给出结果：指令要么提交，要么交给预算弹窗/输入框。
+        preparingInstruction = nil
         switch result {
         case .cannotTrim:
             budgetAlert = nil
