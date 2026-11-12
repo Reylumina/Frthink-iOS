@@ -39,8 +39,10 @@ enum WriterTypography {
     ///
     /// 模型输出用空行分段，段落本身不保留缩进和空行。
     static func paragraphs(_ text: String) -> [String] {
-        text.split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        // 按任意换行符切（\r\n 也算一次），再连空白一起剪掉：
+        // 只切 "\n" 会把 \r 留在段尾，完成态那段会多出一行，和流式对不上。
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 }

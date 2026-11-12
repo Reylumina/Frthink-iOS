@@ -92,8 +92,13 @@ struct InlineSearchField: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(Font.footnote)
                         .foregroundStyle(.tertiary)
-                        .frame(width: size, height: size)
+                        // 热区 44pt，负内边距把占位让回去，搜索框不会因此长高（§5.1）。
+                        .frame(
+                            width: Theme.Layout.hitTarget,
+                            height: Theme.Layout.hitTarget
+                        )
                         .contentShape(Rectangle())
+                        .padding(.vertical, -(Theme.Layout.hitTarget - size) / 2)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("清除搜索")
@@ -823,9 +828,20 @@ struct FloatingGlassButton: View {
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.controlHeight
 
     var body: some View {
+        // iOS 26 用系统玻璃按钮样式：按压形变和高亮由系统给，自己画一个静态玻璃
+        // 会丢掉「点下去有反应」。
+        if #available(iOS 26.0, *) {
+            button.buttonStyle(.glass)
+        } else {
+            button
+                .background(.regularMaterial, in: Capsule())
+                .clipShape(Capsule())
+        }
+    }
+
+    private var button: some View {
         Button(action: action) {
             if let title {
-                // 文字胶囊：玻璃按 36pt 画，外面再补到 44pt 热区，外形不变。
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: symbol)
                         .font(Font.caption.weight(.semibold))
@@ -834,22 +850,14 @@ struct FloatingGlassButton: View {
                 }
                 .padding(.horizontal, Theme.Spacing.m)
                 .frame(minHeight: size)
-                .glassSurface(Capsule())
-                .frame(minHeight: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
             } else {
                 Image(systemName: symbol)
                     .font(Font.subheadline.weight(.semibold))
                     .frame(width: size, height: size)
-                    .glassSurface(Circle())
-                    .frame(
-                        minWidth: Theme.Layout.hitTarget,
-                        minHeight: Theme.Layout.hitTarget
-                    )
                     .contentShape(Rectangle())
             }
         }
-        .buttonStyle(.plain)
         .disabled(!isEnabled)
         .accessibilityLabel(label)
     }

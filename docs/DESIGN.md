@@ -308,7 +308,7 @@ HStack {
 | 输入条发送键 | 34pt 强调色实心圆（`Theme.Layout.inlineControl`），不用玻璃主操作 | 一屏一个 |
 | 次操作 | `SecondaryActionButton`（`.bordered`）；浮在内容上时用 `.glass` | 不限，并排不超过两个 |
 | 行内动作 | 纯文字按钮，`.borderless` | 不限 |
-| 空态动作 | `EmptyStateView` 默认 `.bordered`；整页只有这一个动作时用实底 | 一屏一个 |
+| 空态动作 | `EmptyStateView` 默认 `.bordered`；整屏再没有别的入口时才用实底（目前只有书架首启） | 一屏一个 |
 | 破坏性 | `DestructiveActionRow`，放在页面最后一个独立 Section | 一页一个 |
 | 工具栏 | 系统默认，只放图标或短词 | 一侧不超过 3 个 |
 
