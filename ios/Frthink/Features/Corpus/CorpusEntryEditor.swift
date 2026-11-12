@@ -75,8 +75,8 @@ struct CorpusEntryEditor: View {
                     )
                     if text.count > Self.maxTextLength {
                         Text("已超出 3000 字")
-                            .font(Font.footnote)
-                            .foregroundStyle(.red)
+                            .font(Theme.metadata)
+                            .foregroundStyle(AppTone.danger.color)
                     }
                 }
 
@@ -113,7 +113,7 @@ struct CorpusEntryEditor: View {
             .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    SheetCloseButton {
                         if hasChanges {
                             confirmingDiscard = true
                         } else {
@@ -122,7 +122,7 @@ struct CorpusEntryEditor: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                    SheetConfirmButton(title: "保存", isEnabled: canSave) {
                         var updated = entry
                         updated.title = trimmedTitle
                         updated.text = text
@@ -132,7 +132,6 @@ struct CorpusEntryEditor: View {
                         onSave(updated)
                         dismiss()
                     }
-                    .disabled(!canSave)
                 }
             }
             .confirmationDialog(
@@ -158,15 +157,15 @@ struct CorpusEntryEditor: View {
                     category = item
                 } label: {
                     Text(item)
-                        .font(Font.footnote)
+                        .font(Theme.labelSmall)
                         .foregroundStyle(Theme.accent)
-                        .padding(.horizontal, Theme.Spacing.m)
-                        .padding(.vertical, Theme.Spacing.s)
                         .frame(maxWidth: .infinity)
+                        .frame(minHeight: Theme.Layout.hitTarget)
                         .background(
                             RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
                                 .fill(Theme.accentSoft)
                         )
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

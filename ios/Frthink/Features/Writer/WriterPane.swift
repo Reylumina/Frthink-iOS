@@ -12,12 +12,19 @@ import UniformTypeIdentifiers
 struct WriterPane: View {
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// 减弱动态效果：位移/缩放退化成直接落位（§4.1、§5.6）。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let session: ProjectSession
 
     @State private var controller = WriterController()
     /// 输入框文本与焦点都在子视图里，打字不触发整页重算。
     @State private var composer = WriterComposerModel()
+    /// 应用级撤销的 target（`UndoManager` 只认引用类型），由这里登记与清理。
+    @State private var undoTargets: [WriterUndoTarget] = []
+    /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
+    @State private var columnWidth: CGFloat = 0
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
     @State private var cursorOffset = -1
     /// 用户是否亲手在正文里放过插入点；false 时插到末尾，避免旧偏移插到开头。
@@ -34,6 +41,8 @@ struct WriterPane: View {
     @State private var messageAction: MessageAction?
     /// 用户是否停在聊天底部；滚上去后暂停自动跟随，避免抢滚动。
     @State private var isAtBottom = true
+    /// 生成结束后的落底窗口：这段时间里底部哨兵离开屏幕不算用户滚走。
+    @State private var isSettling = false
     /// 删除等让内容突然变矮的操作后，强制回到底部，避免留下大片空白。
     @State private var forceScrollToBottom = false
     /// 多选删除：条目选择态、选中的消息 id。
@@ -266,6 +275,7 @@ struct WriterPane: View {
                 controller.stop()
             }
             controller.checkpoint(session: session)
+            discardUndoActions()
         }
     }
 
@@ -298,14 +308,6 @@ struct WriterPane: View {
             Label("导入正文…", systemImage: "square.and.arrow.down")
         }
         .disabled(controller.isBusy)
-        if !session.payload.bodyAppendReceipts.isEmpty {
-            Button {
-                undoInsert()
-            } label: {
-                Label("撤销上次插入", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(controller.isBusy)
-        }
 
         Divider()
 
@@ -356,11 +358,26 @@ struct WriterPane: View {
 
                     bottomAnchor
                 }
+                // 对话列宽上限 720（§5.3）；正文栏在行内再按「字号 × 36」收窄。
+                .frame(maxWidth: Theme.Layout.chatMaxWidth)
+                .background { columnWidthReader }
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.vertical, Theme.Spacing.m)
             }
+            // 首帧就落在底部：不再靠 onAppear 里抢在布局前的 scrollTo。
+            // 那一次只能按 LazyVStack 的估算行高算偏移，长对话里可能停在半空
+            // （历史「正文区空白」的复现路径之一）。
+            // 用户手动滚开后锚点撤掉，不会被内容变高拽回去（§5.9）；
+            // 空对话不给锚点，空态按默认从顶部排。
+            .defaultScrollAnchor(
+                isAtBottom && !session.payload.messages.isEmpty ? UnitPoint.bottom : nil
+            )
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
+            // iOS 26 的滚动边缘柔化；更早的系统由 Theme 回落成无操作（§5.2）。
+            .softScrollEdge()
+            .minimizeTabBarOnScroll()
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10).onChanged { value in
                     // 手指向下拖 = 回看更早的内容。生成中也让用户停在自己
@@ -370,75 +387,144 @@ struct WriterPane: View {
                     }
                 }
             )
-            .modifier(
+            // 跟随器单独成视图：它只读 60ms 一次的 displayTick，
+            // 不会让整列气泡跟着高频重算（PERFORMANCE.md §2.1）。
+            .background {
                 WriterStreamingFollower(
                     controller: controller,
                     proxy: proxy,
                     isAtBottom: isAtBottom
                 )
-            )
+            }
             .onAppear {
-                proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
+                // 进页落底：首帧位置由 defaultScrollAnchor(.bottom) 给出，
+                // 这里等一轮布局后再对齐一次，不在布局前按估算行高算偏移。
+                // 动画统一走 motionLayout；减弱动态效果时直接落位。
+                Task { @MainActor in
+                    await Task.yield()
+                    scrollToBottom(
+                        proxy,
+                        animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+                    )
+                }
             }
             .onChange(of: session.payload.messages.count) { oldCount, newCount in
                 // 删除/回退会让内容变短，停在原偏移就会露出大片空白；变短时一律回到底部。
                 let shouldFollow = forceScrollToBottom || isAtBottom || newCount < oldCount
                 forceScrollToBottom = false
                 guard shouldFollow else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
-                }
                 isAtBottom = true
+                // 用户发出消息是直接操作的结果（emphasis）；助手占位、删除等
+                // 属于列表布局变化（layout）。一屏只留一个 emphasis（§4.1）。
+                let sentByUser = newCount > oldCount
+                    && session.payload.messages.last?.role == .user
+                let animation = sentByUser ? Theme.motionEmphasis : Theme.motionLayout
+                scrollToBottom(
+                    proxy,
+                    animation: Theme.motion(animation, reduceMotion: reduceMotion)
+                )
             }
             .onChange(of: controller.isGenerating) { _, active in
                 guard active else { return }
-                proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
                 isAtBottom = true
+                scrollToBottom(
+                    proxy,
+                    animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+                )
             }
             .onChange(of: controller.streamingMessageID) { _, messageID in
-                // 生成结束会先用正式气泡替换流式气泡，底部哨兵可能在这一帧
-                // 先消失并把 isAtBottom 置 false；回底不能依赖这个瞬时状态，
-                // 否则视口停在半空，看起来像卡屏或空白。
+                // 生成结束：流式气泡换成正式气泡，整段按全文重新排版。
+                // 回底不依赖瞬时的 isAtBottom——底部哨兵可能在这一帧先被挤出屏幕。
                 guard messageID == nil else { return }
                 isAtBottom = true
-                Task { @MainActor in
-                    await Task.yield()
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
-                    }
-                    // 正式气泡还要再排一次版（Markdown、动态字体、行距），
-                    // 只滚一次会按旧高度落点，底部留白。
-                    try? await Task.sleep(for: .milliseconds(60))
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
-                    }
-                }
+                settleAtBottom(proxy)
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isAtBottom {
-                    Button {
-                        isAtBottom = true
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
+                // 只在离开底部时出现；浮在内容上的玻璃按钮（§1.6、§5.4）。
+                ZStack {
+                    if !isAtBottom {
+                        FloatingGlassButton(symbol: "arrow.down", label: "回到最新") {
+                            isAtBottom = true
+                            scrollToBottom(
+                                proxy,
+                                animation: Theme.motion(
+                                    Theme.motionLayout,
+                                    reduceMotion: reduceMotion
+                                )
+                            )
                         }
-                    } label: {
-                        Label("回到最新", systemImage: "arrow.down")
-                            .font(Font.caption.weight(.semibold))
-                            .padding(.horizontal, Theme.Spacing.m)
-                            .padding(.vertical, Theme.Spacing.s)
-                            .background(.regularMaterial, in: Capsule())
+                        .padding(.trailing, Theme.Spacing.l)
+                        .padding(.bottom, Theme.Spacing.s)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, Theme.Spacing.l)
-                    .padding(.bottom, Theme.Spacing.s)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
+                .themeAnimation(Theme.motionLayout, value: isAtBottom)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { dismissKeyboard() }
+    }
+
+    /// 对话列的实际宽度。用户气泡的 80% 上限按它算（§5.3），不写设备断点。
+    private var columnWidthReader: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { updateColumnWidth(proxy.size.width) }
+                .onChange(of: proxy.size.width) { _, width in
+                    updateColumnWidth(width)
+                }
+        }
+    }
+
+    private func updateColumnWidth(_ width: CGFloat) {
+        guard width > 0, width != columnWidth else { return }
+        columnWidth = width
+    }
+
+    /// 正文栏宽度上限：字号 × 36，宽屏居中（§2.3、§5.3）。
+    private var bodyMaxWidth: CGFloat {
+        let size = WriterTypography.fontSize(
+            store.settings.bodyFontSize,
+            dynamicTypeSize: dynamicTypeSize
+        )
+        return WriterTypography.bodyMaxWidth(size: size)
+    }
+
+    /// 用户气泡最多占对话列宽的 80%（§5.3）；还没量到列宽时先不限制。
+    private var userBubbleMaxWidth: CGFloat? {
+        columnWidth > 0 ? columnWidth * WriterTypography.userBubbleWidthRatio : nil
+    }
+
+    /// 显式回底：进页、消息发出、生成结束、删除后都走这里，动画只取动效 token。
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animation: Animation?) {
+        withAnimation(animation) {
+            proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
+        }
+    }
+
+    /// 结束/删除后回底：先让本轮排版落地，滚动才按新高度落点；
+    /// 正式气泡还要再排一次版（行内 Markdown、动态字体），下一轮再补一次。
+    private func settleAtBottom(_ proxy: ScrollViewProxy) {
+        isSettling = true
+        Task { @MainActor in
+            defer { isSettling = false }
+            await Task.yield()
+            scrollToBottom(
+                proxy,
+                animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+            )
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(
+                proxy,
+                animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+            )
+        }
     }
 
     private var chatEmptyState: some View {
@@ -456,10 +542,12 @@ struct WriterPane: View {
 
     /// 每项只产出一个视图：流式气泡和普通气泡在 row 内部二选一。
     /// 身份由 `ChatMessage.id` 提供，不用再挂 `.id()`。
+    ///
+    /// 两种状态共用同一个正文栏宽度，生成结束换气泡时折行位置不变（§2.3）。
     @ViewBuilder
     private func messageRow(for message: ChatMessage) -> some View {
         if controller.isStreaming(message.id) {
-            WriterStreamingBubble(controller: controller)
+            WriterStreamingBubble(controller: controller, bodyMaxWidth: bodyMaxWidth)
         } else {
             bubble(for: message)
         }
@@ -475,9 +563,9 @@ struct WriterPane: View {
                 isAtBottom = true
             }
             .onDisappear {
-                // 生成中内容变高也会让哨兵离开屏幕，不能算用户滚走；
-                // 生成结束后用户再往上翻，才暂停自动跟随。
-                if !controller.isBusy {
+                // 生成中内容变高、生成结束换气泡时，哨兵会先离开屏幕；
+                // 那不算用户滚走，不能因此暂停跟随。
+                if !controller.isBusy, !isSettling {
                     isAtBottom = false
                 }
             }
@@ -510,6 +598,8 @@ struct WriterPane: View {
             isSelecting: selectionMode,
             isSelected: selectedMessageIDs.contains(message.id),
             isInterrupted: session.isInterrupted(message.id),
+            bodyMaxWidth: bodyMaxWidth,
+            userBubbleMaxWidth: userBubbleMaxWidth,
             actions: actions
         )
 
@@ -568,7 +658,7 @@ struct WriterPane: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Text(modelLabel)
-                .font(Font.caption2)
+                .font(Font.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -677,13 +767,51 @@ struct WriterPane: View {
         dismissKeyboard()
         let length = session.manuscriptLength
         let base = cursorPlaced ? min(max(cursorOffset, 0), length) : length
-        let chapter = currentChapterTitle
         let block = paragraphSeparated(text, at: base)
         guard !block.isEmpty else { return }
-        session.insertIntoManuscript(block, at: base)
+        let receipt = session.insertIntoManuscript(block, at: base)
         cursorOffset = base + (block as NSString).length
         cursorPlaced = true
-        store.toast = "已插入到\(chapter) · 可点撤销"
+        registerBodyUndo(receipt, actionName: "插入正文")
+        store.toast = "已插入正文"
+    }
+
+    /// 应用级动作登记进窗口的 UndoManager（§5.8）。
+    ///
+    /// 撤销走系统栈：⌘Z / ⇧⌘Z、摇一摇和编辑菜单都能撤回，页面上不再放常驻按钮。
+    /// 闭包只捕获会话和 store，不捕获视图本身，避免把 `@State` 存储带进撤销栈。
+    private func registerBodyUndo(_ receipt: BodyAppendReceipt, actionName: String) {
+        guard let undoManager = WriterUndo.manager() else { return }
+        let session = self.session
+        let store = self.store
+        let target = WriterUndoTarget { [weak session] in
+            guard let session else { return }
+            // 撤销栈是后进先出；栈顶不是这次插入时说明中间有别的改动，不去误删。
+            guard session.payload.bodyAppendReceipts.last?.id == receipt.id else {
+                store.toast = "插入位置已被改动，无法撤销"
+                return
+            }
+            session.undoLastBodyAppend()
+            store.toast = "已撤销"
+        }
+        // 撤销栈只持有 target 的 unowned 引用，页面必须自己保住它，
+        // 所以不清空、不丢引用；离开页面时先摘动作再释放。
+        undoTargets.append(target)
+        undoManager.setActionName(actionName)
+        undoManager.registerUndo(withTarget: target) { target in
+            target.perform()
+        }
+    }
+
+    /// 离开写作台时清掉本页登记的撤销动作：撤销栈挂在窗口上，
+    /// 不清就会切到别的书之后撤回旧书正文。撤销栈只持 unowned 引用，
+    /// 摘不掉动作时宁可把盒子一起留着，也不能让它悬空。
+    private func discardUndoActions() {
+        guard let undoManager = WriterUndo.manager() else { return }
+        for target in undoTargets {
+            undoManager.removeAllActions(withTarget: target)
+        }
+        undoTargets.removeAll()
     }
 
     /// 插入块前后补空行，避免和原文粘成一句。
@@ -709,27 +837,6 @@ struct WriterPane: View {
         }
         // 插到末尾时只在前面补空行；后面没有正文，不需要再造一个空段。
         return block
-    }
-
-    private var currentChapterTitle: String {
-        let chapters = session.payload.chapters
-        guard !chapters.isEmpty else { return "正文" }
-        let length = session.manuscriptLength
-        let location = cursorPlaced ? min(max(cursorOffset, 0), length) : length
-        return chapters.last(where: { $0.location <= location })?.title
-            ?? chapters.first?.title
-            ?? "正文"
-    }
-
-    private func undoInsert() {
-        dismissKeyboard()
-        if let receipt = session.undoLastBodyAppend() {
-            cursorOffset = receipt.location
-            cursorPlaced = true
-            store.toast = "已撤销上一次插入"
-        } else {
-            store.toast = "插入位置已被改动，无法撤销"
-        }
     }
 
     private func openSheet(_ sheet: WriterSheet) {
@@ -845,22 +952,23 @@ struct WriterPane: View {
         switch action {
         case .append(let message):
             dismissKeyboard()
-            session.appendToManuscript(message.content)
+            let receipt = session.appendToManuscript(message.content)
             cursorOffset = session.manuscriptLength
             cursorPlaced = true
-            store.toast = "已将所选回复追加到正文"
+            registerBodyUndo(receipt, actionName: "追加到正文")
+            store.toast = "已追加到正文"
         case .cleanup(let message):
             session.keepOnlySelectedVariant(for: message.id)
             store.toast = "已清理历史版本"
         case .delete(let message):
             forceScrollToBottom = message.variants.count <= 1
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.deleteSelectedVariant(for: message.id)
             }
             store.toast = "已删除当前版本"
         case .deleteMessage(let message):
             forceScrollToBottom = true
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.deleteMessage(message.id)
             }
             store.toast = "已删除这条消息"
@@ -869,13 +977,13 @@ struct WriterPane: View {
             guard !ids.isEmpty else { return }
             forceScrollToBottom = true
             exitSelection()
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.deleteMessages(ids)
             }
             store.toast = "已删除 \(ids.count) 条消息"
         case .clearAll:
             forceScrollToBottom = true
-            withAnimation(.easeInOut(duration: 0.2)) {
+            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.clearConversation()
             }
             store.toast = "已清空聊天记录"

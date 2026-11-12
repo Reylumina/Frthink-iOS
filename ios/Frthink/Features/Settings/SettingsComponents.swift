@@ -2,6 +2,155 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+// MARK: - 行
+
+/// 二级、三级页的导航行：系统 `Label` + 行尾的值（DESIGN §2.4、§5.1）。
+///
+/// 系统缺的只是「列表行内图标与值两端对齐」这一种排版：`AppSettingsRow` 自带
+/// 有色方块图标，只适合一级分类列表；二级以下改用 `Label`，让 `List` 对齐图标列，
+/// 行尾值仍走 `.body` 次要色。
+struct SettingsLabelRow: View {
+    let title: String
+    var symbol: String? = nil
+    var detail: String? = nil
+
+    var body: some View {
+        // 无障碍字号下放不下一行时改竖排：标题在上、值在下（DESIGN §5.5）。
+        ViewThatFits(in: .horizontal) {
+            horizontal
+            vertical
+        }
+        .contentShape(Rectangle())
+        .frame(minHeight: Theme.Layout.hitTarget)
+    }
+
+    private var horizontal: some View {
+        HStack(spacing: Theme.Spacing.m) {
+            label
+            Spacer(minLength: Theme.Spacing.s)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.label)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var vertical: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            label
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.label)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var label: some View {
+        if let symbol {
+            Label(title, systemImage: symbol)
+                .font(Theme.label)
+                .foregroundStyle(.primary)
+        } else {
+            Text(title)
+                .font(Theme.label)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+// MARK: - 长文编辑页
+
+/// 长文编辑页：整页只有一个多行编辑框，自动保存（停手 0.6 秒），离开页面强制落盘。
+///
+/// 长文编辑不进 sheet（DESIGN §5.8），列表里只留一行入口；只有「保存」没有
+/// 「取消」，所以左滑返回也保存非空改动。
+struct SettingsTextEditorPage: View {
+    let title: String
+    var placeholder: String = ""
+
+    @State private var text: String
+    @State private var saveTask: Task<Void, Never>?
+    private let onCommit: (String) -> Void
+
+    init(
+        title: String,
+        text: String,
+        placeholder: String = "",
+        onCommit: @escaping (String) -> Void
+    ) {
+        self.title = title
+        self.placeholder = placeholder
+        _text = State(initialValue: text)
+        self.onCommit = onCommit
+    }
+
+    var body: some View {
+        AppTextEditor(text: $text, placeholder: placeholder, minHeight: 240, expands: true)
+            .padding(Theme.Spacing.l)
+            .pageBackground()
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: text) { _, _ in
+                scheduleSave()
+            }
+            .onDisappear {
+                saveTask?.cancel()
+                saveTask = nil
+                commit()
+            }
+    }
+
+    @MainActor
+    private func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            commit()
+        }
+    }
+
+    @MainActor
+    private func commit() {
+        onCommit(text)
+    }
+}
+
+// MARK: - 宽度
+
+extension View {
+    /// 常规宽度下把表单收窄到 640pt 并居中（DESIGN §5.3）。
+    ///
+    /// 紧凑宽度原样返回；iPad 宽窗口下两侧露出分组页底，不把行宽拉长。
+    @ViewBuilder
+    func settingsFormColumn() -> some View {
+        modifier(SettingsFormColumnModifier())
+    }
+}
+
+private struct SettingsFormColumnModifier: ViewModifier {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if horizontalSizeClass == .regular {
+            content
+                .frame(maxWidth: Theme.Layout.formMaxWidth)
+                .frame(maxWidth: .infinity)
+                .background(Theme.groupedPageColor.ignoresSafeArea())
+        } else {
+            content
+        }
+    }
+}
+
 /// 把一个 `AppSettings` 字段包成 Binding，写入就落盘。
 ///
 /// 用于开关/离散选择这类一次只改一个值的控件；连续拖动（滑块）不要用它，

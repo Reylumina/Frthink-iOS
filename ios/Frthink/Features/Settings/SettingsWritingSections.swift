@@ -44,7 +44,7 @@ struct SettingsModelResponsePage: View {
 
                 AppValueRow(
                     title: "回复上限",
-                    value: store.settings.reservedOutputTokens.formatted()
+                    value: settingsTokenText(store.settings.reservedOutputTokens)
                 )
             } header: {
                 AppSectionHeader(title: "默认值")
@@ -61,6 +61,7 @@ struct SettingsModelResponsePage: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .settingsFormColumn()
         .navigationTitle("全局模型响应")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear { commitTemperatureIfNeeded() }
@@ -109,7 +110,7 @@ struct SettingsContextBudgetPage: View {
                 Section {
                     AppValueRow(
                         title: "模型上下文窗",
-                        value: "\(effectiveWindow(for: provider.resolvedModel).formatted()) tokens"
+                        value: settingsTokenText(effectiveWindow(for: provider.resolvedModel))
                     )
                 }
             }
@@ -139,6 +140,7 @@ struct SettingsContextBudgetPage: View {
                 )
             }
         }
+        .settingsFormColumn()
         .navigationTitle("长上下文预算")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -229,8 +231,8 @@ struct SettingsAppearanceSection: View {
 
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Text("夜色像被谁拧暗了一格，走廊尽头的灯还亮着。")
-                    .font(.system(size: previewFontSize))
-                    .lineSpacing(max(0, previewFontSize * 0.55))
+                    .font(ReaderStyle.bodyFont(size: previewFontSize))
+                    .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: 1.6))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,12 +324,12 @@ struct TokenSliderRow: View {
 
             HStack {
                 Text(label(for: values.first ?? 0))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.badge)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Text(label(for: values.last ?? 0))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.badge)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)

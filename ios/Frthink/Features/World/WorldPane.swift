@@ -242,7 +242,9 @@ struct WorldPane: View {
         let task = Task { @MainActor in
             await work()
             self.worldTask = nil
-            self.store.finishWorldTask(for: self.session.project.id)
+            // 不在这里清登记：切书后同一本书可能已经由新页面登记了另一个任务，
+            // 旧任务收尾时清掉会把新任务的取消入口一起丢掉。登记只由
+            // `registerWorldTask`（覆盖并取消前一个）和 `cancelWorldTask`（切书）维护。
         }
         worldTask = task
         store.registerWorldTask(task, for: session.project.id)
@@ -264,10 +266,13 @@ struct WorldPane: View {
         startTrackedTask {
             do {
                 self.statusMessage = try await operation()
-            } catch is CancellationError {
-                self.statusMessage = cancelled
             } catch {
-                self.handle(error)
+                // 取消有三种形状（结构化并发 / URLSession / LLMError），统一判。
+                if error.isLLMCancellation {
+                    self.statusMessage = cancelled
+                } else {
+                    self.handle(error)
+                }
             }
             self.busy = nil
             self.progressText = ""

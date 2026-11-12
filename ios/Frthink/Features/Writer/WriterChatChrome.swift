@@ -39,7 +39,10 @@ struct WriterSelectionBar: View {
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
                     .font(Font.subheadline.weight(.semibold))
-                    .frame(width: 44, height: 44)
+                    .frame(
+                        minWidth: Theme.Layout.hitTarget,
+                        minHeight: Theme.Layout.hitTarget
+                    )
             }
             .buttonStyle(.plain)
             .foregroundStyle(.red)
@@ -57,20 +60,24 @@ struct WriterSelectionBar: View {
     }
 }
 
-/// 只观察轻量的显示 tick，跟随流式内容滚到底部。
-/// 放在独立 modifier 里，避免每次显示刷新都让整页气泡重算。
+/// 跟随流式内容滚到底部。
+///
+/// 单独成一个零尺寸视图挂在滚动区背景里：`displayTick` 每 60ms 变一次，
+/// 读它的小视图只让这一层重算，不会把整列气泡和正文栏一起拉进高频更新
+/// （PERFORMANCE.md §2.1）。
 ///
 /// 滚动不在 onChange 的同一轮布局里做：先让本轮文本追加完成排版，下一轮再滚，
 /// 否则 scrollTo 可能按旧内容高度落点，表现为底部空白或跳一下。
-struct WriterStreamingFollower: ViewModifier {
+struct WriterStreamingFollower: View {
     let controller: WriterController
     let proxy: ScrollViewProxy
     let isAtBottom: Bool
 
     @State private var pendingScroll: Task<Void, Never>?
 
-    func body(content: Content) -> some View {
-        content
+    var body: some View {
+        Color.clear
+            .allowsHitTesting(false)
             .onChange(of: controller.displayTick) { _, _ in
                 guard isAtBottom else { return }
                 pendingScroll?.cancel()

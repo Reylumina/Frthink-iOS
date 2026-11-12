@@ -31,7 +31,7 @@ struct UniversePane: View {
     var body: some View {
         VStack(spacing: 0) {
             Text("全局预设、共享世界书与 Skill")
-                .font(Font.footnote)
+                .font(Theme.metadata)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.l)
@@ -42,7 +42,6 @@ struct UniversePane: View {
                     EmptyStateView(
                         symbol: "sparkles",
                         title: "还没有宇宙资料",
-                        message: "全局预设、共享世界书和 Skill 保存在这里；每本书再单独勾选要用的条目。",
                         actionTitle: "新建宇宙资料",
                         action: startCreating
                     )
@@ -52,6 +51,7 @@ struct UniversePane: View {
             }
         }
         .groupedPageBackground()
+        .settingsFormColumn()
         .navigationDestination(for: UniverseEntry.self) { entry in
             editor(for: entry)
         }
@@ -68,12 +68,12 @@ struct UniversePane: View {
         .sheet(isPresented: $isCreating) {
             creationSheet
         }
-        .alert(deleteAlertTitle, isPresented: deleteBinding) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
+        .confirmationDialog(deleteAlertTitle, isPresented: deleteBinding, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 if let entry = pendingDelete { delete(entry) }
                 pendingDelete = nil
             }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         }
     }
 
@@ -109,7 +109,7 @@ struct UniversePane: View {
     }
 
     private func row(_ entry: UniverseEntry) -> some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.m) {
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
             Toggle("", isOn: Binding(
                 get: { isEnabled(entry) },
                 set: { on in toggle(entry, on: on) }
@@ -119,26 +119,25 @@ struct UniversePane: View {
             .accessibilityLabel("本书启用「\(entry.title)」")
 
             NavigationLink(value: entry) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text(entry.title)
-                            .font(Font.body.weight(.medium))
+                            .font(Theme.label)
                         if !entry.enabled {
-                            Text("已全局停用")
-                                .font(Font.caption2.weight(.medium))
-                                .foregroundStyle(.orange)
+                            StatusPill(text: "已停用", tone: .warning)
                         }
                     }
                     if !entry.body.isEmpty {
                         Text(entry.body)
-                            .font(Font.caption)
+                            .font(Theme.labelSmall)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
                 }
             }
-            .opacity(entry.enabled ? 1 : 0.55)
         }
+        .frame(minHeight: Theme.Layout.hitTarget)
+        .themeAnimation(Theme.motionSelection, value: entry.enabled)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 pendingDelete = entry
@@ -175,7 +174,7 @@ struct UniversePane: View {
             .interactiveDismissDisabled(hasDraftChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    SheetCloseButton {
                         if hasDraftChanges {
                             confirmingDiscardDraft = true
                         } else {
@@ -184,12 +183,14 @@ struct UniversePane: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                    SheetConfirmButton(
+                        title: "保存",
+                        isEnabled: !trimmedDraftTitle.isEmpty
+                    ) {
                         guard !trimmedDraftTitle.isEmpty else { return }
                         upsert(UniverseEntry(title: trimmedDraftTitle, body: draftBody, kind: draftKind))
                         isCreating = false
                     }
-                    .disabled(trimmedDraftTitle.isEmpty)
                 }
             }
             .confirmationDialog(
@@ -199,8 +200,6 @@ struct UniversePane: View {
             ) {
                 Button("放弃", role: .destructive) { isCreating = false }
                 Button("继续编辑", role: .cancel) {}
-            } message: {
-                Text("标题或内容还没有保存。")
             }
         }
     }
@@ -331,8 +330,6 @@ private struct UniverseEntryEditor: View {
             )
             Section {
                 Toggle("全局启用", isOn: $enabled)
-            } footer: {
-                Text("关闭后所有书都不再注入这条资料；本书的勾选会保留。")
             }
         }
         .scrollContentBackground(.hidden)
@@ -340,14 +337,12 @@ private struct UniverseEntryEditor: View {
         .keyboardDismissOnScroll()
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("保存") {
+                SheetConfirmButton(title: "保存", isEnabled: !trimmedTitle.isEmpty) {
                     save()
                     dismiss()
                 }
-                .disabled(trimmedTitle.isEmpty)
             }
-        }
-        .onDisappear {
+        }        .onDisappear {
             // 这页只有「保存」没有「取消」：左滑返回时把改动存下来，别静默丢。
             guard !saved, hasChanges, !trimmedTitle.isEmpty else { return }
             save()

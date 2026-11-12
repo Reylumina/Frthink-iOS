@@ -31,9 +31,24 @@ struct WriterMessageBubble: View {
     let isSelected: Bool
     /// 上次生成被系统中断；状态属于这条消息，不再由外层挂 overlay。
     var isInterrupted = false
+    /// 正文栏宽度上限（字号 × 36，§2.3）。超出时居中（§5.3）。
+    var bodyMaxWidth: CGFloat = .infinity
+    /// 用户气泡的宽度上限 = 对话列宽的 80%（§5.3）。nil 表示列宽还没量到。
+    var userBubbleMaxWidth: CGFloat?
     let actions: WriterMessageActions
 
     @Environment(AppStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// 与流式视图、正文编辑器同一套字号。
+    private var bodyFontSize: CGFloat {
+        WriterTypography.fontSize(store.settings.bodyFontSize, dynamicTypeSize: dynamicTypeSize)
+    }
+
+    /// 行高固定 1.6；流式气泡用同一个值，生成结束换气泡不会变高。
+    private var bodyLineSpacing: CGFloat {
+        WriterTypography.lineSpacing(size: bodyFontSize)
+    }
 
     var body: some View {
         Group {
@@ -60,7 +75,7 @@ struct WriterMessageBubble: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(Font.title3)
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                    .padding(4)
+                    .padding(Theme.Spacing.xs)
                     .background(.regularMaterial, in: Circle())
                     .offset(x: -2, y: -2)
             }
@@ -69,38 +84,31 @@ struct WriterMessageBubble: View {
 
     // MARK: - 三种样式
 
+    /// 系统行：一次性状态，只占一行，最常见的弱层级。
     private var systemRow: some View {
         Text(message.content)
             .font(Font.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    /// 用户气泡：实底 + 反色文字（§1.3）。收发关系由实底/无底表达，
+    /// 和系统「信息」一致；不加描边、不加投影，宽度不超过列宽 80%（§5.3）。
     private var userRow: some View {
         HStack(alignment: .top, spacing: 0) {
-            Spacer(minLength: 48)
+            Spacer(minLength: Theme.Spacing.xxl)
             MarkdownInline.text(message.content)
                 .font(Font.body)
                 .dynamicBodyFont(store.settings.bodyFontSize)
-                .foregroundStyle(.primary)
-                .lineSpacing(3)
+                .foregroundStyle(Theme.bubbleForeground)
+                .lineSpacing(bodyLineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, Theme.Spacing.m + 2)
-                .padding(.vertical, Theme.Spacing.s + 3)
-                .background(
-                    Theme.accent.opacity(0.12),
-                    in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                        .strokeBorder(Theme.accent.opacity(0.10), lineWidth: 0.5)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-                        .strokeBorder(Theme.accent.opacity(0.10), lineWidth: 0.5)
-                )
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.s)
+                .background(Theme.bubbleFill, in: Theme.containerShape())
+                .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var assistantRow: some View {
@@ -112,8 +120,10 @@ struct WriterMessageBubble: View {
                     .padding(.horizontal, Theme.Spacing.xs)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 2)
+        // 助手回复不铺底色，正文即气泡（§1.3）。
+        .frame(maxWidth: bodyMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xs)
     }
 
     private var header: some View {
@@ -127,10 +137,10 @@ struct WriterMessageBubble: View {
             }
             if isInterrupted {
                 Text("已中断")
-                    .font(Font.caption2.weight(.semibold))
+                    .font(Theme.badge)
                     .foregroundStyle(Theme.accent)
                     .padding(.horizontal, Theme.Spacing.s)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, Theme.Spacing.xs)
                     .background(Capsule().fill(Theme.accentSoft))
             }
             Spacer(minLength: 0)
@@ -155,7 +165,7 @@ struct WriterMessageBubble: View {
         }
         .dynamicBodyFont(store.settings.bodyFontSize)
         .foregroundStyle(.primary)
-        .lineSpacing(3)
+        .lineSpacing(bodyLineSpacing)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -204,7 +214,7 @@ struct WriterMessageBubble: View {
                     Image(systemName: "ellipsis")
                         .font(Font.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 44, height: 44)
+                        .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("更多消息操作")
@@ -228,7 +238,7 @@ struct WriterMessageBubble: View {
             Image(systemName: symbol)
                 .font(Font.caption.weight(.medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -243,7 +253,7 @@ struct WriterMessageBubble: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(Font.caption.weight(.semibold))
-                    .frame(width: 44, height: 44)
+                    .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
             }
             .buttonStyle(.plain)
             .disabled(message.selectedVariant <= 0)
@@ -258,7 +268,7 @@ struct WriterMessageBubble: View {
             } label: {
                 Image(systemName: "chevron.right")
                     .font(Font.caption.weight(.semibold))
-                    .frame(width: 44, height: 44)
+                    .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
             }
             .buttonStyle(.plain)
             .disabled(message.selectedVariant >= message.variants.count - 1)
@@ -269,15 +279,17 @@ struct WriterMessageBubble: View {
     }
 }
 
-/// 流式生成中的气泡，只订阅控制器里的实时文本。
-/// 码字机的身份标记：圆点 + 名字，完成与流式气泡共用。
+/// 码字机的身份标记：圆形符号 + 名字，完成与流式气泡共用。
 struct WriterAssistantBadge: View {
+    /// 圆标直径跟随字号缩放（§5.1、§2.4），图标尺寸由所在文字决定。
+    @ScaledMetric(relativeTo: .caption) private var markDiameter: CGFloat = 18
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Theme.Spacing.s) {
             Image(systemName: "sparkles")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .font(Theme.badge)
+                .foregroundStyle(Theme.bubbleForeground)
+                .frame(width: markDiameter, height: markDiameter)
                 .background(Theme.accent, in: Circle())
             Text("码字机")
                 .font(Font.caption.weight(.semibold))
@@ -288,82 +300,106 @@ struct WriterAssistantBadge: View {
     }
 }
 
+/// 流式生成中的气泡，只订阅控制器里的实时文本。
+///
+/// 文本按 `displayInterval`（60ms）合帧后写进 `streamingText`；这里只渲染
+/// 控制器给的当前值，不自己定时，也不逐 token 触发外层列表重算。
 struct WriterStreamingBubble: View {
     let controller: WriterController
+    /// 正文栏宽度上限。与完成态气泡同一宽度，换气泡时不重新折行（§2.3）。
+    var bodyMaxWidth: CGFloat = .infinity
 
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption) private var stopMarkDiameter: CGFloat = 28
     @State private var reasoningExpanded = false
+
+    private var bodyFontSize: CGFloat {
+        WriterTypography.fontSize(store.settings.bodyFontSize, dynamicTypeSize: dynamicTypeSize)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.s) {
-                WriterAssistantBadge()
-                Text("创作中")
-                    .font(Font.caption)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Text("\(controller.streamingCharacterCount.formatted()) 字")
-                    .font(Theme.numericSmall)
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Button {
-                    controller.stop()
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .font(Font.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Theme.separator.opacity(0.35)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("停止创作")
-            }
+            header
+            content
+        }
+        .frame(maxWidth: bodyMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
 
-            if controller.streamingText.isEmpty {
-                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                    // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
-                    // 时页面不能只挂一个转圈，看起来像卡死。
-                    Text(Self.recentLines(reasoning, limit: 6))
-                        .font(Theme.reply)
+    private var header: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            WriterAssistantBadge()
+            Text("创作中")
+                .font(Font.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Text("\(controller.streamingCharacterCount.formatted()) 字")
+                .font(Theme.numericSmall)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .contentTransition(.numericText())
+            Button {
+                controller.stop()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(Theme.badge)
+                    .foregroundStyle(.secondary)
+                    .frame(width: stopMarkDiameter, height: stopMarkDiameter)
+                    .background(Theme.accentSoft, in: Circle())
+                    .frame(
+                        minWidth: Theme.Layout.hitTarget,
+                        minHeight: Theme.Layout.hitTarget
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("停止创作")
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if controller.streamingText.isEmpty {
+            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
+                // 时页面不能只挂一个转圈，看起来像卡死。
+                Text(Self.recentLines(reasoning, limit: 6))
+                    .font(Theme.reply)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // 首帧就有内容：占位也算一行正文，气泡不会是零高度。
+                Text("……")
+                    .font(Theme.reply)
+                    .foregroundStyle(.tertiary)
+            }
+        } else {
+            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                DisclosureGroup(isExpanded: $reasoningExpanded) {
+                    Text(reasoning)
+                        .font(Theme.numeric)
                         .foregroundStyle(.secondary)
-                        .lineLimit(6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text("……")
-                        .font(Theme.reply)
+                        .textSelection(.enabled)
+                } label: {
+                    Text("思考过程（\(reasoning.count.formatted()) 字）")
+                        .font(Font.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
-            } else {
-                if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                    DisclosureGroup(isExpanded: $reasoningExpanded) {
-                        Text(reasoning)
-                            .font(Theme.numeric)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    } label: {
-                        Text("思考过程（\(reasoning.count.formatted()) 字）")
-                            .font(Font.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                // 生成中用 UITextView 增量排版；结束后的普通气泡仍用 Text。
-                StreamingTextView(
-                    text: controller.streamingText,
-                    fontSize: DynamicTypeFont.bodySize(
-                        store.settings.bodyFontSize,
-                        dynamicTypeSize: dynamicTypeSize
-                    )
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
             }
+
+            // 生成中用 UITextView 增量排版；字号/行距/宽度与完成态 `Text` 同一套换算。
+            StreamingTextView(
+                text: controller.streamingText,
+                fontSize: bodyFontSize,
+                lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 2)
     }
 
     /// 思考过程只显示末尾几行；全文仍留在展开区里。

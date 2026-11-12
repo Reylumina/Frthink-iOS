@@ -59,6 +59,7 @@ struct ReaderDisplaySettingsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var confirmingReset = false
 
     private static let previewLine = "夜色像被谁拧暗了一格，走廊尽头的灯还亮着。"
@@ -77,11 +78,13 @@ struct ReaderDisplaySettingsSheet: View {
                         Image(systemName: "textformat.size.smaller")
                             .font(Font.footnote)
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                         Slider(value: $fontSize, in: 13...28, step: 1)
                             .tint(Theme.accent)
                         Image(systemName: "textformat.size.larger")
                             .font(Font.title3)
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                     }
                 }
 
@@ -91,11 +94,13 @@ struct ReaderDisplaySettingsSheet: View {
                         Image(systemName: "text.alignleft")
                             .font(Font.caption)
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                         Slider(value: $lineHeight, in: 1.2...2.0, step: 0.1)
                             .tint(Theme.accent)
                         Image(systemName: "arrow.up.and.down.text.horizontal")
                             .font(Font.footnote)
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                     }
                 }
 
@@ -126,7 +131,7 @@ struct ReaderDisplaySettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    SheetConfirmButton { dismiss() }
                 }
             }
             .confirmationDialog(
@@ -141,18 +146,21 @@ struct ReaderDisplaySettingsSheet: View {
     }
 
     private var previewBlock: some View {
-        Text(Self.previewLine)
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+        return Text(Self.previewLine)
             .font(ReaderStyle.bodyFont(size: previewFontSize))
             .foregroundStyle(ReaderStyle.ink(dark: darkPage))
             .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: lineHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Spacing.m)
             .background(ReaderStyle.page(dark: darkPage))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                    .stroke(Theme.separator, lineWidth: 0.5)
-            )
+            .clipShape(shape)
+            // 内容表面默认不描边；增强对比度时补一圈系统分隔线（§1.5、§5.6）。
+            .overlay {
+                if contrast == .increased {
+                    shape.strokeBorder(Theme.separator, lineWidth: 1)
+                }
+            }
             .padding(.vertical, Theme.Spacing.xs)
     }
 

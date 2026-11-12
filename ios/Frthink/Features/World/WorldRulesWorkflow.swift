@@ -23,8 +23,9 @@ enum WorldRulesWorkflow {
         if let sourceMessages {
             selected = sourceMessages
         } else {
-            selected = Array(
-                session.payload.messages.filter { $0.role == .user }.suffix(12)
+            selected = Self.pendingUserMessages(
+                session.payload.messages,
+                summarized: session.payload.world.summarizedMessageIDs
             )
         }
         let recentMessages = selected
@@ -32,8 +33,11 @@ enum WorldRulesWorkflow {
             .filter { !$0.isEmpty }
 
         guard !recentMessages.isEmpty else {
+            // 已经进过摘要的轮次不再重复发送：连点两次不该把同一批消息再送一遍。
             throw WorldRunError(
-                message: "还没有可整理的用户消息。先在码字机里提出写作要求，再来更新长期规则。"
+                message: session.payload.messages.contains { $0.role == .user }
+                    ? "没有新的用户消息可整理；已经整理过的对话不会重复发送。"
+                    : "还没有可整理的用户消息。先在码字机里提出写作要求，再来更新长期规则。"
             )
         }
 
@@ -122,6 +126,25 @@ enum WorldRulesWorkflow {
         )
         session.scheduleSave()
         return RulesOutcome(updated: changed)
+    }
+
+    // MARK: - 输入
+
+    /// 手动「用最近对话更新」只取还没进过摘要的用户消息。
+    ///
+    /// 以前固定取最后 12 条用户消息：连点两次会把同一批轮次重复送进 P55，
+    /// 每次都多一版历史；与自动摘要（`WriterController` 先过滤已摘要 id）的口径也不一致。
+    static func pendingUserMessages(
+        _ messages: [ChatMessage],
+        summarized: [String],
+        limit: Int = 12
+    ) -> [ChatMessage] {
+        let done = Set(summarized)
+        return Array(
+            messages
+                .filter { $0.role == .user && !done.contains($0.id) }
+                .suffix(limit)
+        )
     }
 
 }

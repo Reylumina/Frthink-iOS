@@ -290,16 +290,27 @@ enum PromptComposer {
     }
 
     /// 事件卡渲染。规格只写「已有事件卡渲染文本」，没给字段标签；沿用字段名对应的中文标签。
+    ///
+    /// 字段值内部换行压成「；」：P53 与 P08 都按「字段：值」一行一条读，
+    /// 合并（`WorldMerge.appended`）留下的续行没有标签，会被模型当成游离正文。
     static func renderEvents(_ events: [EventCard]) -> String {
         events.map { event in
-            var lines = ["【" + event.title + "】"]
-            if !event.scene.isEmpty { lines.append("场景：" + event.scene) }
+            var lines = ["【" + PromptLibrary.singleLine(event.title) + "】"]
+            if !event.scene.isEmpty {
+                lines.append("场景：" + PromptLibrary.singleLine(event.scene))
+            }
             if !event.characters.isEmpty {
                 lines.append("人物：" + event.characters.joined(separator: "、"))
             }
-            if !event.cause.isEmpty { lines.append("起因：" + event.cause) }
-            if !event.development.isEmpty { lines.append("经过：" + event.development) }
-            if !event.consequence.isEmpty { lines.append("结果：" + event.consequence) }
+            if !event.cause.isEmpty {
+                lines.append("起因：" + PromptLibrary.singleLine(event.cause))
+            }
+            if !event.development.isEmpty {
+                lines.append("经过：" + PromptLibrary.singleLine(event.development))
+            }
+            if !event.consequence.isEmpty {
+                lines.append("结果：" + PromptLibrary.singleLine(event.consequence))
+            }
             return lines.joined(separator: "\n")
         }.joined(separator: "\n\n")
     }

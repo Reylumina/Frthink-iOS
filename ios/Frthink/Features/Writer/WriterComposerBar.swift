@@ -33,46 +33,21 @@ struct WriterComposerBar: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
-            Button {
-                sendContinuation()
-            } label: {
-                Image(systemName: "wand.and.stars")
-                    .font(Font.subheadline.weight(.medium))
-                    .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.plain)
-            .disabled(controller.isGenerating || controller.isPreparing)
-            .accessibilityLabel("续写")
-
-            inputField
-
-            if controller.isPreparing {
-                ProgressView()
-                    .frame(width: 44, height: 44)
-            } else {
-                Button {
-                    send()
-                } label: {
-                    Image(systemName: "paperplane.fill")
-                        .font(Font.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(canSend ? Theme.accent : Theme.separator))
+        // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。
+        WriterComposerShell {
+            HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
+                continuationButton
+                inputField
+                if controller.isPreparing {
+                    ProgressView()
+                        .frame(
+                            minWidth: Theme.Layout.hitTarget,
+                            minHeight: Theme.Layout.hitTarget
+                        )
+                } else {
+                    WriterSendButton(isEnabled: canSend) { send() }
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .accessibilityLabel("发送")
             }
-        }
-        .padding(.horizontal, Theme.Spacing.m)
-        .padding(.vertical, Theme.Spacing.s)
-        .background(.bar)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Theme.separator.opacity(0.6))
-                .frame(height: 0.5)
         }
         .onAppear {
             if autoFocus {
@@ -93,25 +68,33 @@ struct WriterComposerBar: View {
         }
     }
 
+    /// 辅助按钮：续写。只有一个图标，热区按 §5.1 补到 44pt。
+    private var continuationButton: some View {
+        Button {
+            sendContinuation()
+        } label: {
+            Image(systemName: "wand.and.stars")
+                .font(Font.subheadline.weight(.medium))
+                .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(controller.isGenerating || controller.isPreparing)
+        .accessibilityLabel("续写")
+    }
+
     private var inputField: some View {
         TextField(inputPlaceholder, text: $model.text, axis: .vertical)
             .font(Font.body)
             .lineLimit(1...5)
             .focused($focused)
             .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.s + 2)
-            .background(Theme.card)
-            .clipShape(RoundedRectangle(
-                cornerRadius: Theme.Radius.large,
-                style: .continuous
-            ))
-            .overlay(
-                RoundedRectangle(
-                    cornerRadius: Theme.Radius.large,
-                    style: .continuous
-                )
-                .strokeBorder(Theme.separator, lineWidth: 0.5)
-            )
+            .padding(.vertical, Theme.Spacing.s)
+            .modifier(WriterComposerFieldSurface())
     }
 
     /// 草稿只在收键盘/离开页面时落盘。
@@ -168,5 +151,83 @@ struct WriterComposerBar: View {
             from: nil,
             for: nil
         )
+    }
+}
+
+// MARK: - 输入条材质
+
+/// 输入条外壳。§1.6：iOS 26 上输入框和发送按钮各自是玻璃胶囊，放在同一个
+/// `GlassEffectContainer` 里，不铺满宽底条；17–25 回落成 `.bar` 材质满宽底条。
+/// 两档分支收在组件里，页面代码不写 `#available`（§5.2）。
+private struct WriterComposerShell<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: Theme.Spacing.s) {
+                content
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.s)
+            }
+        } else {
+            content
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.s)
+                .background(.bar)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Theme.separator)
+                        .frame(height: 0.5)
+                }
+        }
+    }
+}
+
+/// 输入框表面。iOS 26 用玻璃胶囊（由外层 `GlassEffectContainer` 归并），
+/// 17–25 用实底输入框胶囊——那一档整条已经是 `.bar`，内层再叠材质会糊成一片。
+private struct WriterComposerFieldSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassSurface(Capsule())
+        } else {
+            content.background(Theme.field, in: Capsule())
+        }
+    }
+}
+
+/// 发送按钮。iOS 26 是系统玻璃主操作（§5.4 一屏最多一个），17–25 是强调色实心圆钮。
+private struct WriterSendButton: View {
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            label
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.circle)
+        } else {
+            label
+                .buttonStyle(.plain)
+                .background(isEnabled ? Theme.accent : Theme.separator, in: Circle())
+        }
+    }
+
+    private var label: some View {
+        Button(action: action) {
+            Image(systemName: "paperplane.fill")
+                .font(Font.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
+                .contentShape(Rectangle())
+        }
+        .disabled(!isEnabled)
+        .accessibilityLabel("发送")
     }
 }

@@ -1,4 +1,6 @@
 // 回收站：单独一页。恢复是主操作，彻底删除只走滑动/确认，避免误触。
+//
+// 彻底删除不可恢复，确认用 `confirmationDialog`，只留标题和动作按钮（§5.8）。
 
 import SwiftUI
 
@@ -35,29 +37,31 @@ struct LibraryTrashView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                .frame(maxWidth: Theme.Layout.formMaxWidth)
+                .frame(maxWidth: .infinity)
+                .softScrollEdge()
+                .themeAnimation(Theme.motionLayout, value: projects.count)
             }
         }
         .groupedPageBackground()
         .navigationTitle("回收站")
         .navigationBarTitleDisplayMode(.inline)
-        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
+        .confirmationDialog(
+            pendingDelete.map { "彻底删除「\($0.shelfTitle)」？" } ?? "彻底删除这本书？",
+            isPresented: deleteDialogBinding,
+            titleVisibility: .visible
+        ) {
             Button("彻底删除", role: .destructive) {
                 if let project = pendingDelete {
                     store.deleteForever(project)
-                    store.toast = "已彻底删除"
                 }
                 pendingDelete = nil
             }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         }
     }
 
-    private var deleteAlertTitle: String {
-        guard let project = pendingDelete else { return "彻底删除这本书？" }
-        return "彻底删除「\(project.shelfTitle)」？"
-    }
-
-    private var deleteAlertBinding: Binding<Bool> {
+    private var deleteDialogBinding: Binding<Bool> {
         Binding(
             get: { pendingDelete != nil },
             set: { isPresented in

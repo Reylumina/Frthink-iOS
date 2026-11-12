@@ -5,14 +5,13 @@ import UIKit
 
 struct StreamingTextView: UIViewRepresentable {
     var text: String
-    /// 与「外观 → 正文字号」一致。
-    var fontSize: CGFloat = 18
-    /// 与普通气泡的 `Text.lineSpacing(3)` 保持一致。
+    /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
+    var fontSize: CGFloat
+    /// 与完成态 `Text` 共用的行距（`WriterTypography.lineSpacing`）。
     ///
-    /// 两处不一致时，生成结束换成普通气泡的那一刻整段会突然变高几百点，
+    /// 两处不一致时，生成结束换成普通气泡的那一刻整段会突然变高，
     /// 视口还停在旧高度上，底部就露出一片空白。
-    var lineSpacing: CGFloat = 3.0
-
+    var lineSpacing: CGFloat
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -77,6 +76,7 @@ struct StreamingTextView: UIViewRepresentable {
             )
         }
         coordinator.appliedText = rendered
+        // 先让下一次测量拿到新高度，再由 SwiftUI 收这一帧。
         uiView.invalidateIntrinsicContentSize()
     }
 

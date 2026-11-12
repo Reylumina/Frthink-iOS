@@ -669,8 +669,47 @@ struct ChapterNavigationRow: View {
     }
 }
 
-// MARK: - 浮层按钮
+// MARK: - sheet 工具栏
 
+/// sheet / 编辑页的关闭按钮。
+///
+/// iOS 26 起 `Button(role: .close)` 由系统画 × 并定位置；17–25 没有这个 role，
+/// 退回文字按钮。关闭不丢数据，所以不用 `.cancel`。页面里不写版本分支。
+struct SheetCloseButton: View {
+    /// 17–25 的文字；iOS 26 由系统给图标。
+    var title: String = "取消"
+    let action: () -> Void
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            Button(role: .close, action: action)
+                .accessibilityLabel(title)
+        } else {
+            Button(title, action: action)
+        }
+    }
+}
+
+/// sheet / 编辑页的确认按钮（自动保存的页面只显示完成）。
+struct SheetConfirmButton: View {
+    /// 17–25 的文字；iOS 26 由系统给图标。
+    var title: String = "完成"
+    var isEnabled = true
+    let action: () -> Void
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            Button(role: .confirm, action: action)
+                .accessibilityLabel(title)
+                .disabled(!isEnabled)
+        } else {
+            Button(title, action: action)
+                .disabled(!isEnabled)
+        }
+    }
+}
+
+// MARK: - 浮层按钮
 /// 浮在内容上的图标按钮（回到最新、回到底部）。
 ///
 /// iOS 26 用系统的玻璃按钮样式，17–25 回落到系统材质胶囊；系统补不了的

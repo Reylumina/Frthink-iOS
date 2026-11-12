@@ -43,7 +43,7 @@ struct CorpusLibraryManagerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    SheetCloseButton(title: "关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -72,12 +72,12 @@ struct CorpusLibraryManagerSheet: View {
                     }
                 }
             }
-            .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
-                Button("取消", role: .cancel) { pendingDelete = nil }
+            .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
                 Button("删除", role: .destructive) {
                     if let library = pendingDelete { delete(library) }
                     pendingDelete = nil
                 }
+                Button("取消", role: .cancel) { pendingDelete = nil }
             }
         }
         .sheetToast()
@@ -90,18 +90,24 @@ struct CorpusLibraryManagerSheet: View {
             Button {
                 activeLibraryID = library.id
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.s) {
                         Text(library.name)
-                            .font(Font.body.weight(.medium))
+                            .font(Theme.label)
                             .foregroundStyle(.primary)
                         if library.id == currentLibraryID {
-                            StatusPill(text: "当前")
+                            StatusPill(text: "当前", tone: .accent)
                         }
                     }
-                    Text("\(library.entries.count) 条" + (library.enabled ? " · 已启用" : " · 未启用"))
-                        .font(Font.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text("\(library.entries.count) 条")
+                            .font(Theme.metadata)
+                            .foregroundStyle(.secondary)
+                        StatusPill(
+                            text: library.enabled ? "已启用" : "已停用",
+                            tone: library.enabled ? .neutral : .warning
+                        )
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -126,11 +132,15 @@ struct CorpusLibraryManagerSheet: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(Font.body)
+                    .font(Theme.label)
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("更多操作")
         }
-        .padding(.vertical, Theme.Spacing.xs)
+        .frame(minHeight: Theme.Layout.hitTarget)
+        .themeAnimation(Theme.motionSelection, value: library.enabled)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 pendingDelete = library
@@ -230,6 +240,7 @@ struct CorpusLibraryNameEditor: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    @State private var saved = false
 
     init(heading: String, initialName: String, onSave: @escaping (String) -> Void) {
         self.heading = heading
@@ -259,12 +270,17 @@ struct CorpusLibraryNameEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("保存") {
+                SheetConfirmButton(title: "保存", isEnabled: !trimmedName.isEmpty) {
                     onSave(trimmedName)
+                    saved = true
                     dismiss()
                 }
-                .disabled(trimmedName.isEmpty)
             }
+        }
+        .onDisappear {
+            // 这页只有「保存」没有「取消」：左滑返回时存下改名，别静默丢。
+            guard !saved, !trimmedName.isEmpty, trimmedName != initialName else { return }
+            onSave(trimmedName)
         }
     }
 }

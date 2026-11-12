@@ -25,15 +25,45 @@ enum WorldJSON {
 
     // MARK: - 提取
 
-    /// 从模型响应里截出第一个完整的 JSON 对象或数组。
+    /// 从模型响应里截出 JSON 对象或数组。
     ///
     /// 括号配对时会跳过字符串内部的内容和反斜杠转义，所以 `style_notes`
-    /// 里出现 `{`、`}` 或 ``` 不会截错。找不到完整 JSON 时返回 nil。
+    /// 里出现 `{`、`}` 或 ``` 不会截错。
+    ///
+    /// 不能只认第一个 `{`/`[`：模型常在 JSON 前写一句带括号的说明（如
+    /// 「（[别名] 也要写全）」），从那里截出来的是说明而不是结果。这里按起点
+    /// 逐个试到 `JSONSerialization` 认可为止；对象优先，标量数组（说明里的
+    /// `[别名]`）跳过，空数组留作兜底。
     static func extractJSON(from raw: String) -> String? {
-        guard let start = raw.firstIndex(where: { $0 == "{" || $0 == "[" }) else {
-            return nil
+        var emptyArrayFallback: String?
+        var attempts = 0
+        var searchStart = raw.startIndex
+        while attempts < maxStartAttempts,
+              let start = raw[searchStart...].firstIndex(where: { $0 == "{" || $0 == "[" }) {
+            attempts += 1
+            if let candidate = balancedJSON(in: raw, from: start),
+               let data = candidate.data(using: .utf8),
+               let root = try? JSONSerialization.jsonObject(with: data) {
+                if root is [String: Any] { return candidate }
+                if let list = root as? [Any] {
+                    if list.isEmpty {
+                        if emptyArrayFallback == nil { emptyArrayFallback = candidate }
+                    } else if list.contains(where: { $0 is [String: Any] }) {
+                        return candidate
+                    }
+                }
+            }
+            searchStart = raw.index(after: start)
         }
+        return emptyArrayFallback
+    }
 
+    /// 起点尝试上限。正常响应第一个起点就命中；说明文字里最多几十个括号，
+    /// 加个上限避免在超长响应上做平方级扫描。
+    private static let maxStartAttempts = 128
+
+    /// 从 `start` 起做括号配对，返回第一个完整的对象/数组；括号不配对返回 nil。
+    private static func balancedJSON(in raw: String, from start: String.Index) -> String? {
         var expectedClosers: [Character] = []
         var inString = false
         var escaping = false
@@ -209,7 +239,13 @@ enum WorldJSON {
                 continue
             }
             let scene = prose(field(object, ["scene"]))
-            let characters = strings(field(object, ["characters", "casts"]))
+            // APK `s2/a.java` 同款校验：人物只接受数组或分隔字符串。对象数组
+            // （`[{"name":"…"}]`）或数字会让 iOS 静默得到「没有人物」，直接报错。
+            let characterValue = field(object, ["characters", "casts"])
+            if let characterValue, !isValidEventCharacters(characterValue) {
+                throw WorldJSONError.invalidJSON("事件卡人物格式无效")
+            }
+            let characters = strings(characterValue)
             let cause = prose(field(object, ["cause"]))
             let development = prose(field(object, ["development"]))
             let consequence = prose(field(object, ["consequence", "result"]))
@@ -238,6 +274,14 @@ enum WorldJSON {
     }
 
     // MARK: - 人物卡
+
+    /// 事件卡 `characters` 的合法形态：字符串（按分隔符切）或字符串数组。
+    /// 空值在调用处已过滤；对象、数字、混合数组都算非法。
+    private static func isValidEventCharacters(_ value: Any) -> Bool {
+        if value is String { return true }
+        guard let list = value as? [Any] else { return false }
+        return list.allSatisfy { $0 is String || $0 is NSNull }
+    }
 
     /// 逐项解析人物卡，并在别称类型不对时按原版报错。
     ///

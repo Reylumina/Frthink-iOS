@@ -20,11 +20,11 @@ struct SettingsConnectionPage: View {
         List {
             currentSection
             providersSection
-            translationSection
-            summarySection
+            taskModelSection
             advancedSection
         }
         .listStyle(.insetGrouped)
+        .settingsFormColumn()
         .navigationTitle("连接与模型")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $editingProvider) { provider in
@@ -42,19 +42,17 @@ struct SettingsConnectionPage: View {
                 if let provider = store.settings.activeProvider {
                     ProviderIcon(
                         kind: provider.kind,
-                        tint: hasActiveKey ? Theme.accent : .orange
+                        tint: hasActiveKey ? Theme.accent : AppTone.warning.color
                     )
-                } else {
-                    IconTile(
-                        symbol: "bolt.horizontal.circle",
-                        tint: .orange
-                    )
-                }
-                VStack(alignment: .leading, spacing: 2) {
                     Text(activeProviderName)
-                        .font(.body.weight(.medium))
+                        .font(Theme.label)
                         .lineLimit(2)
                         .truncationMode(.middle)
+                } else {
+                    Label("尚未选择 AI 服务商", systemImage: "bolt.horizontal.circle")
+                        .font(Theme.label)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: Theme.Spacing.s)
                 StatusPill(
@@ -62,6 +60,8 @@ struct SettingsConnectionPage: View {
                     tone: hasActiveKey ? .success : .warning
                 )
             }
+            .contentShape(Rectangle())
+            .frame(minHeight: Theme.Layout.hitTarget)
 
             Button {
                 testActiveConnection()
@@ -71,12 +71,12 @@ struct SettingsConnectionPage: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "bolt.horizontal")
-                            .font(.footnote.weight(.semibold))
                     }
                     Text(isTesting ? "正在测试…" : "测试连接")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
             .disabled(isTesting || store.settings.activeProvider == nil)
 
@@ -109,48 +109,42 @@ struct SettingsConnectionPage: View {
         }
     }
 
-    // MARK: - 翻译模型
+    // MARK: - 任务模型
 
-    private var translationSection: some View {
+    /// 翻译和摘要各自可以指定模型，合并成一块，二级页保持四个区块（§5.10）。
+    private var taskModelSection: some View {
         Section {
             NavigationLink {
                 TranslationProviderPicker(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "翻译模型",
                     symbol: "character.bubble",
                     detail: translationModelShortLabel
                 )
             }
-        } header: {
-            AppSectionHeader(title: "翻译任务")
-        }
-    }
-
-    // MARK: - 生成参数
-
-    private var summarySection: some View {
-        Section {
             NavigationLink {
                 SettingsSummaryModelPage(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "摘要模型",
                     symbol: "text.append",
                     detail: summaryModelShortLabel
                 )
             }
         } header: {
-            AppSectionHeader(title: "摘要任务")
+            AppSectionHeader(title: "任务模型")
         }
     }
+
+    // MARK: - 生成参数
 
     private var advancedSection: some View {
         Section {
             NavigationLink {
                 SettingsModelResponsePage(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "全局模型响应",
                     symbol: "dial.medium",
                     detail: String(format: "%.2f", store.settings.defaultTemperature)
@@ -159,7 +153,7 @@ struct SettingsConnectionPage: View {
             NavigationLink {
                 SettingsContextBudgetPage(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "长上下文预算",
                     symbol: "gauge.with.dots.needle.33percent",
                     detail: outputBudgetShortLabel
@@ -206,7 +200,8 @@ struct SettingsConnectionPage: View {
         return model.isEmpty ? "跟随当前" : model
     }
 
-    private var outputBudgetShortLabel: String {        let value = store.settings.reservedOutputTokens
+    private var outputBudgetShortLabel: String {
+        let value = store.settings.reservedOutputTokens
         guard value > 0 else { return "跟随模型" }
         if value >= 1_000 {
             return "输出 \(Int((Double(value) / 1_000).rounded()))K"
@@ -233,7 +228,7 @@ struct SettingsConnectionPage: View {
             do {
                 let client = try store.clientForActiveProvider()
                 try await client.testConnection()
-                testMessage = "连接成功，当前模型可用。"
+                testMessage = "连接成功"
                 testFailed = false
             } catch {
                 testMessage = error.localizedDescription
@@ -263,7 +258,7 @@ struct TranslationProviderPicker: View {
                 }
             }
 
-            Section("指定AI服务商") {
+            Section {
                 ForEach(store.settings.providers) { provider in
                     row(
                         kind: provider.kind,
@@ -275,9 +270,12 @@ struct TranslationProviderPicker: View {
                         select(provider.id)
                     }
                 }
+            } header: {
+                AppSectionHeader(title: "指定AI服务商")
             }
         }
         .listStyle(.insetGrouped)
+        .settingsFormColumn()
         .navigationTitle("翻译模型")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -294,7 +292,7 @@ struct TranslationProviderPicker: View {
                     ProviderIcon(kind: kind, size: 24)
                 }
                 Text(title)
-                    .font(.body)
+                    .font(Theme.label)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
@@ -304,10 +302,11 @@ struct TranslationProviderPicker: View {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.accent)
+                        .accessibilityLabel("当前")
                 }
             }
             .contentShape(Rectangle())
-            .frame(minHeight: 36)
+            .frame(minHeight: Theme.Layout.hitTarget)
         }
         .buttonStyle(.plain)
     }
@@ -331,18 +330,18 @@ private struct ConnectionProviderRow: View {
 
     var body: some View {
         Button(action: onEdit) {
-            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+            HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 ProviderIcon(
                     kind: provider.kind,
                     tint: isActive ? Theme.accent : .secondary
                 )
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.xs) {
                         Text(provider.kind.displayName)
-                            .font(.body.weight(.medium))
+                            .font(Theme.label)
                             .foregroundStyle(.primary)
                         if isActive {
-                            StatusPill(text: "当前")
+                            StatusPill(text: "当前", tone: .accent)
                         }
                         if !provider.enabled {
                             StatusPill(text: "已停用")
@@ -350,7 +349,7 @@ private struct ConnectionProviderRow: View {
                     }
 
                     Text(provider.model.isEmpty ? "未填写模型" : provider.model)
-                        .font(.caption)
+                        .font(Theme.labelSmall)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -361,10 +360,10 @@ private struct ConnectionProviderRow: View {
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
-                    .padding(.top, Theme.Spacing.xs)
+                    .accessibilityHidden(true)
             }
-            .padding(.vertical, 2)
             .contentShape(Rectangle())
+            .frame(minHeight: Theme.Layout.hitTarget)
         }
         .buttonStyle(.plain)
         .swipeActions(edge: .leading) {

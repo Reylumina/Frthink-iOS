@@ -15,6 +15,7 @@ struct SettingsPromptPage: View {
             worldBuildSection
             conversationSummarySection
         }
+        .settingsFormColumn()
         .navigationTitle("提示词与资料")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -26,7 +27,7 @@ struct SettingsPromptPage: View {
             NavigationLink {
                 PromptManagerPane(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "技能与预设",
                     symbol: "text.book.closed",
                     detail: "\(store.settings.skills.count) 个技能"
@@ -41,7 +42,7 @@ struct SettingsPromptPage: View {
                     store.toast = "已复制原句"
                 }
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "语料收集库",
                     symbol: "text.quote",
                     detail: "\(store.settings.corpusLibraries.count) 个库"
@@ -66,7 +67,7 @@ struct SettingsPromptPage: View {
             NavigationLink {
                 WorldBuildEditorPage(store: store)
             } label: {
-                AppSettingsRow(
+                SettingsLabelRow(
                     title: "世界建立要求",
                     symbol: "globe.asia.australia",
                     detail: worldBuildDetail
@@ -94,7 +95,7 @@ struct SettingsPromptPage: View {
             NavigationLink {
                 SettingsLongTermRulesPage(store: store)
             } label: {
-                AppSettingsRow(title: "长期规则摘要", symbol: "list.bullet.rectangle")
+                SettingsLabelRow(title: "长期规则摘要", symbol: "list.bullet.rectangle")
             }
         } header: {
             AppSectionHeader(title: "对话总结")
@@ -155,7 +156,8 @@ struct WorldBuildEditorPage: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
-                Button("完成") { close() }
+                .accessibilityLabel("更多操作")
+                SheetConfirmButton(title: "完成") { close() }
             }
         }
         .onChange(of: text) { _, _ in
@@ -232,7 +234,7 @@ struct WorldBuildDefaultSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    SheetCloseButton(title: "完成") { dismiss() }
                 }
             }
         }

@@ -6,12 +6,15 @@ import SwiftUI
 /// 搜索面板。搜的是当前模式显示的那一篇，所以占位符跟着模式走。
 ///
 /// 面板由 `ReaderPane` 放在正文的 overlay 里：打开时正文不下推，只有顶部这一层
-/// 发生变化，键盘也只在面板自己的输入框里。
+/// 发生变化，键盘也只在面板自己的输入框里。搜索没出结果前先显示加载态，
+/// 有结果或确认为空之后再切内容，避免先闪一下空白。
 struct ReaderSearchPanel: View {
     let mode: ReaderMode
     @Binding var query: String
     let matches: [ReaderMatch]
     let currentIndex: Int
+    /// 全文还在扫。为 true 时先显示一行加载态。
+    let isSearching: Bool
     let onSubmit: () -> Void
     let onPrevious: () -> Void
     let onNext: () -> Void
@@ -29,10 +32,7 @@ struct ReaderSearchPanel: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             searchField
             if !trimmedQuery.isEmpty {
-                statusRow
-            }
-            if !matches.isEmpty {
-                resultList
+                results
             }
         }
         .padding(.horizontal, Theme.Spacing.l)
@@ -51,6 +51,7 @@ struct ReaderSearchPanel: View {
             Image(systemName: "magnifyingglass")
                 .font(Font.footnote)
                 .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
 
             TextField(mode.searchPlaceholder, text: $query)
                 .font(Font.subheadline)
@@ -59,6 +60,7 @@ struct ReaderSearchPanel: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .focused($focused)
+                .accessibilityLabel(mode.searchPlaceholder)
                 .onSubmit(onSubmit)
 
             if !query.isEmpty {
@@ -68,7 +70,10 @@ struct ReaderSearchPanel: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(Font.footnote)
                         .foregroundStyle(.tertiary)
-                        .frame(width: 44, height: 44)
+                        .frame(
+                            minWidth: Theme.Layout.hitTarget,
+                            minHeight: Theme.Layout.hitTarget
+                        )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -82,45 +87,56 @@ struct ReaderSearchPanel: View {
                 Text("收起")
                     .font(Font.footnote.weight(.medium))
                     .foregroundStyle(Theme.accent)
+                    .frame(minHeight: Theme.Layout.hitTarget)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, Theme.Spacing.m)
-        .padding(.vertical, Theme.Spacing.s)
+        .padding(.vertical, Theme.Spacing.xs)
         .background(Theme.field)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                .stroke(Theme.separator, lineWidth: 0.5)
-        )
     }
 
-    // MARK: - 状态与跳转
+    // MARK: - 状态与命中
+
+    @ViewBuilder
+    private var results: some View {
+        if isSearching {
+            AppStatusLine(kind: .progress, text: "正在搜索…")
+        } else if matches.isEmpty {
+            InlineEmptyState(
+                symbol: "magnifyingglass",
+                message: "没有找到「\(trimmedQuery)」"
+            )
+        } else {
+            statusRow
+            resultList
+        }
+    }
 
     private var statusRow: some View {
         HStack(spacing: Theme.Spacing.m) {
             Text(statusText)
                 .font(Font.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
 
             Spacer(minLength: 0)
 
-            if !matches.isEmpty {
-                Button(action: onPrevious) {
-                    Label("上一处", systemImage: "chevron.up")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityLabel("上一处")
-
-                Button(action: onNext) {
-                    Label("下一处", systemImage: "chevron.down")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityLabel("下一处")
+            Button(action: onPrevious) {
+                Label("上一处", systemImage: "chevron.up")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("上一处")
+
+            Button(action: onNext) {
+                Label("下一处", systemImage: "chevron.down")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("下一处")
         }
     }
 
@@ -129,10 +145,7 @@ struct ReaderSearchPanel: View {
     }
 
     private var statusText: String {
-        if matches.isEmpty {
-            return "没有找到「\(trimmedQuery)」"
-        }
-        return "第 \(currentIndex + 1)/\(matches.count) 处命中"
+        "第 \(currentIndex + 1)/\(matches.count) 处命中"
     }
 
     // MARK: - 命中列表
@@ -163,12 +176,7 @@ struct ReaderSearchPanel: View {
         }
         .frame(maxHeight: resultListHeight)
         .scrollDismissesKeyboard(.immediately)
-        .background(Theme.card)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                .stroke(Theme.separator, lineWidth: 0.5)
-        )
+        .cardSurface(radius: Theme.Radius.medium)
     }
 
     private func resultRow(index: Int, match: ReaderMatch) -> some View {

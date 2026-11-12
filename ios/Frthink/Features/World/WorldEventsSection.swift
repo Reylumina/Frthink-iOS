@@ -229,7 +229,15 @@ struct WorldEventsSection: View {
     }
 
     private func addEvent() {
-        let event = EventCard(title: "新事件")
+        // 事件卡按标题唯一：新建时直接给一个不重复的默认名，避免刚建出来
+        // 就因为同名被保存校验挡住。
+        var title = "新事件"
+        var suffix = 2
+        while session.payload.world.events.contains(where: { $0.title == title }) {
+            title = "新事件 \(suffix)"
+            suffix += 1
+        }
+        let event = EventCard(title: title)
         session.payload.world.events.append(event)
         session.scheduleSave()
         route = Route(id: event.id)

@@ -1,4 +1,7 @@
 // 新建 / 重命名 / 改简介共用的输入弹窗。
+//
+// 这一页有草稿：关闭（取消或下滑）前必须确认放弃，不能静默丢掉已经输入的内容（§5.8）。
+// 单行字段只有填充底，没有描边和投影（§1.5）。
 
 import SwiftUI
 
@@ -66,18 +69,19 @@ struct LibraryInputSheet: View {
                         .focused($focused)
                         .onSubmit { commit() }
                         .padding(Theme.Spacing.m)
-                        .background(Theme.card)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                                .stroke(Theme.separator, lineWidth: 0.5)
-                        )
+                        .background(Theme.field)
+                        .clipShape(Theme.containerShape(minimum: Theme.Radius.medium))
                 }
 
                 Spacer(minLength: 0)
             }
             .padding(Theme.Spacing.l)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(
+                maxWidth: Theme.Layout.formMaxWidth,
+                maxHeight: .infinity,
+                alignment: .topLeading
+            )
+            .frame(maxWidth: .infinity, alignment: .top)
             .pageBackground()
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)

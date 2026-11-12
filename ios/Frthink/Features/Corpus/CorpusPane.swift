@@ -60,6 +60,7 @@ struct CorpusPane: View {
             prompt: "搜索"
         )
         .keyboardDismissOnScroll()
+        .settingsFormColumn()
         .navigationTitle("语料收集库")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -99,12 +100,12 @@ struct CorpusPane: View {
                 CorpusLibraryManagerSheet(store: store, activeLibraryID: $activeLibraryID)
             }
         }
-        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
+        .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 if let entry = pendingDelete { delete(entry) }
                 pendingDelete = nil
             }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         }
     }
 
@@ -132,7 +133,7 @@ struct CorpusPane: View {
                 }
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
-                    AppSettingsRow(
+                    SettingsLabelRow(
                         title: activeLibrary?.name ?? "还没有语料库",
                         symbol: "books.vertical",
                         detail: activeLibrary.map { "\($0.entries.count) 条" }
@@ -140,6 +141,7 @@ struct CorpusPane: View {
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
             }
@@ -166,7 +168,6 @@ struct CorpusPane: View {
                 Button("清除筛选") {
                     query = CorpusQuery()
                 }
-                .font(Font.footnote)
             }
         } header: {
             AppSectionHeader(title: "筛选")
@@ -384,19 +385,20 @@ private struct CorpusFilterMenuRow: View {
         } label: {
             HStack(spacing: Theme.Spacing.m) {
                 Label(title, systemImage: symbol)
-                    .font(Font.body)
+                    .font(Theme.label)
                     .foregroundStyle(.primary)
                 Spacer(minLength: Theme.Spacing.s)
                 Text(displayValue)
-                    .font(Font.footnote)
+                    .font(Theme.label)
                     .foregroundStyle(selection == nil ? Color.secondary : Theme.accent)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .frame(minHeight: 36)
+            .frame(minHeight: Theme.Layout.hitTarget)
         }
     }
 }
@@ -459,14 +461,14 @@ private struct CorpusRowContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Text(highlighted.title)
-                .font(Font.subheadline.weight(.medium))
+                .font(Theme.label)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
 
             HStack(spacing: Theme.Spacing.s) {
                 if !entry.category.isEmpty {
                     Text(highlighted.category)
-                        .font(Font.caption.weight(.medium))
+                        .font(Theme.badge)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, Theme.Spacing.s)
                         .padding(.vertical, Theme.Spacing.xs)
@@ -474,8 +476,8 @@ private struct CorpusRowContent: View {
                 }
                 if !entry.source.isEmpty {
                     Text("来源 \(entry.source)")
-                        .font(Theme.numeric)
-                        .foregroundStyle(.tertiary)
+                        .font(Theme.metadata)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -493,12 +495,12 @@ private struct CorpusRowContent: View {
                 HStack(spacing: Theme.Spacing.xs) {
                     ForEach(highlighted.tags) { pill in
                         Text(pill.text)
-                            .font(Font.caption)
+                            .font(Theme.badge)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, Theme.Spacing.s)
                             .padding(.vertical, Theme.Spacing.xs)
                             .background(
-                                Capsule().fill(pill.matched ? Theme.accentSoft : Theme.separator.opacity(0.4))
+                                Capsule().fill(pill.matched ? Theme.accentSoft : Theme.field)
                             )
                     }
                 }

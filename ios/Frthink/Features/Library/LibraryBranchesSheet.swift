@@ -1,4 +1,7 @@
 // 同一本书的分支（平行稿）列表：可以打开任意分支，或再创建一条。
+//
+// 分支也是书稿：行内沿用书架的「书脊 + 书名 + 一行元数据」语法，
+// 打开后与书架行看到的是同一本书的同一份索引。
 
 import SwiftUI
 
@@ -22,6 +25,10 @@ struct LibraryBranchesSheet: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
+            .frame(maxWidth: Theme.Layout.formMaxWidth)
+            .frame(maxWidth: .infinity)
+            .softScrollEdge()
+            .themeAnimation(Theme.motionLayout, value: branches.count)
             .groupedPageBackground()
             .navigationTitle("分支")
             .navigationBarTitleDisplayMode(.inline)
@@ -56,13 +63,22 @@ struct LibraryBranchesSheet: View {
             dismiss()
         } label: {
             HStack(spacing: Theme.Spacing.m) {
+                LibraryCoverImage(
+                    payload: branch.coverImagePayload,
+                    title: branch.title,
+                    seed: branch.id
+                )
+
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(branch.title)
-                        .font(Font.body.weight(.medium))
+                    Text(branch.shelfTitle)
+                        .font(Theme.label.weight(.semibold))
                         .foregroundStyle(.primary)
+                        .lineLimit(1)
+
                     Text(subtitle(for: branch))
-                        .font(Font.caption)
+                        .font(Theme.metadata.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: Theme.Spacing.s)
@@ -71,6 +87,7 @@ struct LibraryBranchesSheet: View {
                     StatusPill(text: "当前")
                 }
             }
+            .frame(minHeight: Theme.Layout.hitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -80,6 +97,7 @@ struct LibraryBranchesSheet: View {
         store.branches(of: project)
     }
 
+    /// 第几条 + 最近编辑时间：和书架一样合成一行，不再单独放一行说明。
     private func subtitle(for branch: Project) -> String {
         "第 \(branch.branchOrder + 1) 条 · " + LibraryFormat.updatedText(branch.updatedAt)
     }

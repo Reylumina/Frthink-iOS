@@ -14,12 +14,15 @@ enum WorldDedupe {
     }
 
     /// 对「本轮新增候选」去重。`existing` 只读，用于 existing_id / 同名匹配。
+    ///
+    /// 取消要原样抛出：去重被取消时调用方按「已停止」收尾，不能把它当成
+    /// 「去重失败」继续合并，否则用户点了停止还会写库。
     static func dedupe(
         candidates: [CharacterCard],
         existing: [CharacterCard],
         client: any LLMClient,
         provider: ProviderSetting
-    ) async -> (cards: [CharacterCard], outcome: Outcome) {
+    ) async throws -> (cards: [CharacterCard], outcome: Outcome) {
         // 单张候选不需要分组请求；后面 WorldMerge 会按同名/别称并入已有卡。
         guard candidates.count >= 2 else {
             return (candidates, Outcome(mergedGroups: 0, removedCards: 0, note: nil))
@@ -32,18 +35,18 @@ enum WorldDedupe {
             candidates: candidates.map(\.name),
             existingNames: existingNames
         )
-        let request = LLMRequest(
-            model: provider.resolvedModel,
+        // 与其它世界任务同参数：输出至少 4096，整段 JSON 被截断时直接报错。
+        let request = WorldRequestContext.request(
+            provider: provider,
             messages: messages,
-            stream: false,
-            temperature: provider.temperature,
-            maxTokens: max(provider.maxTokens, 2_048)
+            failOnLength: true
         )
 
         let raw: String
         do {
             raw = try await client.complete(request)
         } catch {
+            if error.isLLMCancellation { throw CancellationError() }
             return (candidates, Outcome(
                 mergedGroups: 0,
                 removedCards: 0,
@@ -70,6 +73,14 @@ enum WorldDedupe {
     }
 
     // MARK: - 解析
+
+    /// 候选里出现过的所有称呼，按 `WorldMerge.normalize` 归一。
+    ///
+    /// 模型常把同一名字写成大小写/空格不同的形态（`Lin Zhao` / `lin zhao`），
+    /// 原样比对会把整份去重结果判成无效。
+    static func candidateNameKeys(_ cards: [CharacterCard]) -> Set<String> {
+        Set(cards.flatMap { [$0.name] + $0.aliases }.map(WorldMerge.normalize))
+    }
 
     private struct Group {
         var indexes: [Int]
@@ -118,7 +129,7 @@ enum WorldDedupe {
             uniquingKeysWith: { first, _ in first }
         )
         // 循环不变量：候选里出现过的所有称呼。每组都重算会变成 O(组 × 卡)。
-        let candidateNames = Set(cards.flatMap { [$0.name] + $0.aliases })
+        let candidateNames = candidateNameKeys(cards)
 
         for group in groups {
             let valid = group.indexes.filter { cards.indices.contains($0) }
@@ -137,7 +148,9 @@ enum WorldDedupe {
                 canonical = existingCard.name
             } else if !canonical.isEmpty {
                 // 新人物 canonical_name 必须来自候选中已有的名称。
-                guard candidateNames.contains(canonical) else { return nil }
+                guard candidateNames.contains(WorldMerge.normalize(canonical)) else {
+                    return nil
+                }
             }
 
             var primary = cards[valid[0]]

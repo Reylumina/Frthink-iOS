@@ -382,20 +382,34 @@ enum PromptLibrary {
 
     // MARK: - P11 人物卡块渲染
 
+    /// 把字段值内部的换行压成「；」。
+    ///
+    /// P11/P53 的块形状是「一行一个字段：值」；世界合并（`WorldMerge.appended`）
+    /// 按换行追加新事实，值里带换行时第二行没有全角冒号，会作为无标签续行留在块里。
+    /// 渲染时统一压平：历史卡与新合并的卡按同一形状进提示词。
+    static func singleLine(_ text: String) -> String {
+        guard text.contains(where: { $0.isNewline }) else { return text }
+        return text
+            .split(whereSeparator: { $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "；")
+    }
+
     /// P11：把一张人物卡渲染成 `# <人物名>` + 逐行「字段：值」。
     ///
     /// 逐行过滤规则（规格 P11 下方）：拼完后对每行取「第一个全角冒号之后」的内容，
     /// 内容为空的行整行丢弃。没有全角冒号的行（`# 人物名`）一律保留。
     static func characterBlock(for card: CharacterCard) -> String {
         var body = render(characterBlockTemplate, [
-            "人物名": card.name,
-            "identity": card.identity,
-            "personality": card.personality,
-            "voice": card.voice,
-            "goals": card.goals,
-            "boundaries": card.boundaries,
-            "personal_memory": card.personalMemory,
-            "relationship_attitudes": card.relationshipAttitudes,
+            "人物名": singleLine(card.name),
+            "identity": singleLine(card.identity),
+            "personality": singleLine(card.personality),
+            "voice": singleLine(card.voice),
+            "goals": singleLine(card.goals),
+            "boundaries": singleLine(card.boundaries),
+            "personal_memory": singleLine(card.personalMemory),
+            "relationship_attitudes": singleLine(card.relationshipAttitudes),
         ])
 
         // 自定义词条：模板里那两行占位符一个词条渲染一次；没有词条就整行去掉。
@@ -404,7 +418,7 @@ enum PromptLibrary {
             body = body.replacingOccurrences(of: customLine, with: "")
         } else {
             let rendered = card.customEntries
-                .map { $0.title + "：" + $0.body }
+                .map { singleLine($0.title) + "：" + singleLine($0.body) }
                 .joined(separator: "\n")
             body = body.replacingOccurrences(of: customLine, with: rendered)
         }

@@ -1,6 +1,6 @@
 // 本文件负责：设置首页 —— 只做「分类导航」，具体功能都收进二级页。
 //
-// 一级只有四组、六行；每行给一句当前状态，点进去才展开该组。
+// 一级一屏看完，六个分类各占一行；每行给一句当前状态，点进去才展开该分类。
 // 缺 API Key 时首行本身变成提醒，不再额外插一条重复入口。
 
 import SwiftUI
@@ -49,11 +49,6 @@ struct SettingsView: View {
                     NavigationLink(value: SettingsCategory.connection) {
                         connectionRow
                     }
-                } header: {
-                    AppSectionHeader(title: "模型与连接")
-                }
-
-                Section {
                     NavigationLink(value: SettingsCategory.prompts) {
                         AppSettingsRow(
                             title: "提示词与资料",
@@ -61,11 +56,6 @@ struct SettingsView: View {
                             detail: "\(store.settings.skills.count) 个技能"
                         )
                     }
-                } header: {
-                    AppSectionHeader(title: "写作")
-                }
-
-                Section {
                     NavigationLink(value: SettingsCategory.archive) {
                         AppSettingsRow(
                             title: "存档与备份",
@@ -79,11 +69,6 @@ struct SettingsView: View {
                             symbol: "chart.bar"
                         )
                     }
-                } header: {
-                    AppSectionHeader(title: "数据")
-                }
-
-                Section {
                     NavigationLink(value: SettingsCategory.appearance) {
                         AppSettingsRow(
                             title: "外观与交互",
@@ -98,11 +83,10 @@ struct SettingsView: View {
                             detail: Attribution.versionLine
                         )
                     }
-                } header: {
-                    AppSectionHeader(title: "外观与交互")
                 }
             }
             .listStyle(.insetGrouped)
+            .settingsFormColumn()
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.large)
             .preferredColorScheme(store.settings.theme.colorScheme)
@@ -140,25 +124,27 @@ struct SettingsView: View {
         HStack(spacing: Theme.Spacing.m) {
             IconTile(
                 symbol: hasKey ? "point.3.connected.trianglepath.dotted" : "key.fill",
-                tint: hasKey ? Theme.accent : .orange
+                tint: hasKey ? Theme.accent : AppTone.warning.color
             )
 
             Text("连接与模型")
-                .font(.body)
+                .font(Theme.label)
                 .foregroundStyle(.primary)
 
             Spacer(minLength: Theme.Spacing.s)
 
             if hasKey {
                 Text(activeModelShort)
-                    .font(.footnote)
+                    .font(Theme.label)
                     .foregroundStyle(.secondary)
+                    .monospacedDigit()
                     .lineLimit(1)
             } else {
                 StatusPill(text: "未配置", tone: .warning)
             }
         }
-        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .frame(minHeight: Theme.Layout.hitTarget)
     }
 
     private var hasKey: Bool {

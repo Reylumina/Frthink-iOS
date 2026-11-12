@@ -1,7 +1,10 @@
 // 书架根页面：继续写作 + 全部书稿 + 回收站/设置入口。
 //
 // 一屏三件事：回到正在写的书、打开另一本、处理回收站。新建在右上角。
-// 不再用大封面网格：占位封面在写作应用里辨识度低，书名和最近编辑时间才是索引。
+// 不再用大封面网格：书脊、书名和最近编辑时间就是索引。
+//
+// 宽屏（iPad、可调整大小的窗口）下列表按 `Theme.Layout.formMaxWidth` 居中，
+// 页面底色铺满，内容不随窗口拉伸。
 
 import SwiftUI
 
@@ -49,8 +52,13 @@ struct LibraryView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .frame(maxWidth: Theme.Layout.formMaxWidth)
+        .frame(maxWidth: .infinity)
+        .softScrollEdge()
+        // 移入回收站、新建、恢复都会增删行；列表增删按 §4.1 用 motionLayout。
+        .themeAnimation(Theme.motionLayout, value: store.activeProjects.count)
         .groupedPageBackground()
-        .navigationTitle("本机书架")
+        .navigationTitle("书架")
         .navigationBarTitleDisplayMode(.large)
         .presentationDragIndicator(.visible)
         .toolbar {
@@ -117,21 +125,12 @@ struct LibraryView: View {
     }
 
     private var emptyBooksRow: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            Image(systemName: "books.vertical")
-                .font(.system(.largeTitle).weight(.light))
-                .foregroundStyle(.tertiary)
-
-            Text("还没有书项目")
-                .font(.headline)
-                .foregroundStyle(.primary)
-
-            PrimaryActionButton(title: "新建书项目", systemImage: "plus") {
-                editTarget = .newProject
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.xl)
+        EmptyStateView(
+            symbol: "books.vertical",
+            title: "还没有书项目",
+            actionTitle: "新建书项目",
+            action: { editTarget = .newProject }
+        )
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -148,7 +147,7 @@ struct LibraryView: View {
                     symbol: "trash",
                     detail: store.trashedProjects.isEmpty
                         ? nil
-                        : "\(store.trashedProjects.count)"
+                        : store.trashedProjects.count.formatted()
                 )
             }
 
@@ -160,8 +159,9 @@ struct LibraryView: View {
                             symbol: "gearshape"
                         )
                         Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
+                            .font(Font.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                     }
                     .contentShape(Rectangle())
                 }

@@ -22,8 +22,6 @@ struct ManuscriptReaderSheet: View {
     @State private var showRewrite = false
     @State private var rewriteRange = NSRange(location: 0, length: 0)
     @State private var rewriteText = ""
-    @State private var undoRequest = 0
-    @State private var redoRequest = 0
 
     var body: some View {
         NavigationStack {
@@ -48,9 +46,7 @@ struct ManuscriptReaderSheet: View {
                     onCursorInteraction: onCursorInteraction,
                     onSelectionChange: { range in
                         selection = range
-                    },
-                    undoRequest: undoRequest,
-                    redoRequest: redoRequest
+                    }
                 )
 
                 if selection.length > 0 {
@@ -144,40 +140,15 @@ struct ManuscriptReaderSheet: View {
 
     // MARK: - 底栏
 
-    /// 编辑态把撤销/重做降到第二行：大字号时标题与字数不会被挤成省略号。
+    /// 底栏只放章节与字数：撤销/重做不再占常驻按钮，
+    /// 走系统 `UndoManager`（⌘Z / ⇧⌘Z、摇一摇、编辑菜单，§5.8）。
     private var bottomBar: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.s) {
-                chapterButton
-                Spacer(minLength: Theme.Spacing.s)
-                Text("\(session.manuscriptCharacterCount.formatted()) 字")
-                    .font(Theme.numericSmall)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if editing {
-                HStack(spacing: Theme.Spacing.xl) {
-                    Button {
-                        undoRequest += 1
-                    } label: {
-                        Label("撤销", systemImage: "arrow.uturn.backward")
-                            .font(Font.footnote)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("撤销")
-
-                    Button {
-                        redoRequest += 1
-                    } label: {
-                        Label("重做", systemImage: "arrow.uturn.forward")
-                            .font(Font.footnote)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("重做")
-
-                    Spacer(minLength: 0)
-                }
-            }
+        HStack(spacing: Theme.Spacing.s) {
+            chapterButton
+            Spacer(minLength: Theme.Spacing.s)
+            Text("\(session.manuscriptCharacterCount.formatted()) 字")
+                .font(Theme.numericSmall)
+                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.s)

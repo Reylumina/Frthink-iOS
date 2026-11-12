@@ -1305,6 +1305,12 @@ enum FrthinkArchive {
         var projects: [ProjectBackup]
         /// 原版字段叫 `activeProjectId`；iOS 的当前书由根视图持有，导出时留空。
         var activeProjectID: String
+        /// 存档 `settings` 对象里实际出现的键（iOS 属性名与 Android 原版键名都算）。
+        ///
+        /// 只给 `mergeSettings` 用：Android 备份没有 iOS 独有的流式开关、上下文
+        /// 窗口、累计用量等键，解出来是出厂默认值；合并时缺键保留本机值，
+        /// 不能拿这些默认值把用户设置重置。不写进存档（不在 CodingKeys 里）。
+        var settingsKeyNames: Set<String> = []
 
         private enum CodingKeys: String, CodingKey {
             case formatVersion, createdAt, settings, projects
@@ -1366,6 +1372,18 @@ enum FrthinkArchive {
                 }
             }
             settings = merged
+            // 记下存档里明确出现的设置键。iOS 导出的存档用属性名，Android 备份
+            // 用原版键名，`mergeSettings` 两种都认；缺键的字段保留本机值。
+            // 解析不出来时留空集合，方向是「什么也不覆盖」，不会写坏设置。
+            var keyNames: Set<String> = []
+            if let rawSettings = try? c.decode(
+                [String: AnyCodable].self,
+                forKey: .settings
+            ) {
+                keyNames = Set(rawSettings.keys)
+            }
+            if c.contains(.corpusLibrary) { keyNames.insert("corpusLibrary") }
+            settingsKeyNames = keyNames
             projects = try c.decode([ProjectBackup].self, forKey: .projects)
             activeProjectID = (try? c.decode(String.self, forKey: .activeProjectID)) ?? ""
         }
@@ -1763,9 +1781,12 @@ enum FrthinkArchive {
         let looksFull = envelope.map { isAcceptedFormat($0.format, kind: .full) } ?? false
         let looksProject = envelope.map { isAcceptedFormat($0.format, kind: .project) } ?? false
         // 两种都接受时按全量口径解压（错误文案更贴合「可能是全量备份」）。
+        // 信封只解这一次：`openEnvelope` 复用同一份，同一份文件不再把
+        // base64 payload 字符串完整构造两遍（大备份的内存峰值少一份）。
         let json = try openEnvelope(
             data,
-            kind: looksFull ? .full : .project
+            kind: looksFull ? .full : .project,
+            decoded: envelope
         )
 
         // 先按信封里的 format 走对应读取器；失败则记住它的错误，
@@ -1820,7 +1841,14 @@ enum FrthinkArchive {
 
     /// 校验顺序照抄原版（spec 03 §9.3）：大小 → JSON → format/version →
     /// compression → base64/gzip → 载荷。
-    private static func openEnvelope(_ data: Data, kind: Kind) throws -> Data {
+    ///
+    /// `decoded` 只给 `openAny` 用：它为了判断格式已经解过信封，这里复用，
+    /// 避免同一份文件把 base64 payload 再构造一遍。其它入口传 nil 自行解码。
+    private static func openEnvelope(
+        _ data: Data,
+        kind: Kind,
+        decoded: Envelope? = nil
+    ) throws -> Data {
         // 1. 2 ≤ n ≤ 300 MiB。
         guard data.count >= 2 else { throw FrthinkArchiveError.emptyOrDamaged }
         guard data.count <= maxBytes else {
@@ -1829,10 +1857,14 @@ enum FrthinkArchive {
 
         // 2. 整份文件当 JSON 信封读。
         let envelope: Envelope
-        do {
-            envelope = try jsonDecoder.decode(Envelope.self, from: data)
-        } catch {
-            throw FrthinkArchiveError.notAnArchive(isFull: kind.isFull)
+        if let decoded {
+            envelope = decoded
+        } else {
+            do {
+                envelope = try jsonDecoder.decode(Envelope.self, from: data)
+            } catch {
+                throw FrthinkArchiveError.notAnArchive(isFull: kind.isFull)
+            }
         }
 
         // 3. format + version。
@@ -2039,9 +2071,19 @@ enum FrthinkArchive {
     /// - 本机身份（译文 `owner`）不换；
     /// - 存档没有供应方（Android 备份只有 `credentials`）时保留本机供应方，
     ///   API Key 存在 Keychain、按供应方 id 取，换 id 等于把 Key 弄丢；
+    /// - 存档没选当前供应方（或选了本机不存在的）时保留本机选中项，再退列表第一个；
     /// - 宇宙条目按 id 合并，不删本机条目；
-    /// - 外观类本机偏好（主题、正文字号、动效、触感）保留本机值。
-    static func mergeSettings(_ imported: AppSettings, into local: AppSettings) -> AppSettings {
+    /// - 外观类本机偏好（主题、正文字号、动效、触感）保留本机值；
+    /// - 存档里没有写出的字段保留本机值：Android 备份没有 iOS 的流式开关、
+    ///   上下文窗口、累计用量等键，解出来是出厂默认值，整份替换会把这些设置重置。
+    ///
+    /// `archivedKeys` 是存档 `settings` 对象里实际出现的键；传空集合时按「什么都没写」
+    /// 处理，即只覆盖供应方/宇宙条目，其余保留本机——宁可少覆盖，也不写坏设置。
+    static func mergeSettings(
+        _ imported: AppSettings,
+        into local: AppSettings,
+        archivedKeys: Set<String> = []
+    ) -> AppSettings {
         var result = imported
         result.ownerID = local.ownerID
         if result.providers.isEmpty {
@@ -2064,6 +2106,75 @@ enum FrthinkArchive {
         result.bodyFontSize = local.bodyFontSize
         result.limitAnimationFrameRate = local.limitAnimationFrameRate
         result.hapticsEnabled = local.hapticsEnabled
+
+        // 未映射 / 缺键的字段：Android 备份没有对应键，解出来是出厂默认值。
+        func archived(_ names: String...) -> Bool {
+            names.contains { archivedKeys.contains($0) }
+        }
+        if !archived("streamByDefault", "streamingResponses") {
+            result.streamByDefault = local.streamByDefault
+        }
+        if !archived("corpusEnabled", "corpusLibrary") {
+            result.corpusEnabled = local.corpusEnabled
+        }
+        if !archived("corpusLibraries", "corpusLibrary") {
+            result.corpusLibraries = local.corpusLibraries
+        }
+        if !archived("enabledUniverseEntryIDs") {
+            result.enabledUniverseEntryIDs = local.enabledUniverseEntryIDs
+        }
+        if !archived("defaultTemperature") {
+            result.defaultTemperature = local.defaultTemperature
+        }
+        if !archived("defaultMaxTokens") {
+            result.defaultMaxTokens = local.defaultMaxTokens
+        }
+        if !archived("contextWindowTokens") {
+            result.contextWindowTokens = local.contextWindowTokens
+        }
+        if !archived("inputBudgetTokens") {
+            result.inputBudgetTokens = local.inputBudgetTokens
+        }
+        if !archived("reservedOutputTokens", "outputBudgetTokens") {
+            result.reservedOutputTokens = local.reservedOutputTokens
+        }
+        if !archived("tokenUsageTotal") {
+            result.tokenUsageTotal = local.tokenUsageTotal
+        }
+        if !archived("translationProviderID") {
+            result.translationProviderID = local.translationProviderID
+        }
+        if !archived("summaryModel") {
+            result.summaryModel = local.summaryModel
+        }
+        if !archived("worldBuildInstruction") {
+            result.worldBuildInstruction = local.worldBuildInstruction
+        }
+        if !archived("plotOutlineInstruction") {
+            result.plotOutlineInstruction = local.plotOutlineInstruction
+        }
+        if !archived("imitationInstruction") {
+            result.imitationInstruction = local.imitationInstruction
+        }
+        if !archived("autoConversationSummary") {
+            result.autoConversationSummary = local.autoConversationSummary
+        }
+        if !archived("conversationSummaryThresholdPercent") {
+            result.conversationSummaryThresholdPercent =
+                local.conversationSummaryThresholdPercent
+        }
+        if !archived("excludeAssistantChatHistory") {
+            result.excludeAssistantChatHistory = local.excludeAssistantChatHistory
+        }
+        if !archived("globalPreset") {
+            result.globalPreset = local.globalPreset
+        }
+        if !archived("aiFlavorRules") {
+            result.aiFlavorRules = local.aiFlavorRules
+        }
+        if !archived("skills") {
+            result.skills = local.skills
+        }
         return result
     }
 

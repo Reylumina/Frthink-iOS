@@ -209,15 +209,13 @@ final class ArchiveImportController {
         runConfirmTask { controller in
             try await controller.restore(backup.projects)
             controller.stage = .mergingSettings
-            var merged = FrthinkArchive.mergeSettings(
+            // 只覆盖存档里明确写出的设置键；供应方、本机 Key 与外观偏好由
+            // mergeSettings 保留（Android 备份不含 Key，也没有 iOS 独有字段）。
+            let merged = FrthinkArchive.mergeSettings(
                 backup.settings,
-                into: controller.store.settings
+                into: controller.store.settings,
+                archivedKeys: backup.settingsKeyNames
             )
-            // 全量恢复保留本机密钥与供应方（存档永远不含 Key）。
-            merged.ownerID = controller.store.settings.ownerID
-            if merged.providers.isEmpty {
-                merged.providers = controller.store.settings.providers
-            }
             controller.store.settings = merged
             controller.mergeUniverseEntries(backup.projects)
             controller.store.saveSettings()

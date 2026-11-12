@@ -60,14 +60,25 @@ enum WorldMaterialWorkflow {
         }
 
         let context = try WorldRequestContext.make(store: store)
+        // 预算推不出来（模型窗口比输出预留还小）时不拦抽取：本轮正文才是要抽取的
+        // 对象，P53 只是只读基线，退化成不带已有事件即可。
+        let budget = try? PromptBudget.make(
+            settings: store.settings,
+            model: context.provider.resolvedModel
+        )
         var added = 0
         var updated = 0
         var consumed = 0
         for chunk in chunks {
             try Task.checkCancellation()
             let messages = PromptComposer.eventMessages(
-                existingEvents: session.payload.world.events,
-                digest: chunk
+                // P53 带全部已有事件会随段数线性增长；按输入预算只保留最近的卡。
+                existingEvents: Self.promptEvents(
+                    session.payload.world.events,
+                    budget: Self.eventBaselineBudget(budget: budget, digest: chunk)
+                ),
+                digest: chunk,
+                incremental: !session.payload.world.events.isEmpty
             )
             let raw: String
             do {
@@ -78,6 +89,8 @@ enum WorldMaterialWorkflow {
                     message: "事件卡抽取请求失败：\(error.localizedDescription)"
                 )
             }
+            // 取消/切书后不再写这一段的结果。
+            try Task.checkCancellation()
             let events: [EventCard]
             do {
                 events = try WorldJSON.parseEvents(raw)
@@ -163,6 +176,8 @@ enum WorldMaterialWorkflow {
                 )
             }
             consumed += (chunk as NSString).length
+            // 取消/切书后不再写这一段的结果。
+            try Task.checkCancellation()
             let note = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !note.isEmpty, !WorldMerge.isNoAdditions(note) {
                 notes.append(note)
@@ -203,6 +218,7 @@ enum WorldMaterialWorkflow {
                 )
             }
         }
+        try Task.checkCancellation()
         let incoming = mergedNote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !incoming.isEmpty, !WorldMerge.isNoAdditions(incoming) else {
             session.payload.world.materialSourceProgress[key] = progress
@@ -229,6 +245,7 @@ enum WorldMaterialWorkflow {
                 message: "仿写模板请求失败：\(error.localizedDescription)"
             )
         }
+        try Task.checkCancellation()
         let templateText = templateRaw.trimmingCharacters(in: .whitespacesAndNewlines)
         var templateAfter = templateBefore
         if !templateText.isEmpty, !WorldMerge.isNoAdditions(templateText) {
@@ -252,7 +269,12 @@ enum WorldMaterialWorkflow {
     // MARK: - 公共
 
     /// 素材归纳从上次偏移继续；前缀哈希对不上说明正文改过，从头再来。
-    private static func materialStart(
+    ///
+    /// 存档里的 `promptHash` 只写不读：跨端哈希算法与拼接口径都没有验证，
+    /// 拿它判定「提示词变了」会让导入的 APK 书在第一次点击时把整本重新归纳
+    /// （最多 256 段 × 3000 token）。收益只有应用升级改了 P40/P41 这一种情况，
+    /// 不值得冒这笔成本；确认 APK 的算法后再补。
+    static func materialStart(
         _ manuscript: String,
         key: String,
         world: WorldBook
@@ -263,6 +285,39 @@ enum WorldMaterialWorkflow {
         guard offset > 0, !progress.prefixHash.isEmpty else { return offset }
         let prefix = ns.substring(to: offset)
         return ContentHash.of(prefix) == progress.prefixHash ? offset : 0
+    }
+
+    /// P53「已有剧情梗概（只读）」能占多少输入 token。
+    ///
+    /// 输入预算里先扣掉本段正文与系统侧指令，剩下的才是已有事件的量；
+    /// 留 1024 token 余量给块标题和估算误差。预算推不出来时按 0 处理
+    /// （不带已有事件，仍按增量契约发请求）。
+    static func eventBaselineBudget(budget: PromptBudget?, digest: String) -> Int {
+        guard let budget else { return 0 }
+        let digestTokens = TokenEstimator.estimate(digest)
+        let instructionTokens = TokenEstimator.estimate(
+            PromptLibrary.plotIncrementalInstruction
+                + PromptLibrary.eventContractIncremental
+        )
+        return max(0, budget.effectiveInputBudget - digestTokens - instructionTokens - 1_024)
+    }
+
+    /// 按预算裁剪进 P53 的已有事件。
+    ///
+    /// 每段请求都带全部已有事件，事件会随段数线性增长，大书后段能把上下文顶满。
+    /// 事件卡按追加顺序保存，越靠后越新：从最新往回装，装不下就不带；
+    /// 一张都装不下时返回空数组，调用方仍按增量契约发请求（`incremental` 单独传）。
+    static func promptEvents(_ events: [EventCard], budget: Int) -> [EventCard] {
+        guard budget > 0, !events.isEmpty else { return [] }
+        var kept: [EventCard] = []
+        var used = 0
+        for event in events.reversed() {
+            let cost = TokenEstimator.estimate(PromptComposer.renderEvents([event]))
+            if used + cost > budget { break }
+            kept.append(event)
+            used += cost
+        }
+        return Array(kept.reversed())
     }
 
     private static func materialProgress(

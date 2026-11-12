@@ -124,9 +124,18 @@ struct FileStore {
         do {
             _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
         } catch {
-            let backup = parent.appendingPathComponent(
-                ".\(projectID).\(UUID().uuidString).bak",
-                isDirectory: true
+            // 备份放 staging/ 而不是 projects/：projects/ 下任何带 project.json 的
+            // 目录都会被 `loadProjects()` 当成一本书，`.bak` 删除失败时书架会出现
+            // 同 id 的重复项。staging/ 不参与书架扫描。
+            let backup = root
+                .appendingPathComponent("staging", isDirectory: true)
+                .appendingPathComponent(
+                    ".\(projectID).\(UUID().uuidString).bak",
+                    isDirectory: true
+                )
+            try FileManager.default.createDirectory(
+                at: backup.deletingLastPathComponent(),
+                withIntermediateDirectories: true
             )
             try FileManager.default.moveItem(at: destination, to: backup)
             do {
@@ -172,7 +181,9 @@ struct FileStore {
             return []
         }
         var out: [Project] = []
-        for id in ids {
+        // 跳过点开头的条目：`commitStagedProject` 的回退备份目录里也有
+        // project.json，不跳过会在书架里冒出同 id 的重复书。
+        for id in ids where !id.hasPrefix(".") {
             let url = file("project.json", in: id)
             guard let data = try? Data(contentsOf: url),
                   let p = try? decoder.decode(Project.self, from: data)
@@ -563,9 +574,36 @@ struct FileStore {
     func loadSettings() -> AppSettings {
         let url = root.appendingPathComponent("settings.json")
         guard let data = try? Data(contentsOf: url),
-              let s = try? decoder.decode(AppSettings.self, from: data)
+              let decoded = try? decoder.decode(AppSettings.self, from: data)
         else { return AppSettings() }
-        return s
+        // `providers` 在 AppSettings 里是整组解码：只要一条坏掉（字段类型变化、
+        // 手工改档），整份设置仍能解，但供应方会变成空数组，下一次保存又把空列表
+        // 写回。读本机设置时逐条补解，至少保住能解的那几条；全坏才补回出厂供应方，
+        // ownerID 与其它设置保持原样（换 ownerID 会让译文归属对不上）。
+        guard decoded.providers.isEmpty else { return decoded }
+        let rawProviders = Self.providerObjects(in: data)
+        guard !rawProviders.isEmpty else { return decoded }
+        let recovered = rawProviders.compactMap { object -> ProviderSetting? in
+            guard let item = try? JSONSerialization.data(withJSONObject: object) else {
+                return nil
+            }
+            return try? decoder.decode(ProviderSetting.self, from: item)
+        }
+        var settings = decoded
+        settings.providers = recovered.isEmpty ? AppSettings().providers : recovered
+        if !settings.providers.contains(where: { $0.id == settings.activeProviderID }) {
+            settings.activeProviderID = settings.providers.first?.id ?? ""
+        }
+        return settings
+    }
+
+    /// `settings.json` 里 `providers` 数组的原始元素；结构不对时返回空。
+    private static func providerObjects(in data: Data) -> [[String: Any]] {
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let root = json as? [String: Any],
+              let raw = root["providers"] as? [Any]
+        else { return [] }
+        return raw.compactMap { $0 as? [String: Any] }
     }
 
     func saveSettings(_ settings: AppSettings) throws {

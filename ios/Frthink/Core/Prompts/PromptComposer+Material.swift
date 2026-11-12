@@ -139,9 +139,13 @@ extension PromptComposer {
     static func eventMessages(
         existingEvents: [EventCard],
         digest: String,
-        instruction: String? = nil
+        instruction: String? = nil,
+        incremental: Bool? = nil
     ) -> [LLMMessage] {
-        let incremental = !existingEvents.isEmpty
+        // 已有事件可能因为输入预算被裁掉，但契约仍要走增量版（P49/P51）：
+        // 本轮正文不是全书开头，模型不该按「初次归纳」重写已有事件。
+        // 调用方不传时按「有没有事件」推断。
+        let usesIncremental = incremental ?? !existingEvents.isEmpty
         let taskKey = "task:world-plot-outline:" + shortHash(digest)
 
         let systemBlocks: [PromptBlock] = [
@@ -149,7 +153,7 @@ extension PromptComposer {
                 key: taskKey,
                 category: .agentPrompt,
                 title: "",
-                body: instruction ?? (incremental
+                body: instruction ?? (usesIncremental
                     ? PromptLibrary.plotIncrementalInstruction
                     : PromptLibrary.plotInitialInstruction),
                 locked: true
@@ -159,7 +163,7 @@ extension PromptComposer {
                 key: "",
                 category: .agentPrompt,
                 title: "",
-                body: incremental
+                body: usesIncremental
                     ? PromptLibrary.eventContractIncremental
                     : PromptLibrary.eventContractInitial
             ),
@@ -175,7 +179,7 @@ extension PromptComposer {
             ),
         ]
         // P53 · task:existing-plot-outline:<哈希前12> · 已有剧情梗概（只读）
-        if incremental {
+        if usesIncremental {
             userBlocks.append(PromptBlock(
                 key: "task:existing-plot-outline:" + shortHash(digest),
                 category: .worldbook,

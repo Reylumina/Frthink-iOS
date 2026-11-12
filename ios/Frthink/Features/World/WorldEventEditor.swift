@@ -56,6 +56,9 @@ struct WorldEventEditor: View {
                 commitDraft()
                 dismiss()
             }
+            // 同名事件卡不能保存：合并/抽取都按 title 认事件，两张同名卡里
+            // 只有第一张会被继续补充，另一张从此是孤儿。
+            .disabled(hasDuplicateTitle)
         }
     }
 
@@ -122,7 +125,8 @@ struct WorldEventEditor: View {
     @ViewBuilder
     private var duplicateTitleWarning: some View {
         if hasDuplicateTitle {
-            Text("已有同名事件卡")
+            // APK 保存侧原文（`str:17316`）：同名事件卡不允许保存。
+            Text("事件名称重复，请先整理事件卡")
                 .font(Font.caption)
                 .foregroundStyle(.orange)
         }
@@ -139,11 +143,27 @@ struct WorldEventEditor: View {
     }
 
     private var hasDuplicateTitle: Bool {
-        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return false }
-        return session.payload.world.events.contains {
+        Self.conflicts(
+            title: draft.title,
+            in: session.payload.world.events,
+            excluding: eventID
+        )
+    }
+
+    /// 事件卡标题唯一性：合并与抽取都按 title 认事件，同名卡只能有一张。
+    ///
+    /// 保存侧校验（APK `str:17316`「事件名称重复，请先整理事件卡」）。空标题不拦：
+    /// 新建卡还没填标题时不该连「完成」都按不下去。
+    static func conflicts(
+        title: String,
+        in events: [EventCard],
+        excluding eventID: String
+    ) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return events.contains {
             $0.id != eventID
-                && $0.title.trimmingCharacters(in: .whitespacesAndNewlines) == title
+                && $0.title.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed
         }
     }
 
@@ -152,6 +172,9 @@ struct WorldEventEditor: View {
             $0.id == eventID
         }) else { return }
         guard draft != session.payload.world.events[index] else { return }
+        // 标题与其它卡冲突时整份草稿都不写：保存按钮已经禁用并给了行内原因，
+        // 滑走页面也按放弃处理，不让同名卡进库。
+        guard !hasDuplicateTitle else { return }
         var event = draft
         event.updatedAt = Date()
         session.payload.world.events[index] = event

@@ -16,8 +16,6 @@ struct SettingsSummaryModelPage: View {
                     .autocorrectionDisabled()
             } header: {
                 AppSectionHeader(title: "摘要模型")
-            } footer: {
-                Text("留空跟随当前AI服务商模型；只影响自动对话摘要和长期规则更新。")
             }
 
             Section {
@@ -28,6 +26,7 @@ struct SettingsSummaryModelPage: View {
                 .disabled(store.settings.summaryModel.isEmpty)
             }
         }
+        .settingsFormColumn()
         .navigationTitle("摘要模型")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model = store.settings.summaryModel }

@@ -133,7 +133,7 @@ enum WorldWorkflow {
                 completed: session.payload.world.completedAnalysisSegments,
                 total: allSegments.count
             ), !session.payload.world.analysisMergedCards.isEmpty {
-                let finalized = await finalizeAnalysis(session: session, context: context)
+                let finalized = try await finalizeAnalysis(session: session, context: context)
                 return RefreshOutcome(
                     addedCharacters: finalized.added,
                     updatedCharacters: finalized.updated,
@@ -186,6 +186,9 @@ enum WorldWorkflow {
                 if error.isLLMCancellation { throw CancellationError() }
                 throw WorldRunError(message: "世界刷新请求失败：\(error.localizedDescription)")
             }
+            // 请求期间用户可能已经停止刷新或切书：先确认没被取消，再改会话，
+            // 否则已驱逐的旧会话还会把这一段写回同一份 payload.json。
+            try Task.checkCancellation()
 
             let payload: WorldJSON.WorldRefreshPayload
             do {
@@ -211,7 +214,12 @@ enum WorldWorkflow {
             }
             session.payload.world.refreshedUpTo =
                 session.payload.world.completedAnalysisSegments
-                    .reduce(0) { $0 + (allSegments[$1].text.count) }
+                    .reduce(0) { sum, done in
+                        // 存档里的段序号可能越界（旧书/损坏 payload），越界就跳过，
+                        // 不能让一个坏索引把整轮刷新崩掉。
+                        guard allSegments.indices.contains(done) else { return sum }
+                        return sum + allSegments[done].text.unicodeScalars.count
+                    }
             session.payload.world.lastRefreshedAt = Date()
             session.scheduleSave()
         }
@@ -221,7 +229,7 @@ enum WorldWorkflow {
             completed: session.payload.world.completedAnalysisSegments,
             total: allSegments.count
         ) {
-            let finalized = await finalizeAnalysis(session: session, context: context)
+            let finalized = try await finalizeAnalysis(session: session, context: context)
             addedCharacters = finalized.added
             updatedCharacters = finalized.updated
             dedupeNote = finalized.note
@@ -259,6 +267,9 @@ enum WorldWorkflow {
         session.payload.world.analysisMergedCards = []
         session.payload.world.analysisWorldRefreshComplete = false
         session.payload.world.refreshedUpTo = 0
+        // 概览按码点数判断「大书模式」；正文改过还留着旧值，状态行会按
+        // 上一版的字数显示进度。分段路径本身不用这个字段。
+        session.payload.world.analysisSourceCodePointCount = 0
     }
 
     /// 大书模式：一次只分析上下文放得下的前缀，落盘后等下一次点击继续。
@@ -336,8 +347,11 @@ enum WorldWorkflow {
         do {
             raw = try await context.complete(messages, failOnLength: true)
         } catch {
+            if error.isLLMCancellation { throw CancellationError() }
             throw WorldRunError(message: "世界刷新请求失败：\(error.localizedDescription)")
         }
+        // 与分段路径一致：取消后不再往会话里写这一段的结果。
+        try Task.checkCancellation()
         let payload: WorldJSON.WorldRefreshPayload
         do {
             payload = try WorldJSON.parseWorldRefresh(raw)
@@ -351,7 +365,7 @@ enum WorldWorkflow {
         if !payload.characters.isEmpty {
             session.payload.world.analysisMergedCards.append(contentsOf: payload.characters)
         }
-        let committed = await commitCandidates(session: session, context: context)
+        let committed = try await commitCandidates(session: session, context: context)
 
         let endCodePoint = min(consumed + prefix.unicodeScalars.count, totalCodePoints)
         let segment = CharacterAnalysisSegment(
@@ -383,14 +397,16 @@ enum WorldWorkflow {
     }
 
     /// 把候选去重后并入人物卡。分段模式等全部段完成再调用，大书模式每前缀调用一次。
+    ///
+    /// 候选只在写库成功后才清空：去重请求被取消或失败时，下一轮还要靠这份候选补写，
+    /// 先清会让「全部段已完成但一张卡都没有」变成永久状态。
     private static func commitCandidates(
         session: ProjectSession,
         context: WorldRequestContext
-    ) async -> (added: Int, updated: Int, note: String?) {
+    ) async throws -> (added: Int, updated: Int, note: String?) {
         let candidates = session.payload.world.analysisMergedCards
-        session.payload.world.analysisMergedCards = []
         guard !candidates.isEmpty else { return (0, 0, nil) }
-        let deduped = await WorldDedupe.dedupe(
+        let deduped = try await WorldDedupe.dedupe(
             candidates: candidates,
             existing: session.payload.world.characters,
             client: context.client,
@@ -401,6 +417,7 @@ enum WorldWorkflow {
             incoming: deduped.cards
         )
         session.payload.world.characters = merged.cards
+        session.payload.world.analysisMergedCards = []
         return (merged.added, merged.updated, deduped.outcome.note)
     }
 
@@ -408,8 +425,8 @@ enum WorldWorkflow {
     private static func finalizeAnalysis(
         session: ProjectSession,
         context: WorldRequestContext
-    ) async -> (added: Int, updated: Int, note: String?) {
-        let result = await commitCandidates(session: session, context: context)
+    ) async throws -> (added: Int, updated: Int, note: String?) {
+        let result = try await commitCandidates(session: session, context: context)
         session.payload.world.analysisWorldRefreshComplete = true
         session.scheduleSave()
         return result

@@ -41,6 +41,45 @@ enum SelfCheck {
         if !condition { throw Failure(message: message()) }
     }
 
+    /// 异步自检的结果。只在主线程读写，`checkAsync` 泵 RunLoop 等它落值。
+    private static var asyncResult: Result<String, Error>?
+
+    /// 异步自检：把 body 交给 MainActor 任务后泵主线程，等它真正完成。
+    ///
+    /// `saveNowAndWait()` 要等后台写盘，写盘完成回调又回到 MainActor；同步的
+    /// `check` 里没法 await，直接阻塞主线程又会死锁。这里让出主线程（RunLoop
+    /// 会处理 MainActor 上的任务），最多等 15 秒。
+    private static func checkAsync(
+        _ name: String,
+        _ body: @escaping @MainActor () async throws -> String
+    ) {
+        asyncResult = nil
+        Task { @MainActor in
+            do {
+                asyncResult = .success(try await body())
+            } catch {
+                asyncResult = .failure(error)
+            }
+        }
+        let deadline = Date().addingTimeInterval(15)
+        while asyncResult == nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        guard let result = asyncResult else {
+            failures += 1
+            lines.append("FAIL  \(name)  等待主线程回调超时")
+            return
+        }
+        switch result {
+        case .success(let detail):
+            lines.append("PASS  \(name)  \(detail)")
+        case .failure(let error):
+            failures += 1
+            let message = (error as? Failure)?.message ?? error.localizedDescription
+            lines.append("FAIL  \(name)  \(message)")
+        }
+    }
+
     @MainActor
     static func run() -> Int32 {
         #if DEBUG
@@ -612,6 +651,260 @@ enum SelfCheck {
                 }
             }
             return "书项目存档不会被全量入口接受"
+        }
+
+        // 全量恢复：Android 备份没有 activeProviderID，导入后必须保留本机选中的
+        // 供应方；退化成列表第一个会把用户切到可能没填 Key 的那条。
+        check("archive.fullRestoreKeepsActiveProvider") {
+            let deepseek = ProviderSetting(kind: .deepseek)
+            let openRouter = ProviderSetting(kind: .openRouter)
+            var local = AppSettings(providers: [deepseek, openRouter])
+            local.activeProviderID = openRouter.id
+            // Android 形状：没有 providers、没有 activeProviderID。
+            let imported = AppSettings(providers: [])
+            let merged = FrthinkArchive.mergeSettings(imported, into: local)
+            try expect(
+                merged.providers.map(\.id) == [deepseek.id, openRouter.id],
+                "导入后供应方列表变了"
+            )
+            try expect(
+                merged.activeProviderID == openRouter.id,
+                "当前供应方被换成列表第一个：\(merged.activeProviderID)"
+            )
+
+            // 存档带了供应方、但选中的那条不存在：回落到本机当前项（它还在列表里）。
+            var foreign = AppSettings(providers: [deepseek, openRouter])
+            foreign.activeProviderID = "not-in-any-list"
+            let kept = FrthinkArchive.mergeSettings(foreign, into: local)
+            try expect(
+                kept.activeProviderID == openRouter.id,
+                "存档选中项失效时没有回落到本机当前供应方"
+            )
+            return "active provider 保留本机选择 ok"
+        }
+
+        // Android 备份缺 iOS 独有设置键：解出来是出厂默认值，合并时不能拿它
+        // 覆盖本机的流式开关、上下文窗口、累计用量等（真实备份 39 个键里没有这些）。
+        check("archive.mergeSettingsKeepsUnmapped") {
+            var local = AppSettings(providers: [ProviderSetting(kind: .deepseek)])
+            local.streamByDefault = false
+            local.contextWindowTokens = 128_000
+            local.tokenUsageTotal = 123_456
+            local.summaryModel = "local-summary"
+            local.globalPreset = "LOCAL_PRESET"
+            local.defaultTemperature = 0.4
+            local.enabledUniverseEntryIDs = ["entry-1"]
+
+            var imported = AppSettings(providers: [])
+            imported.streamByDefault = true
+            imported.contextWindowTokens = 0
+            imported.tokenUsageTotal = 0
+            imported.summaryModel = ""
+            imported.globalPreset = "ARCHIVE_PRESET"
+
+            // Android 备份实际只写了 globalPreset 这类原版键。
+            let merged = FrthinkArchive.mergeSettings(
+                imported,
+                into: local,
+                archivedKeys: ["globalPreset"]
+            )
+            try expect(merged.globalPreset == "ARCHIVE_PRESET", "存档里有的字段没有导入")
+            try expect(!merged.streamByDefault, "流式开关被出厂默认值覆盖")
+            try expect(merged.contextWindowTokens == 128_000, "上下文窗口被清零")
+            try expect(merged.tokenUsageTotal == 123_456, "累计用量被清零")
+            try expect(merged.summaryModel == "local-summary", "摘要模型被空串覆盖")
+            try expect(merged.defaultTemperature == 0.4, "默认温度被覆盖")
+            try expect(
+                merged.enabledUniverseEntryIDs == ["entry-1"],
+                "宇宙启用集合被清空"
+            )
+            return "缺键设置保留本机值 ok"
+        }
+
+        // 真实 Android 备份要能给出「实际出现的设置键」，否则合并时的缺键保留
+        // 永远不生效；这条同时用真实数据验证缺键不会被 iOS 出厂值覆盖。
+        check("archive.androidSettingsKeyNames") {
+            guard let url = Bundle.main.url(
+                forResource: "fixture-backup",
+                withExtension: "frthink"
+            ) else {
+                return "skipped (no fixture)"
+            }
+            let data = try Data(contentsOf: url)
+            let archive = try FrthinkArchive.openAny(data)
+            guard case .full(let backup) = archive else {
+                throw Failure(message: "真实备份应识别为全量备份")
+            }
+            try expect(
+                backup.settingsKeyNames.contains("globalPreset"),
+                "没有记录到 globalPreset：\(backup.settingsKeyNames.sorted())"
+            )
+            try expect(
+                backup.settingsKeyNames.contains("skills"),
+                "没有记录到 skills"
+            )
+            try expect(
+                backup.settingsKeyNames.contains("corpusLibrary"),
+                "没有记录到顶层 corpusLibrary"
+            )
+            try expect(
+                !backup.settingsKeyNames.contains("streamByDefault"),
+                "Android 备份不应出现 iOS 独有键"
+            )
+
+            var local = AppSettings(providers: [ProviderSetting(kind: .deepseek)])
+            local.streamByDefault = false
+            local.contextWindowTokens = 256_000
+            let merged = FrthinkArchive.mergeSettings(
+                backup.settings,
+                into: local,
+                archivedKeys: backup.settingsKeyNames
+            )
+            try expect(!merged.streamByDefault, "真实备份导入把流式开关重置了")
+            try expect(
+                merged.contextWindowTokens == 256_000,
+                "真实备份导入把上下文窗口清零了"
+            )
+            return "真实备份设置键 \(backup.settingsKeyNames.count) 个"
+        }
+
+        // 本机 settings.json 里一条供应方坏掉时，不能把整组供应方解成空数组：
+        // 启动后没有供应方，下一次保存还会把空列表写回去。
+        check("archive.loadSettingsRecoversProviders") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-settings-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let good = ProviderSetting(kind: .deepseek)
+            let broken = ProviderSetting(kind: .openRouter)
+            let settingsURL = root.appendingPathComponent("settings.json")
+            let encoded = try FrthinkArchive.jsonEncoder.encode(
+                AppSettings(providers: [broken, good])
+            )
+            let json = try JSONSerialization.jsonObject(with: encoded)
+            guard var object = json as? [String: Any],
+                  var providers = object["providers"] as? [[String: Any]]
+            else { throw Failure(message: "设置 JSON 结构不对") }
+
+            // 一条坏（类型不对）+ 一条好的：整组解码会失败，逐条补解应保住好的。
+            providers[0]["temperature"] = "hot"
+            object["providers"] = providers
+            try JSONSerialization.data(withJSONObject: object)
+                .write(to: settingsURL, options: .atomic)
+            let recovered = files.loadSettings()
+            try expect(
+                recovered.providers.map(\.id) == [good.id],
+                "坏条目应只丢自己，实际：\(recovered.providers.map(\.id))"
+            )
+            try expect(recovered.activeProviderID == good.id, "当前供应方没有回落到能解的那条")
+
+            // 全坏：补回出厂供应方，但 ownerID 与其它设置不能被重置。
+            providers[1]["temperature"] = "hot"
+            object["providers"] = providers
+            try JSONSerialization.data(withJSONObject: object)
+                .write(to: settingsURL, options: .atomic)
+            let fallback = files.loadSettings()
+            try expect(!fallback.providers.isEmpty, "全坏时应补回出厂供应方")
+            try expect(fallback.ownerID == recovered.ownerID, "ownerID 被重置，译文归属会对不上")
+            return "单条坏供应方不影响其余条目 ok"
+        }
+
+        // 导出前必须查 payload 状态：损坏/缺页的书不能导出成「成功但没有对话、
+        // 世界或正文」的备份，否则拿它恢复会把本机数据真的弄丢。
+        check("archive.exportRejectsCorruptPayload") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-export-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+
+            let corrupt = Project(id: "corrupt-export", title: "坏 payload")
+            try files.saveProject(corrupt)
+            try files.saveBody("正文还在", chapters: [], projectID: corrupt.id)
+            let payloadURL = files.projectDirectory(corrupt.id)
+                .appendingPathComponent("payload.json")
+            try Data("不是 JSON".utf8).write(to: payloadURL, options: .atomic)
+            do {
+                _ = try files.loadVerifiedFullPayload(corrupt.id)
+                throw Failure(message: "payload 损坏时导出仍然成功")
+            } catch let error as FileStore.BodyLoadError {
+                guard case .payloadUnavailable = error else {
+                    throw Failure(message: "错误类型不对：\(error)")
+                }
+            }
+
+            let missing = Project(id: "missing-page", title: "缺页")
+            try files.saveProject(missing)
+            try files.savePayload(ProjectPayload(), projectID: missing.id)
+            try files.saveBody(
+                String(repeating: "字", count: FileStore.bodyPageSize + 100),
+                chapters: [],
+                projectID: missing.id
+            )
+            try FileManager.default.removeItem(
+                at: files.projectDirectory(missing.id)
+                    .appendingPathComponent("body.pages", isDirectory: true)
+                    .appendingPathComponent("0001.bin")
+            )
+            do {
+                _ = try files.loadVerifiedFullPayload(missing.id)
+                throw Failure(message: "缺页时导出仍然成功")
+            } catch let error as FileStore.BodyLoadError {
+                guard case .missingPage(let index) = error, index == 1 else {
+                    throw Failure(message: "错误类型不对：\(error)")
+                }
+            }
+            return "损坏 payload / 缺页导出被拒绝 ok"
+        }
+
+        // 覆盖导入后，已缓存会话必须换成磁盘上的新内容并复位只读，否则旧会话
+        // 会把旧稿写回去，阅读页也还拿着旧的分页缓存。
+        check("archive.overwriteRefreshesSession") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-overwrite-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let project = Project(id: "overwrite-session", title: "覆盖会话")
+            try files.saveProject(project)
+            try files.savePayload(ProjectPayload(manuscript: "旧稿"), projectID: project.id)
+            try files.saveBody("旧稿", chapters: [], projectID: project.id)
+
+            // 模拟「损坏 payload 只读打开」：内存态为空且所有保存入口被拦住。
+            let session = ProjectSession(
+                project: project,
+                payload: ProjectPayload(),
+                source: "",
+                translations: [],
+                store: files,
+                readOnly: true
+            )
+            let newText = String(repeating: "新稿段落\n\n", count: 40)
+            let replacement = Project(id: project.id, title: project.title)
+            _ = try FrthinkArchive.restore(
+                [FrthinkArchive.ProjectBackup(
+                    project: replacement,
+                    payload: ProjectPayload(manuscript: newText),
+                    sourceText: "新原文",
+                    translations: [],
+                    universeEntries: []
+                )],
+                into: files,
+                ownerID: "self"
+            )
+            let revisionBefore = session.manuscriptRevision
+            session.replaceLoadedState(project: replacement, fileStore: files)
+            try expect(!session.isReadOnly, "覆盖导入后会话仍是只读")
+            try expect(
+                session.manuscriptRevision > revisionBefore,
+                "覆盖后没有递增 manuscriptRevision，阅读页不会重建分页"
+            )
+            try expect(
+                session.bodyPageCount > 0 && !(session.bodyBlocks ?? []).isEmpty,
+                "分页缓存没有换成新稿的块索引"
+            )
+            try expect(session.sourceText == "新原文", "原文没有换成新稿")
+            session.scheduleSave()
+            try expect(session.isDirty, "覆盖后保存入口仍被拦住")
+            return "覆盖导入复位会话与分页缓存 ok"
         }
 
         // 分段要带正确的码点范围：P27/P28/P29 靠它告诉模型本段在全文的位置
@@ -1380,6 +1673,252 @@ enum SelfCheck {
             return "大书阈值 / 前缀切分 ok"
         }
 
+        // P11/P53 的块形状是「一行一个字段：值」。合并按换行追加新事实，
+        // 字段值里的换行必须在渲染时压成「；」，否则会多出无标签续行。
+        check("world.fieldOneLine") {
+            // 合并真实产出的形状：`appended` 用换行接新事实。
+            let mergedPersonality = WorldMerge.appended("冷静。", "克制。")
+            try expect(
+                mergedPersonality.contains("\n"),
+                "前置条件不成立：合并结果应是多行"
+            )
+            let card = CharacterCard(
+                name: "林昭",
+                personality: mergedPersonality,
+                relationshipAttitudes: "对沈默：信任。\n对店主：警惕。",
+                customEntries: [
+                    CharacterCard.CustomEntry(title: "口癖", body: "嗯。\n哦。")
+                ]
+            )
+            let block = PromptLibrary.characterBlock(for: card)
+            for line in block.split(separator: "\n", omittingEmptySubsequences: false) {
+                guard !line.hasPrefix("# ") else { continue }
+                try expect(line.contains("："), "人物卡出现无标签续行：\(line)")
+            }
+            try expect(
+                block.contains("性格：冷静。；克制。"),
+                "字段内换行没有压成「；」：\(block)"
+            )
+
+            let events = PromptComposer.renderEvents([
+                EventCard(
+                    title: "雨夜来客",
+                    scene: "旧书店。\n雨声很密。",
+                    characters: ["林昭"],
+                    cause: "找书。\n顺路。",
+                    development: "进门。",
+                    consequence: "相认。"
+                )
+            ])
+            for line in events.split(separator: "\n", omittingEmptySubsequences: false) {
+                guard !line.hasPrefix("【") else { continue }
+                try expect(line.contains("："), "事件卡出现无标签续行：\(line)")
+            }
+            try expect(
+                events.contains("起因：找书。；顺路。"),
+                "事件字段换行没有压平：\(events)"
+            )
+            return "人物卡/事件卡字段单行渲染 ok"
+        }
+
+        // 说明文字里带括号时不能从那里截 JSON；围栏与空数组都要能解析。
+        check("world.jsonExtraction") {
+            let withNote = "先说明一下（[别名] 也要写全）：\n{\"characters\":[{\"name\":\"林昭\"}]}"
+            let parsed = try WorldJSON.parseWorldRefresh(withNote)
+            try expect(
+                parsed.characters.first?.name == "林昭",
+                "前置说明里的方括号截走了 JSON"
+            )
+            let fenced = "```json\n{\"characters\":[{\"name\":\"沈默\"}]}\n```"
+            try expect(
+                try WorldJSON.parseWorldRefresh(fenced).characters.first?.name == "沈默",
+                "围栏 JSON 未解析"
+            )
+            try expect(try WorldJSON.parseEvents("[]").isEmpty, "空数组应解析成没有事件")
+            return "JSON 提取 / 围栏 / 空数组 ok"
+        }
+
+        // 事件卡人物只接受数组或分隔字符串；对象/数字要按 APK 文案报错，
+        // 不能静默变成「没有人物」。
+        check("world.eventCharacters") {
+            let bad = #"{"events":[{"title":"甲","characters":[{"name":"林昭"}]}]}"#
+            do {
+                _ = try WorldJSON.parseEvents(bad)
+                throw Failure(message: "对象形态的 characters 应当报错")
+            } catch let error as WorldJSONError {
+                try expect(
+                    error.localizedDescription.contains("事件卡人物格式无效"),
+                    "报错文案不对：\(error.localizedDescription)"
+                )
+            }
+            let ok = try WorldJSON.parseEvents(
+                #"{"events":[{"title":"甲","characters":"林昭、沈默"}]}"#
+            )
+            try expect(ok.first?.characters == ["林昭", "沈默"], "分隔字符串未解析成人物")
+            return "事件卡人物格式校验 ok"
+        }
+
+        // 事件卡保存侧唯一性（APK「事件名称重复，请先整理事件卡」）。
+        check("world.eventTitleConflicts") {
+            let events = [
+                EventCard(id: "a", title: "雨夜来客"),
+                EventCard(id: "b", title: "次日清晨"),
+            ]
+            try expect(
+                WorldEventEditor.conflicts(title: " 雨夜来客 ", in: events, excluding: "b"),
+                "同名标题应被拦下"
+            )
+            try expect(
+                !WorldEventEditor.conflicts(title: "雨夜来客", in: events, excluding: "a"),
+                "改自己那张卡时不应误判冲突"
+            )
+            try expect(
+                !WorldEventEditor.conflicts(title: "   ", in: events, excluding: "b"),
+                "空标题不该拦保存"
+            )
+            return "事件卡同名拦截 ok"
+        }
+
+        // 规则编辑页：AI 在页面开着时更新同一字段，没动过草稿就换成新值，
+        // 动过就保留用户输入（否则「完成」会用旧草稿盖掉 AI 结果）。
+        check("world.ruleDraftSync") {
+            try expect(
+                WorldRuleDraftSync.decision(draft: "旧", baseline: "旧") == .adoptExternal,
+                "没动过草稿时应收下外部新值"
+            )
+            try expect(
+                WorldRuleDraftSync.decision(draft: "旧", baseline: "改过") == .keepDraft,
+                "用户改过草稿时不应被外部新值覆盖"
+            )
+            return "规则草稿同步判定 ok"
+        }
+
+        // 手动「用最近对话更新」只取未摘要的用户消息，连点两次不重复消费。
+        check("world.rulesPendingMessages") {
+            let messages = [
+                ChatMessage(id: "u1", role: .user, content: "第一条"),
+                ChatMessage(id: "a1", role: .assistant, content: "回复"),
+                ChatMessage(id: "u2", role: .user, content: "第二条"),
+                ChatMessage(id: "u3", role: .user, content: "第三条"),
+            ]
+            let pending = WorldRulesWorkflow.pendingUserMessages(
+                messages,
+                summarized: ["u1", "u2"]
+            )
+            try expect(
+                pending.map(\.id) == ["u3"],
+                "已摘要消息被重复消费：\(pending.map(\.id))"
+            )
+            return "手动更新只看未摘要消息 ok"
+        }
+
+        // 素材断点：正文前缀没变才续跑，正文改过从头归纳。
+        check("world.materialCheckpoint") {
+            let manuscript = String(repeating: "甲", count: 100)
+            let prefix = String(manuscript.prefix(40))
+            var world = WorldBook()
+            world.materialSourceProgress["imitation"] = MaterialSourceProgress(
+                processedUtf16: 40,
+                prefixHash: ContentHash.of(prefix),
+                promptHash: ContentHash.of("P40-P43")
+            )
+            try expect(
+                WorldMaterialWorkflow.materialStart(
+                    manuscript,
+                    key: "imitation",
+                    world: world
+                ) == 40,
+                "前缀没变时应从断点继续"
+            )
+            world.materialSourceProgress["imitation"] = MaterialSourceProgress(
+                processedUtf16: 40,
+                prefixHash: ContentHash.of("别的正文"),
+                promptHash: ContentHash.of("P40-P43")
+            )
+            try expect(
+                WorldMaterialWorkflow.materialStart(
+                    manuscript,
+                    key: "imitation",
+                    world: world
+                ) == 0,
+                "前缀对不上时应从头归纳"
+            )
+            return "素材断点 / 前缀哈希 ok"
+        }
+
+        // P53 的已有事件随段数线性增长；按输入预算只保留最近的卡。
+        check("world.materialBudget") {
+            let events = (0..<500).map { index in
+                EventCard(
+                    title: "事件\(index)",
+                    cause: String(repeating: "因", count: 40)
+                )
+            }
+            let all = WorldMaterialWorkflow.promptEvents(events, budget: 1_000_000)
+            try expect(all.count == events.count, "预算充足时应带全部事件：\(all.count)")
+            let trimmed = WorldMaterialWorkflow.promptEvents(events, budget: 300)
+            try expect(trimmed.count < events.count, "预算不足时没有裁剪")
+            try expect(
+                trimmed.last?.title == events.last?.title,
+                "裁剪应保留最新的事件卡"
+            )
+            try expect(
+                WorldMaterialWorkflow.promptEvents(events, budget: 0).isEmpty,
+                "预算为 0 时不应带已有事件"
+            )
+            return "\(events.count) 张 → \(trimmed.count) 张 ok"
+        }
+
+        // 已有事件被预算裁空时，契约仍要走增量版（P49/P51），不能退回初次归纳。
+        check("world.eventIncrementalContract") {
+            let messages = PromptComposer.eventMessages(
+                existingEvents: [],
+                digest: "本段正文",
+                incremental: true
+            )
+            let system = messages.first?.content ?? ""
+            try expect(
+                system.contains(PromptLibrary.eventContractIncremental),
+                "裁剪掉 P53 后退回了初次契约"
+            )
+            let user = messages.last?.content ?? ""
+            try expect(
+                !user.contains(PromptLibrary.existingPlotOutlineTitle),
+                "已有事件为空时不应生成 P53 块"
+            )
+            return "裁剪后仍走增量契约 ok"
+        }
+
+        // 去重的 canonical_name 比较要归一：模型写大小写/空格不同时不能判无效。
+        check("world.dedupeNameKeys") {
+            let keys = WorldDedupe.candidateNameKeys([
+                CharacterCard(name: "Lin Zhao", aliases: ["林昭"]),
+                CharacterCard(name: "沈默"),
+            ])
+            try expect(keys.contains("linzhao"), "大小写/空格未归一：\(keys)")
+            try expect(
+                keys.contains(WorldMerge.normalize("LIN  ZHAO")),
+                "归一名没有覆盖模型的大小写变体"
+            )
+            return "去重名称归一 ok"
+        }
+
+        // 取消归一：世界四类任务（刷新/事件/文风/规则）都按这个谓词判断
+        // 「用户点了停止」，判错会弹红色失败或把取消当完成。
+        check("world.cancellationShape") {
+            try expect(CancellationError().isLLMCancellation, "结构化取消未识别")
+            try expect(LLMError.cancelled.isLLMCancellation, "LLMError.cancelled 未识别")
+            try expect(
+                URLError(.cancelled).isLLMCancellation,
+                "URLSession 取消未识别"
+            )
+            try expect(
+                !URLError(.timedOut).isLLMCancellation,
+                "超时被当成了取消"
+            )
+            return "取消三形状归一 ok"
+        }
+
         // 19 · 正文尾部窗口保存：窗口之前的页不动，窗口页替换后能拼回全文
         check("store.windowSave") {
             let files = FileStore()
@@ -1624,6 +2163,33 @@ enum SelfCheck {
                 "小快照没有按条数封顶：\(session.payload.requestSnapshots.count)"
             )
             return "\(session.payload.requestSnapshots.count) 条快照 ok"
+        }
+
+        // 退后台/切书/导出都依赖「等写盘真正结束」：saveNowAndWait 返回后磁盘
+        // 必须已经是新内容。这条要真的 await 异步写盘，放在最后单独跑。
+        checkAsync("archive.saveNowAndWait") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-wait-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let project = Project(id: "wait-book", title: "等待写盘")
+            try files.saveProject(project)
+            try files.savePayload(ProjectPayload(), projectID: project.id)
+            let session = ProjectSession(
+                project: project,
+                payload: ProjectPayload(),
+                source: "",
+                translations: [],
+                store: files
+            )
+            session.updateManuscript("落盘标记：等写盘结束")
+            await session.saveNowAndWait()
+            let reloaded = try FileStore(root: root).loadVerifiedFullPayload(project.id)
+            try expect(
+                reloaded.manuscript == "落盘标记：等写盘结束",
+                "saveNowAndWait 返回后磁盘还是旧内容：\(reloaded.manuscript)"
+            )
+            return "saveNowAndWait 后读盘一致"
         }
 
         lines.append("=== \(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ===")

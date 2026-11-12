@@ -26,11 +26,11 @@ struct SettingsStorageSection: View {
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.footnote.weight(.semibold))
                     Text("重新计算")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
             .disabled(!measured && bytes == 0)
         } header: {
@@ -101,11 +101,11 @@ struct SettingsTokenUsageSection: View {
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.footnote.weight(.semibold))
                     Text("重新统计正文")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
         } header: {
             AppSectionHeader(title: "Token 用量")

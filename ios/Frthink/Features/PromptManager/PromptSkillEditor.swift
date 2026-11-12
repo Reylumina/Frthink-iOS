@@ -1,4 +1,7 @@
 // 技能编辑页：技能名、内容、启用开关；编辑已有技能时可以在底部删除。
+//
+// 长文编辑推入页而不进 sheet（DESIGN §5.8）。这一页只有「保存」没有「取消」，
+// 左滑返回时自动存下非空改动，删除走底部独立一节并二次确认。
 
 import SwiftUI
 
@@ -12,12 +15,8 @@ struct PromptSkillEditor: View {
     @State private var name: String
     @State private var content: String
     @State private var enabled: Bool
-    @State private var pendingAction: PendingAction?
-
-    private enum PendingAction {
-        case discard
-        case delete
-    }
+    @State private var saved = false
+    @State private var confirmingDelete = false
 
     init(
         skill: Skill,
@@ -38,111 +37,83 @@ struct PromptSkillEditor: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 有未保存的改动时禁止下滑关闭，点取消也要确认。
+    /// 有未保存的改动时返回要自动保存，交给 `onDisappear`。
     private var hasChanges: Bool {
         trimmedName != skill.name || content != skill.content || enabled != skill.enabled
-    }
-
-    private var pendingTitle: String {
-        switch pendingAction {
-        case .discard: return "放弃未保存的修改？"
-        case .delete: return deleteTitle
-        case nil: return ""
-        }
-    }
-
-    private var pendingBinding: Binding<Bool> {
-        Binding(
-            get: { pendingAction != nil },
-            set: { if !$0 { pendingAction = nil } }
-        )
     }
 
     private var deleteTitle: String {
         trimmedName.isEmpty ? "删除这个技能？" : "删除「\(trimmedName)」？"
     }
 
+    private func save() {
+        guard !trimmedName.isEmpty else { return }
+        var updated = skill
+        updated.name = trimmedName
+        updated.content = content
+        updated.enabled = enabled
+        onSave(updated)
+        saved = true
+    }
+
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    AppTextField(
-                        title: "技能名",
-                        text: $name,
-                        placeholder: "对白节奏"
-                    )
-                }
-
-                Section {
-                    AppTextEditor(
-                        text: $content,
-                        placeholder: "技能内容",
-                        minHeight: 260
-                    )
-                } header: {
-                    AppSectionHeader(title: "内容")
-                }
-
-                Section {
-                    Toggle("启用技能", isOn: $enabled)
-                }
-
-                if !isNew, onDelete != nil {
-                    Section {
-                        DestructiveActionRow(title: "删除技能") {
-                            pendingAction = .delete
-                        }
-                    }
-                }
+        Form {
+            Section {
+                AppTextField(
+                    title: "技能名",
+                    text: $name,
+                    placeholder: "对白节奏"
+                )
             }
-            .scrollContentBackground(.hidden)
-            .groupedPageBackground()
-            .keyboardDismissOnScroll()
-            .navigationTitle(isNew ? "新建技能" : "编辑技能")
-            .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(hasChanges)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        if hasChanges {
-                            pendingAction = .discard
-                        } else {
-                            dismiss()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
-                        var updated = skill
-                        updated.name = trimmedName
-                        updated.content = content
-                        updated.enabled = enabled
-                        onSave(updated)
-                        dismiss()
-                    }
-                    .disabled(trimmedName.isEmpty)
-                }
+
+            Section {
+                AppTextEditor(
+                    text: $content,
+                    placeholder: "技能内容",
+                    minHeight: 260
+                )
+            } header: {
+                AppSectionHeader(title: "内容")
             }
-            .confirmationDialog(
-                pendingTitle,
-                isPresented: pendingBinding,
-                titleVisibility: .visible
-            ) {
-                switch pendingAction {
-                case .discard:
-                    Button("放弃修改", role: .destructive) { dismiss() }
-                    Button("继续编辑", role: .cancel) {}
-                case .delete:
-                    Button("删除", role: .destructive) {
-                        onDelete?()
-                        dismiss()
+
+            Section {
+                Toggle("启用技能", isOn: $enabled)
+            }
+
+            if !isNew, onDelete != nil {
+                Section {
+                    DestructiveActionRow(title: "删除技能") {
+                        confirmingDelete = true
                     }
-                    Button("取消", role: .cancel) {}
-                case nil:
-                    Button("取消", role: .cancel) {}
                 }
             }
         }
-        .presentationDetents([.large])
+        .scrollContentBackground(.hidden)
+        .groupedPageBackground()
+        .keyboardDismissOnScroll()
+        .navigationTitle(isNew ? "新建技能" : "编辑技能")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                SheetConfirmButton(title: "保存", isEnabled: !trimmedName.isEmpty) {
+                    save()
+                    dismiss()
+                }
+            }
+        }
+        .confirmationDialog(deleteTitle, isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("删除", role: .destructive) {
+                onDelete?()
+                // 删除即结束这一页：置位避免 onDisappear 又把改动存回去。
+                saved = true
+                dismiss()
+            }
+            Button("取消", role: .cancel) {}
+        }
+        .onDisappear {
+            // 只有「保存」没有「取消」：左滑返回时存下非空改动，别静默丢。
+            guard !saved, hasChanges, !trimmedName.isEmpty else { return }
+            save()
+        }
     }
 }

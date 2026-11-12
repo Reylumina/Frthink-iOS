@@ -23,8 +23,8 @@ struct PromptBlocksPreviewSheet: View {
             .navigationTitle("提示词块预览")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
+                ToolbarItem(placement: .confirmationAction) {
+                    SheetCloseButton(title: "完成") { dismiss() }
                 }
             }
         }
@@ -43,7 +43,7 @@ struct PromptBlocksPreviewSheet: View {
     private func blockSection(_ block: PromptBlock) -> some View {
         Section {
             Text(block.rendered)
-                .font(Theme.numeric)
+                .font(Theme.reply)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -55,12 +55,12 @@ struct PromptBlocksPreviewSheet: View {
     private func blockHeader(_ block: PromptBlock) -> some View {
         HStack(spacing: Theme.Spacing.s) {
             Text(block.category.rawValue)
-                .font(Font.footnote.weight(.semibold))
+                .font(Theme.sectionTitle)
                 .foregroundStyle(.secondary)
             if block.locked {
                 Image(systemName: "lock.fill")
-                    .font(Font.caption2)
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.badge)
+                    .foregroundStyle(.secondary)
                     .accessibilityLabel("已锁定")
             }
             Spacer(minLength: 0)

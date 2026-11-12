@@ -186,6 +186,19 @@ struct WorldRulesSection: View {
     }
 }
 
+/// 规则编辑页的草稿与外部（AI 摘要）写入之间的同步判定。
+///
+/// 页面打开时 `draft == baseline`；用户改过以后两者不再相等。只有没被用户
+/// 动过的草稿才接受外部新值，否则会把用户正在写的内容顶掉。
+enum WorldRuleDraftSync: Equatable {
+    case adoptExternal
+    case keepDraft
+
+    static func decision(draft: String, baseline: String) -> Self {
+        draft == baseline ? .adoptExternal : .keepDraft
+    }
+}
+
 /// 模板与规则的整页编辑器：正文在离开或点完成时一次写回，模型动作不在这里。
 private struct WorldRuleEditorPage: View {
     @Bindable var session: ProjectSession
@@ -239,6 +252,15 @@ private struct WorldRuleEditorPage: View {
         ) {
             Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
             Button("取消", role: .cancel) {}
+        }
+        // 页面开着时 AI 可能更新了同一字段（手动入口在列表上，自动摘要在后台跑）。
+        // 用户没动过草稿就直接换成新值，避免他看到旧内容再点「完成」把新结果盖掉。
+        .onChange(of: kind.text(in: session.payload.world)) { _, newValue in
+            guard WorldRuleDraftSync.decision(draft: draft, baseline: baseline)
+                == .adoptExternal
+            else { return }
+            draft = newValue
+            baseline = newValue
         }
         .onDisappear {
             commitDraft()

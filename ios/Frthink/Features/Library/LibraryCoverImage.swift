@@ -2,6 +2,9 @@
 //
 // 书架每一行都会重绘，base64 解码不能放在 `body` 里逐帧做。这里只缓存
 // 240×320 的缩略图，容量 32 张；真实封面按屏宽缩放也够清晰。
+//
+// 尺寸和形状只在本文件定义：3:4 书封比例 + 一个 `@ScaledMetric`，
+// 继续写作、全部书稿、分支和回收站共用同一份封面语法，页面上不会出现两种画法。
 
 import SwiftUI
 import UIKit
@@ -15,6 +18,18 @@ struct LibraryCoverImage: View {
 
     @State private var image: UIImage?
 
+    /// 书封高度；宽度按 3:4 推出，随 Dynamic Type 缩放（§5.1 固定尺寸控件）。
+    @ScaledMetric(relativeTo: .body) private var height: CGFloat = 70
+
+    private var width: CGFloat {
+        height * 3 / 4
+    }
+
+    /// 封面形状：iOS 26 跟随所在行的容器同心，17–25 回落到 8pt 圆角（§3.3）。
+    private var shape: AnyShape {
+        Theme.containerShape(minimum: Theme.Radius.small)
+    }
+
     private var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? Project.untitledTitle : trimmed
@@ -22,8 +37,7 @@ struct LibraryCoverImage: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
-                .fill(placeholderColor)
+            shape.fill(placeholderColor)
 
             if let image {
                 Image(uiImage: image)
@@ -33,14 +47,19 @@ struct LibraryCoverImage: View {
                 placeholderMark
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous))
+        .frame(width: width, height: height)
+        .clipShape(shape)
         .task(id: payload) { await loadThumbnail() }
-        .accessibilityLabel("封面：\(displayTitle)")
+        // 书名就在同一行，封面属于重复信息，VoiceOver 只读行内容。
+        .accessibilityHidden(true)
     }
 
-    /// 没有封面时的书脊标记：一枚单色符号，不加描边和装饰线。
+    /// 没有封面时的书脊标记：单色 `book.pages`，不加描边、投影和装饰线。
+    ///
+    /// 不用 `book.closed` 这类旧字形；`book.pages` 是 iOS 17 起可用的新书稿符号。
     private var placeholderMark: some View {
         Image(systemName: "book.pages")
+            .symbolRenderingMode(.monochrome)
             .font(.callout.weight(.regular))
             .foregroundStyle(Color.white.opacity(0.9))
             .accessibilityHidden(true)

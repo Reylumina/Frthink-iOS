@@ -1,4 +1,7 @@
-// 书架上的书稿行：书脊 + 书名 + 简介 + 元信息，右侧只有一套「⋯」菜单。
+// 书架上的书稿行：书脊 + 书名 + 一行元数据，右侧只有一套「⋯」菜单。
+//
+// 简介不进书架：一行简介会把行撑成三行，把「最近编辑时间」挤出视线（§6）。
+// 简介在 ⋯ →「改简介」里编辑，列表只做索引。
 
 import SwiftUI
 
@@ -15,26 +18,28 @@ struct LibraryContinueRow: View {
                     title: project.title,
                     seed: project.id
                 )
-                .frame(width: 56, height: 74)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(project.shelfTitle)
-                        .font(Font.headline)
+                        .font(Theme.labelEmphasis)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+
                     Text(LibraryFormat.updatedText(project.updatedAt))
-                        .font(Font.caption)
+                        .font(Theme.metadata.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: Theme.Spacing.s)
 
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(Font.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
+            .frame(minHeight: Theme.Layout.hitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -61,74 +66,31 @@ struct LibraryProjectRow: View {
                     title: project.title,
                     seed: project.id
                 )
-                .frame(width: 52, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: Theme.Spacing.xs) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    HStack(spacing: Theme.Spacing.s) {
                         Text(project.shelfTitle)
-                            .font(Font.body.weight(.semibold))
+                            .font(Theme.label.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
+
                         if isCurrent {
                             StatusPill(text: "正在写", tone: .accent)
                         }
                     }
 
-                    if !project.synopsis.isEmpty {
-                        Text(project.synopsis)
-                            .font(Font.footnote)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    HStack(spacing: Theme.Spacing.s) {
-                        Text(LibraryFormat.updatedText(project.updatedAt))
-                        if let count = project.bodyCharacterCount, count > 0 {
-                            Text("\(count.formatted()) 字")
-                        }
-                        if branchCount > 1 {
-                            Text("\(branchCount) 分支")
-                        }
-                    }
-                    .font(Theme.numericSmall)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    metadata
                 }
 
-                Spacer(minLength: 40)
+                // 给行尾的 ⋯ 菜单留出完整热区，文字不能伸到按钮下面。
+                Spacer(minLength: Theme.Layout.hitTarget)
             }
+            .frame(minHeight: Theme.Layout.hitTarget)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .overlay(alignment: .trailing) {
-            Menu {
-                Button { onOpen() } label: {
-                    Label("打开", systemImage: "book")
-                }
-                Button { onRename() } label: {
-                    Label("重命名", systemImage: "pencil")
-                }
-                Button { onSynopsis() } label: {
-                    Label("改简介", systemImage: "text.alignleft")
-                }
-                Button { onBranches() } label: {
-                    Label("分支（\(branchCount)）", systemImage: "arrow.triangle.branch")
-                }
-                Divider()
-                Button(role: .destructive) { onTrash() } label: {
-                    Label("移入回收站", systemImage: "trash")
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(Font.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .tint(.secondary)
-            .accessibilityLabel("管理「\(project.shelfTitle)」")
+            menu
         }
         .padding(.vertical, Theme.Spacing.xs)
         .swipeActions(edge: .leading) {
@@ -142,5 +104,51 @@ struct LibraryProjectRow: View {
                 Label("移入回收站", systemImage: "trash")
             }
         }
+    }
+
+    /// 时间、字数、分支数合成一行：三项都是会冒出来的数字，统一用元信息的字号。
+    private var metadata: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            Text(LibraryFormat.updatedText(project.updatedAt))
+            if let count = project.bodyCharacterCount, count > 0 {
+                Text("\(count.formatted()) 字")
+            }
+            if branchCount > 1 {
+                Text(LibraryFormat.branchText(branchCount))
+            }
+        }
+        .font(Theme.metadata.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+    }
+
+    /// 行尾 ⋯：书架只有这一套菜单入口，不再另挂长按菜单。
+    private var menu: some View {
+        Menu {
+            Button { onOpen() } label: {
+                Label("打开", systemImage: "book.pages")
+            }
+            Button { onRename() } label: {
+                Label("重命名", systemImage: "pencil")
+            }
+            Button { onSynopsis() } label: {
+                Label("改简介", systemImage: "text.alignleft")
+            }
+            Button { onBranches() } label: {
+                Label("分支（\(branchCount)）", systemImage: "arrow.triangle.branch")
+            }
+            Divider()
+            Button(role: .destructive) { onTrash() } label: {
+                Label("移入回收站", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(Theme.label.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("管理「\(project.shelfTitle)」")
     }
 }

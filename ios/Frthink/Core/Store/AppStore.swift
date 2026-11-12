@@ -86,13 +86,17 @@ final class AppStore {
     // MARK: - 世界任务
 
     /// 登记正在跑的世界任务；同一本书同时只允许一个。
+    ///
+    /// 结束不清登记：下一次登记会覆盖并取消前一个，切书/删书走 `cancelWorldTask`。
+    /// 旧任务收尾时清掉登记会把同书的新任务一起摘掉，所以不提供「完成」入口。
     func registerWorldTask(_ task: Task<Void, Never>, for projectID: String) {
         worldTasks[projectID]?.cancel()
         worldTasks[projectID] = task
     }
 
-    /// 任务正常结束或失败时清掉登记。
-    func finishWorldTask(for projectID: String) {
+    /// 切书/删书时取消该项目在跑的世界任务。
+    func cancelWorldTask(for projectID: String) {
+        worldTasks[projectID]?.cancel()
         worldTasks[projectID] = nil
     }
 

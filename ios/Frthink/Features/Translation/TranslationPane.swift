@@ -22,8 +22,6 @@ struct TranslationPane: View {
     /// sourceHash -> 最新译文。命中就直接显示，不再请求。
     @State private var cache: [String: String] = [:]
     @State private var isRunning = false
-    @State private var stepIndex = 0
-    @State private var stepTotal = 0
     @State private var runTask: Task<Void, Never>?
     /// 每轮跑批一个 token。中止后立刻再开一轮时，旧任务的收尾不会把新任务的状态抹掉。
     @State private var runID = UUID()
@@ -68,7 +66,7 @@ struct TranslationPane: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("关闭") { dismiss() }
+                SheetCloseButton { dismiss() }
             }
         }
     }
@@ -139,14 +137,7 @@ struct TranslationPane: View {
             }
 
             if !plan.isEmpty {
-                Text(progressLine)
-                    .font(Font.caption)
-                    .foregroundStyle(.secondary)
-                ProgressView(
-                    value: Double(translatedCount),
-                    total: Double(max(plan.count, 1))
-                )
-                .tint(Theme.accent)
+                AppStatusLine(kind: isRunning ? .progress : .info, text: progressLine)
                 if planSource != session.sourceText {
                     AppStatusLine(kind: .info, text: "原文已修改")
                 }
@@ -161,11 +152,7 @@ struct TranslationPane: View {
     }
 
     private var progressLine: String {
-        var line = "进度 \(translatedCount)/\(plan.count) 段"
-        if isRunning {
-            line += " · 正在处理第 \(min(stepIndex + 1, max(stepTotal, 1)))/\(stepTotal) 段"
-        }
-        return line
+        "进度 \(translatedCount.formatted())/\(plan.count.formatted()) 段"
     }
 
     // MARK: - 段落
@@ -222,7 +209,7 @@ struct TranslationPane: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             } else {
-                Text(isRunning ? "等待翻译…" : "未翻译")
+                Text("未翻译")
                     .font(Font.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -314,7 +301,7 @@ struct TranslationPane: View {
             return
         }
         guard let provider = store.translationProvider else {
-            store.errorMessage = "还没有可用的AI服务商，请先到设置里填好服务地址和 API Key。"
+            store.errorMessage = "还没有可用的 AI 服务商"
             return
         }
         let client: any LLMClient
@@ -333,16 +320,13 @@ struct TranslationPane: View {
 
         store.errorMessage = nil
         isRunning = true
-        stepIndex = 0
-        stepTotal = targets.count
         let thisRun = UUID()
         runID = thisRun
 
         runTask = Task { @MainActor in
             var translated = 0
-            for (offset, index) in targets.enumerated() {
+            for index in targets {
                 if Task.isCancelled || runID != thisRun { break }
-                stepIndex = offset
                 let item = snapshot[index]
 
                 if !force, let cachedText = cache[item.hash], !cachedText.isEmpty {

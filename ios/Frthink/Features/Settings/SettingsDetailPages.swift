@@ -36,6 +36,7 @@ struct SettingsArchivePage: View {
         }
         .navigationTitle("存档与备份")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsFormColumn()
         .navigationDestination(item: $pendingImport) { request in
             if let importer {
                 ArchiveImportFlowView(controller: importer)
@@ -92,6 +93,7 @@ struct SettingsStoragePage: View {
         }
         .navigationTitle("存储与用量")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsFormColumn()
     }
 }
 
@@ -107,6 +109,7 @@ struct SettingsAppearancePage: View {
         }
         .navigationTitle("外观")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsFormColumn()
     }
 }
 
@@ -128,7 +131,7 @@ struct SettingsAboutPage: View {
                         .foregroundStyle(.secondary)
                     Text(Attribution.portNotice)
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .multilineTextAlignment(.leading)
@@ -150,6 +153,7 @@ struct SettingsAboutPage: View {
         }
         .navigationTitle("关于")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsFormColumn()
         .task {
             #if DEBUG
             selfTestReport = FrthinkArchiveSelfTest.run()

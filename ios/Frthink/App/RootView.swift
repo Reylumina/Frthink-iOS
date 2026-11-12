@@ -179,6 +179,9 @@ struct RootView: View {
                     }
                 )
             }
+            // sheet 会盖住根视图的 toast：书架里的重命名、移入回收站等结果
+            // 要在这一层显示，包括 push 出来的回收站页。
+            .sheetToast()
         }
         .overlay(alignment: .bottom) {
             if let toast = store.toast {

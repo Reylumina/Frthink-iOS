@@ -1,5 +1,6 @@
 // 提示词集成管理器：技能、全局预设、去 AI 味规则、项目补充指令四类可编辑指令。
 //
+// 列表只做入口与开关；长文一律点进推入库页面编辑（DESIGN §5.8），
 // 预览直接走 `PromptComposer`，和真正发出去的内容一致。
 
 import SwiftUI
@@ -8,12 +9,19 @@ struct PromptManagerPane: View {
     let store: AppStore
     let session: ProjectSession?
 
-    @State private var activeSheet: PromptManagerSheet?
+    @State private var skillRoute: SkillRoute?
+    @State private var showingPreview = false
     @State private var pendingDelete: Skill?
     @State private var pickedProjectID: String?
     /// 从设置页进来时没有现成会话；在 `.task` 里按所选书项目异步打开，不在 body 里读盘。
     @State private var resolvedSession: ProjectSession?
-    @State private var saveTask: Task<Void, Never>?
+
+    /// 技能编辑页的推入路由。新建时点一次只生成一条空白技能，id 在这里就定下来，
+    /// 避免推入过程中重复求值换掉身份。
+    private enum SkillRoute: Hashable {
+        case create(Skill)
+        case edit(Skill)
+    }
 
     init(store: AppStore, session: ProjectSession? = nil) {
         self.store = store
@@ -22,10 +30,6 @@ struct PromptManagerPane: View {
 
     private var skills: [Skill] {
         store.settings.skills
-    }
-
-    private var enabledSkillCount: Int {
-        skills.filter(\.enabled).count
     }
 
     private var previewBlocks: [PromptBlock] {
@@ -41,8 +45,7 @@ struct PromptManagerPane: View {
     var body: some View {
         List {
             skillsSection
-            globalPresetSection
-            flavorRulesSection
+            presetSection
             projectSupplementSection
             previewSection
         }
@@ -50,12 +53,13 @@ struct PromptManagerPane: View {
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
         .keyboardDismissOnScroll()
+        .settingsFormColumn()
         .navigationTitle("提示词集成管理器")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    activeSheet = .newSkill
+                    skillRoute = .create(Skill(name: ""))
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -71,41 +75,35 @@ struct PromptManagerPane: View {
             await loadResolvedSession()
         }
         .onDisappear {
-            saveTask?.cancel()
             store.saveSettings()
             resolvedSession?.scheduleSave()
         }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .newSkill:
+        .navigationDestination(item: $skillRoute) { route in
+            switch route {
+            case .create(let skill):
                 PromptSkillEditor(
-                    skill: Skill(name: ""),
+                    skill: skill,
                     isNew: true,
-                    onSave: { skill in
-                        upsert(skill)
-                    }
+                    onSave: { upsert($0) }
                 )
             case .edit(let skill):
                 PromptSkillEditor(
                     skill: skill,
                     isNew: false,
-                    onSave: { updated in
-                        upsert(updated)
-                    },
-                    onDelete: {
-                        delete(skill)
-                    }
+                    onSave: { upsert($0) },
+                    onDelete: { delete(skill) }
                 )
-            case .preview:
-                PromptBlocksPreviewSheet(blocks: previewBlocks)
             }
         }
-        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
+        .sheet(isPresented: $showingPreview) {
+            PromptBlocksPreviewSheet(blocks: previewBlocks)
+        }
+        .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
             Button("删除", role: .destructive) {
                 if let skill = pendingDelete { delete(skill) }
                 pendingDelete = nil
             }
+            Button("取消", role: .cancel) { pendingDelete = nil }
         }
     }
 
@@ -119,7 +117,7 @@ struct PromptManagerPane: View {
                     message: "还没有技能",
                     actionTitle: "新建技能"
                 ) {
-                    activeSheet = .newSkill
+                    skillRoute = .create(Skill(name: ""))
                 }
             } else {
                 ForEach(skills) { skill in
@@ -139,14 +137,14 @@ struct PromptManagerPane: View {
                 .accessibilityLabel("启用「\(skill.name)」")
 
             Button {
-                activeSheet = .edit(skill)
+                skillRoute = .edit(skill)
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(skill.name.isEmpty ? "未命名技能" : skill.name)
-                        .font(Font.body.weight(.medium))
+                        .font(Theme.label)
                         .foregroundStyle(.primary)
                     Text(skill.content.isEmpty ? "未填写" : collapsed(skill.content))
-                        .font(Font.caption)
+                        .font(Theme.labelSmall)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -160,6 +158,7 @@ struct PromptManagerPane: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
         }
+        .frame(minHeight: Theme.Layout.hitTarget)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 pendingDelete = skill
@@ -173,41 +172,60 @@ struct PromptManagerPane: View {
         text.replacingOccurrences(of: "\n", with: " ")
     }
 
-    // MARK: - 全局预设
+    // MARK: - 预设与规则
 
-    private var globalPresetSection: some View {
+    private var presetSection: some View {
         Section {
-            AppTextArea(
-                title: "预设正文",
-                text: globalPresetBinding,
-                placeholder: "预设内容",
-                minLines: 5,
-                maxLines: 10
-            )
+            NavigationLink {
+                SettingsTextEditorPage(
+                    title: "全局预设",
+                    text: store.settings.globalPreset,
+                    placeholder: "预设内容"
+                ) { text in
+                    guard store.settings.globalPreset != text else { return }
+                    store.settings.globalPreset = text
+                    store.saveSettings()
+                }
+            } label: {
+                SettingsLabelRow(
+                    title: "全局预设",
+                    symbol: "text.alignleft",
+                    detail: filledLabel(store.settings.globalPreset)
+                )
+            }
+
+            NavigationLink {
+                SettingsTextEditorPage(
+                    title: "去 AI 味规则",
+                    text: store.settings.aiFlavorRules,
+                    placeholder: "写作规则"
+                ) { text in
+                    guard store.settings.aiFlavorRules != text else { return }
+                    store.settings.aiFlavorRules = text
+                    store.saveSettings()
+                }
+            } label: {
+                SettingsLabelRow(
+                    title: "去 AI 味规则",
+                    symbol: "wand.and.rays",
+                    detail: filledLabel(store.settings.aiFlavorRules)
+                )
+            }
+
+            Button("填入示例") {
+                store.settings.aiFlavorRules = Self.flavorRulesSample
+                store.saveSettings()
+                store.toast = "已填入示例"
+            }
         } header: {
-            AppSectionHeader(title: "全局预设")
+            AppSectionHeader(title: "预设与规则")
         }
     }
 
-    // MARK: - 去 AI 味规则
+    private static let flavorRulesSample = "减少模板化转折、空泛总结和机械分段；只修改未锁定正文。"
 
-    private var flavorRulesSection: some View {
-        Section {
-            AppTextArea(
-                title: "规则正文",
-                text: aiFlavorRulesBinding,
-                placeholder: "写作规则",
-                minLines: 5,
-                maxLines: 10
-            )
-            Button("填入示例") {
-                store.settings.aiFlavorRules = "减少模板化转折、空泛总结和机械分段；只修改未锁定正文。"
-                scheduleSettingsSave()
-            }
-            .font(Font.footnote)
-        } header: {
-            AppSectionHeader(title: "去 AI 味规则")
-        }
+    private func filledLabel(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未填写" : "已填写"
     }
 
     // MARK: - 项目补充指令
@@ -226,7 +244,23 @@ struct PromptManagerPane: View {
             }
 
             if let resolved = resolvedSession {
-                PromptProjectSupplementFields(session: resolved)
+                NavigationLink {
+                    SettingsTextEditorPage(
+                        title: "补充指令",
+                        text: resolved.payload.assistantSupplement,
+                        placeholder: "补充指令"
+                    ) { text in
+                        guard resolved.payload.assistantSupplement != text else { return }
+                        resolved.payload.assistantSupplement = text
+                        resolved.scheduleSave()
+                    }
+                } label: {
+                    SettingsLabelRow(
+                        title: "补充指令",
+                        symbol: "square.and.pencil",
+                        detail: filledLabel(resolved.payload.assistantSupplement)
+                    )
+                }
             } else if session == nil, !store.activeProjects.isEmpty {
                 AppStatusLine(kind: .progress, text: "正在打开书稿…")
             }
@@ -251,19 +285,20 @@ struct PromptManagerPane: View {
         } label: {
             HStack(spacing: Theme.Spacing.s) {
                 Text("书项目")
-                    .font(Font.body)
+                    .font(Theme.label)
                     .foregroundStyle(.primary)
                 Spacer(minLength: Theme.Spacing.s)
                 Text(pickedProjectTitle)
-                    .font(Font.footnote)
+                    .font(Theme.label)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .frame(minHeight: 36)
+            .frame(minHeight: Theme.Layout.hitTarget)
         }
     }
 
@@ -279,21 +314,19 @@ struct PromptManagerPane: View {
     private var previewSection: some View {
         Section {
             Button {
-                activeSheet = .preview
+                showingPreview = true
             } label: {
-                HStack(spacing: Theme.Spacing.m) {
-                    IconTile(symbol: "doc.text.magnifyingglass")
-                    Text("查看最终提示词")
-                        .font(Font.body)
-                        .foregroundStyle(.primary)
-                    Spacer(minLength: Theme.Spacing.s)
+                HStack(spacing: Theme.Spacing.s) {
+                    SettingsLabelRow(
+                        title: "查看最终提示词",
+                        symbol: "doc.text.magnifyingglass"
+                    )
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: 36)
             }
             .buttonStyle(.plain)
         } header: {
@@ -323,36 +356,6 @@ struct PromptManagerPane: View {
         let loaded = await store.openSessionAsync(for: project)
         guard !Task.isCancelled, pickedProjectID == id else { return }
         resolvedSession = loaded
-    }
-
-    private var globalPresetBinding: Binding<String> {
-        Binding(
-            get: { store.settings.globalPreset },
-            set: { text in
-                store.settings.globalPreset = text
-                scheduleSettingsSave()
-            }
-        )
-    }
-
-    private var aiFlavorRulesBinding: Binding<String> {
-        Binding(
-            get: { store.settings.aiFlavorRules },
-            set: { text in
-                store.settings.aiFlavorRules = text
-                scheduleSettingsSave()
-            }
-        )
-    }
-
-    /// 文本编辑不做逐字落盘，停手 0.6 秒后再写设置文件。
-    private func scheduleSettingsSave() {
-        saveTask?.cancel()
-        saveTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            store.saveSettings()
-        }
     }
 
     private func skillEnabledBinding(_ skill: Skill) -> Binding<Bool> {
@@ -396,45 +399,6 @@ struct PromptManagerPane: View {
         Binding(
             get: { pendingDelete != nil },
             set: { if !$0 { pendingDelete = nil } }
-        )
-    }
-
-    private enum PromptManagerSheet: Identifiable {
-        case newSkill
-        case edit(Skill)
-        case preview
-
-        var id: String {
-            switch self {
-            case .newSkill: return "new"
-            case .edit(let skill): return skill.id
-            case .preview: return "preview"
-            }
-        }
-    }
-}
-
-/// 本书写作助手补充指令的编辑区。拆出来是因为它绑在 `ProjectSession` 上。
-private struct PromptProjectSupplementFields: View {
-    let session: ProjectSession
-
-    private var binding: Binding<String> {
-        Binding(
-            get: { session.payload.assistantSupplement },
-            set: { text in
-                session.payload.assistantSupplement = text
-                session.scheduleSave()
-            }
-        )
-    }
-
-    var body: some View {
-        AppTextArea(
-            title: "补充指令",
-            text: binding,
-            placeholder: "补充指令",
-            minLines: 5,
-            maxLines: 10
         )
     }
 }

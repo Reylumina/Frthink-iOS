@@ -17,6 +17,25 @@ struct WorldRequestContext {
         return Self(client: client, provider: provider)
     }
 
+    /// 世界任务统一的请求参数：输出预算至少 4096，截断按 `failOnLength` 处理。
+    ///
+    /// 去重这类自己发请求的步骤也走这里，避免各写一个 `maxTokens`（曾经是 2048，
+    /// 大候选批的 JSON 会在输出上限处被截断）。
+    static func request(
+        provider: ProviderSetting,
+        messages: [LLMMessage],
+        failOnLength: Bool
+    ) -> LLMRequest {
+        LLMRequest(
+            model: provider.resolvedModel,
+            messages: messages,
+            stream: false,
+            temperature: provider.temperature,
+            maxTokens: max(provider.maxTokens, 4_096),
+            failOnLength: failOnLength
+        )
+    }
+
     /// 摘要模型留空时跟随当前服务商；传入 provider 只覆盖本次请求。
     func complete(
         _ messages: [LLMMessage],
@@ -24,14 +43,12 @@ struct WorldRequestContext {
         failOnLength: Bool = false
     ) async throws -> String {
         let target = providerOverride ?? provider
-        let request = LLMRequest(
-            model: target.resolvedModel,
-            messages: messages,
-            stream: false,
-            temperature: target.temperature,
-            maxTokens: max(target.maxTokens, 4096),
-            failOnLength: failOnLength
+        return try await client.complete(
+            Self.request(
+                provider: target,
+                messages: messages,
+                failOnLength: failOnLength
+            )
         )
-        return try await client.complete(request)
     }
 }

@@ -51,10 +51,6 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     /// 选区变化（读写都回调）。改写条只在编辑态、选区非空时出现。
     var onSelectionChange: ((NSRange) -> Void)? = nil
 
-    /// 外部撤销/重做请求：每次 +1 执行一次。原版阅读页有「上一步/下一步」。
-    var undoRequest: Int = 0
-    var redoRequest: Int = 0
-
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -83,15 +79,6 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     func updateUIView(_ uiView: UITextView, context: Context) {
         // 视图重建后委托手里还握着旧的 Binding，每次都换新。
         context.coordinator.parent = self
-
-        if context.coordinator.lastUndoRequest != undoRequest {
-            context.coordinator.lastUndoRequest = undoRequest
-            uiView.undoManager?.undo()
-        }
-        if context.coordinator.lastRedoRequest != redoRequest {
-            context.coordinator.lastRedoRequest = redoRequest
-            uiView.undoManager?.redo()
-        }
 
         if uiView.isEditable != isEditable {
             uiView.isEditable = isEditable
@@ -147,8 +134,6 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var appliedRevision = -1
         /// 上一次回调过的选区长度；用来区分「光标移动」和「选区变化」。
         var lastSelectionLength = 0
-        var lastUndoRequest = 0
-        var lastRedoRequest = 0
         /// 键盘「完成」按钮要能主动 resign，所以留一个弱引用。
         /// 正文提交防抖：停止输入 200ms 才把整串交给 session。
         ///

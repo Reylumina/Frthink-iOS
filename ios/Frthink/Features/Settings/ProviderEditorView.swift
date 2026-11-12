@@ -53,7 +53,7 @@ struct ProviderEditorView: View {
             .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
+                    SheetCloseButton {
                         if hasChanges {
                             pendingConfirmation = .discard
                         } else {
@@ -62,7 +62,7 @@ struct ProviderEditorView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
+                    SheetConfirmButton(title: "保存") { save() }
                 }
             }
             .sheet(isPresented: $showingModelPicker) {
@@ -207,12 +207,12 @@ struct ProviderEditorView: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "arrow.down.circle")
-                            .font(.footnote.weight(.semibold))
                     }
                     Text(models.isEmpty ? "从服务端读取模型列表" : "重新读取模型列表")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 32)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
             .disabled(isBusy)
         } header: {
@@ -294,12 +294,12 @@ struct ProviderEditorView: View {
                         ProgressView().controlSize(.small)
                     } else {
                         Image(systemName: "bolt.horizontal")
-                            .font(.footnote.weight(.semibold))
                     }
                     Text(isTesting ? "正在测试…" : "测试连接")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
             .disabled(isBusy)
 
@@ -313,11 +313,11 @@ struct ProviderEditorView: View {
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "checkmark.circle")
-                        .font(.footnote.weight(.semibold))
                     Text(isActive ? "已设为当前AI服务商" : "保存并设为当前AI服务商")
                     Spacer(minLength: 0)
                 }
-                .frame(minHeight: 36)
+                .contentShape(Rectangle())
+                .frame(minHeight: Theme.Layout.hitTarget)
             }
             .disabled(isActive || isBusy)
         } header: {
@@ -410,7 +410,7 @@ struct ProviderEditorView: View {
             do {
                 let client = try makeClient()
                 try await client.testConnection()
-                statusText = "连接成功。"
+                statusText = "连接成功"
                 statusKind = .success
             } catch {
                 statusText = "连接失败：\(error.localizedDescription)"
@@ -425,7 +425,7 @@ struct ProviderEditorView: View {
     private func loadModels() {
         guard !isBusy else { return }
         guard !effectiveKey.isEmpty else {
-            statusText = "先填 API Key，再读取模型列表。"
+            statusText = "先填 API Key，再读取模型列表"
             statusKind = .failure
             return
         }
@@ -438,10 +438,10 @@ struct ProviderEditorView: View {
                 let list = try await client.listModels()
                 models = list
                 if list.isEmpty {
-                    statusText = "服务端没有返回任何模型。"
+                    statusText = "服务端没有返回任何模型"
                     statusKind = .failure
                 } else {
-                    statusText = "读取到 \(list.count) 个模型。"
+                    statusText = "读取到 \(list.count) 个模型"
                     statusKind = .success
                     showingModelPicker = true
                 }
@@ -486,7 +486,7 @@ struct ProviderEditorView: View {
         commit()
         store.settings.activeProviderID = draft.id
         store.saveSettings()
-        statusText = "已设为当前AI服务商。"
+        statusText = "已设为当前AI服务商"
         statusKind = .success
     }
 
@@ -495,7 +495,7 @@ struct ProviderEditorView: View {
         store.setAPIKey("", for: draft.id)
         keyInput = ""
         keyRevision += 1
-        statusText = "已清除这个AI服务商的 Key。"
+        statusText = "已清除这个AI服务商的 Key"
         statusKind = .success
     }
 }
@@ -529,10 +529,11 @@ struct ModelPickerSheet: View {
                                 Image(systemName: "checkmark")
                                     .font(.footnote.weight(.semibold))
                                     .foregroundStyle(Theme.accent)
+                                    .accessibilityLabel("当前")
                             }
                         }
-                        .frame(minHeight: 36)
                         .contentShape(Rectangle())
+                        .frame(minHeight: Theme.Layout.hitTarget)
                     }
                     .buttonStyle(.plain)
                 }
@@ -548,7 +549,7 @@ struct ModelPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    SheetCloseButton(title: "关闭") { dismiss() }
                 }
             }
         }

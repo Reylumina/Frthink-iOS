@@ -10,6 +10,8 @@ import SwiftUI
 /// 起始偏移」，写进 `scrollPosition` 的绑定滚过去。
 struct ReaderPane: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let session: ProjectSession
 
@@ -36,6 +38,8 @@ struct ReaderPane: View {
     @State private var matches: [ReaderMatch] = []
     @State private var highlightMap: [Int: [NSRange]] = [:]
     @State private var matchIndex = 0
+    /// 搜索是否还没出结果。面板据此先显示加载态，不先闪「没有找到」。
+    @State private var isSearching = false
     /// 排版（切块）任务。56 万字的正文切块不能在主线程做。
     @State private var rebuildTask: Task<Void, Never>?
     @State private var searchTask: Task<Void, Never>?
@@ -67,6 +71,7 @@ struct ReaderPane: View {
             searchOverlay
         }
         .background(Theme.pageBackgroundColor.ignoresSafeArea())
+        .themeAnimation(Theme.motionLayout, value: showSearch)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 modeMenu
@@ -84,6 +89,7 @@ struct ReaderPane: View {
             isVisible = false
             // 切走时把搜索浮层一起收起，键盘不会留在别处。
             showSearch = false
+            isSearching = false
             rebuildTask?.cancel()
             rebuildTask = nil
             searchTask?.cancel()
@@ -102,7 +108,14 @@ struct ReaderPane: View {
         }
         // 换书由 RootView 的 `.id(session.project.id)` 重建整页，这里不用再监听。
         // 搜索防抖：打字停下 220ms 再扫全文；输入变了或页面走了，上一轮自动取消。
+        // 空关键词立即清结果，不做加载态；有词时先亮加载，避免先闪一下「没有找到」。
         .task(id: query) {
+            let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !needle.isEmpty else {
+                performSearch()
+                return
+            }
+            isSearching = true
             try? await Task.sleep(for: .milliseconds(220))
             guard !Task.isCancelled else { return }
             performSearch()
@@ -122,15 +135,16 @@ struct ReaderPane: View {
                 query: $query,
                 matches: matches,
                 currentIndex: matchIndex,
+                isSearching: isSearching,
                 onSubmit: { jumpToMatch(0) },
                 onPrevious: { stepMatch(-1) },
                 onNext: { stepMatch(1) },
                 onSelect: { index in jumpToMatch(index) },
-                onClose: {
-                    withAnimation(.easeInOut(duration: 0.18)) { showSearch = false }
-                }
+                onClose: { showSearch = false }
             )
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(
+                reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity)
+            )
         }
     }
 
@@ -147,6 +161,8 @@ struct ReaderPane: View {
     private var chaptersSheet: some View {
         ReaderChapterList(
             chapters: session.payload.chapters,
+            // 章节索引已有时直接列出来；两者都还没有，才先亮加载态。
+            isLoading: session.payload.chapters.isEmpty && isLoadingDocument,
             currentChapterID: currentChapterID
         ) { chapter in
             jump(to: displayOffset(for: chapter))
@@ -177,12 +193,15 @@ struct ReaderPane: View {
                 }
             }
         } label: {
-            HStack(spacing: 2) {
+            HStack(spacing: Theme.Spacing.xs) {
                 Text(modeBinding.wrappedValue.displayName)
                     .font(Font.subheadline)
                 Image(systemName: "chevron.down")
-                    .font(Font.caption2)
+                    .font(Font.caption)
+                    .accessibilityHidden(true)
             }
+            .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
+            .contentShape(Rectangle())
         }
         .accessibilityLabel("阅读模式")
         .accessibilityValue(modeBinding.wrappedValue.displayName)
@@ -213,7 +232,7 @@ struct ReaderPane: View {
             Divider()
 
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) { showSearch = true }
+                showSearch = true
             } label: {
                 Label(mode == .source ? "搜索正文" : "搜索译文", systemImage: "magnifyingglass")
             }
@@ -248,6 +267,8 @@ struct ReaderPane: View {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(Font.subheadline)
+                .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("更多阅读操作")
     }
@@ -277,12 +298,16 @@ struct ReaderPane: View {
                 }
             }
             .scrollTargetLayout()
+            // 每行不超过 36 个汉字：正文栏封顶后居中，两侧露出纸色/黑底（§2.3、§5.3）。
+            .frame(maxWidth: bodyColumnMaxWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.vertical, Theme.Spacing.l)
         }
         .background(ReaderStyle.page(dark: darkPage))
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
+        .softScrollEdge()
         // iOS 17 的滚动位置绑定：只更新一个 Int，不再给每一段挂
         // GeometryReader + PreferenceKey，滚动时不会整页重算。
         // 跳转也只写这个绑定，避免 `scrollTo` 与 id 驱动互相拉扯。
@@ -295,27 +320,28 @@ struct ReaderPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// 设置字号按 Dynamic Type 换算后的实际字号；正文栏宽度按它算。
+    private var scaledBodyFontSize: CGFloat {
+        DynamicTypeFont.bodySize(fontSize, dynamicTypeSize: dynamicTypeSize)
+    }
+
+    private var bodyColumnMaxWidth: CGFloat {
+        ReaderStyle.bodyMaxWidth(size: scaledBodyFontSize)
+    }
+
     private var emptyState: some View {
         EmptyStateView(
             symbol: mode == .source ? "doc.text" : "character.book.closed",
-            title: mode == .source ? "正文还是空的" : "还没有译文",
-            message: mode == .source
-                ? "先在「创作」里写点东西，这里就会按段落显示。"
-                : "把要读的段落翻好之后，译文会按分段顺序拼在这里。"
+            title: mode == .source ? "正文还是空的" : "还没有译文"
         )
-        .frame(height: 260)
+        .frame(maxWidth: .infinity)
     }
 
     /// 排版完成前的占位；大书或旧书回退全文解析时能看到，而不是先闪一下空态。
     private var loadingState: some View {
-        VStack(spacing: Theme.Spacing.s) {
-            ProgressView()
-            Text("正在排版正文…")
-                .font(Font.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 260)
+        ProgressView()
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Spacing.xxl)
     }
 
     // MARK: - 页脚
@@ -324,32 +350,22 @@ struct ReaderPane: View {
         HStack(spacing: Theme.Spacing.s) {
             Text(positionLabel)
                 .font(Theme.numeric)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             if !document.blocks.isEmpty {
-                Text("\(document.characterCount) 字")
+                Text("\(document.characterCount.formatted()) 字")
                     .font(Theme.numeric)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            if bookmarkOffset >= 0 {
-                Button {
-                    jump(to: bookmarkOffset)
-                } label: {
-                    Label("书签", systemImage: "bookmark.fill")
-                        .font(Font.caption)
-                        .foregroundStyle(Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("跳到书签")
-            }
         }
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.vertical, Theme.Spacing.xs + 2)
+        .padding(.vertical, Theme.Spacing.s)
+        .accessibilityElement(children: .combine)
     }
 
     private var positionLabel: String {
         guard !document.blocks.isEmpty else { return "暂无正文" }
-        return "第 \(currentBlockNumber)/\(document.blocks.count) 段"
+        return "第 \(currentBlockNumber.formatted())/\(document.blocks.count.formatted()) 段"
     }
 
     private var currentBlockNumber: Int {
@@ -429,17 +445,6 @@ struct ReaderPane: View {
         }
     }
 
-    private func stepBlock(_ delta: Int) {
-        guard !document.blocks.isEmpty else { return }
-        let index = ReaderLocator.blockIndex(for: anchorOffset, in: document.blocks)
-        let target = index + delta
-        guard target >= 0, target < document.blocks.count else {
-            store.toast = delta < 0 ? "已经是第一段" : "已经是最后一段"
-            return
-        }
-        jump(to: document.blocks[target].start)
-    }
-
     /// 跳到某个偏移：先夹到正文范围内，再落到它所在那一段的段首。
     private func jump(to offset: Int) {
         guard !document.blocks.isEmpty else { return }
@@ -448,7 +453,7 @@ struct ReaderPane: View {
         anchorOffset = start
         lastOffset = start
         // 只写滚动位置绑定：它同时也是跳转驱动，避免和 scrollTo 抢位置。
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(Theme.motion(Theme.motionSelection, reduceMotion: reduceMotion)) {
             scrolledBlockStart = start
         }
     }
@@ -466,8 +471,10 @@ struct ReaderPane: View {
             matches = []
             highlightMap = [:]
             matchIndex = 0
+            isSearching = false
             return
         }
+        isSearching = true
         let documentSnapshot = document
         let blocks = document.blocks
         searchTask = Task { @MainActor in
@@ -476,6 +483,7 @@ struct ReaderPane: View {
             matches = found
             highlightMap = ReaderSearch.grouped(found, by: blocks)
             matchIndex = 0
+            isSearching = false
         }
     }
 
@@ -577,6 +585,7 @@ struct ReaderPane: View {
             matches = []
             highlightMap = [:]
             matchIndex = 0
+            isSearching = false
             return
         }
         let index = ReaderLocator.blockIndex(for: clamp(preferredOffset), in: document.blocks)

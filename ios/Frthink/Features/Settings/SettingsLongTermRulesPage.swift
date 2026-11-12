@@ -29,9 +29,10 @@ struct SettingsLongTermRulesPage: View {
                 .pickerStyle(.menu)
 
                 if rules.isEmpty {
-                    Text("还没有长期规则")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
+                    InlineEmptyState(
+                        symbol: "list.bullet.rectangle",
+                        message: "还没有长期规则"
+                    )
                 } else {
                     Text(rules)
                         .font(Theme.reply)
@@ -48,27 +49,25 @@ struct SettingsLongTermRulesPage: View {
                     Label("编辑摘要", systemImage: "square.and.pencil")
                 }
                 .disabled(selectedProject == nil)
+
+                if updatedAt > 0 {
+                    AppValueRow(title: "上次更新", value: updatedText)
+                }
             } header: {
                 AppSectionHeader(title: "当前摘要")
-            } footer: {
-                if updatedAt > 0 {
-                    Text("上次更新：\(updatedText)")
-                }
             }
 
             Section {
-                Button {
+                DestructiveActionRow(
+                    title: "恢复上一版",
+                    systemImage: "arrow.uturn.backward",
+                    isEnabled: revisionCount > 0
+                ) {
                     pendingRestore = true
-                } label: {
-                    Label("恢复上一版", systemImage: "arrow.uturn.backward")
                 }
-                .disabled(revisionCount == 0)
-            } footer: {
-                Text(revisionCount == 0
-                    ? "还没有历史版本。"
-                    : "恢复后当前摘要会被上一版替换；历史只保留最近 10 版。")
             }
         }
+        .settingsFormColumn()
         .navigationTitle("长期规则摘要")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: store.activeProjects.count) {
@@ -80,13 +79,15 @@ struct SettingsLongTermRulesPage: View {
         .onChange(of: selectedProjectID) { _, _ in
             Task { await reloadRules() }
         }
-        .alert("恢复上一版摘要？", isPresented: $pendingRestore) {
-            Button("取消", role: .cancel) {}
+        .confirmationDialog(
+            "恢复上一版摘要？",
+            isPresented: $pendingRestore,
+            titleVisibility: .visible
+        ) {
             Button("恢复", role: .destructive) {
                 Task { await restore() }
             }
-        } message: {
-            Text("当前摘要会被上一版替换，这一步不能撤销。")
+            Button("取消", role: .cancel) {}
         }
     }
 
@@ -179,18 +180,14 @@ struct LongTermRulesEditorPage: View {
     }
 
     var body: some View {
-        TextEditor(text: $text)
-            .font(Theme.reply)
-            .lineSpacing(4)
-            .scrollContentBackground(.hidden)
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, Theme.Spacing.s)
+        AppTextEditor(text: $text, placeholder: "长期规则", minHeight: 240, expands: true)
+            .padding(Theme.Spacing.l)
             .pageBackground()
             .navigationTitle("编辑摘要")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") {
+                    SheetConfirmButton(title: "保存") {
                         onSave(trimmedText)
                         saved = true
                         dismiss()
