@@ -724,7 +724,7 @@ enum FrthinkArchive {
             "imitationTemplate": world.styleTemplate,
             // iOS 私有键：文风笔记是用户可编辑数据，原版没有对应字段。
             "styleNotes": world.styleNotes,
-            "characters": Self.characterLines(for: world),
+            "characters": FrthinkArchive.characterLines(for: world),
             "relationships": world.relationships,
             "events": [],
             "plotEvents": world.events.map { event in
