@@ -82,6 +82,4 @@ ProMotion 在 `ios/Info.plist` 设 `CADisableMinimumFrameDurationOnPhone = true`
 ## 4. 尚未实现
 
 - Instruments 的 View Body / Time Profiler 实测，需要 Mac。
-- 人物卡编辑页仍每按键直写 `@Observable` payload；规则与事件编辑已改为局部草稿、离开时提交。
-- 请求快照只按条数保留 30 条；发送全文时 payload 会随正文线性膨胀，需要字节上限或按块键重建。
-- 正文与气泡的固定字号尚未接入 Dynamic Type，放大系统字号时不会重排。
+- 请求快照在 30 条之外另有 200k token 总量上限（`ProjectSession.requestSnapshotTokenBudget`），但单条快照仍随发送的正文线性增长，没有字节上限或按块键重建。

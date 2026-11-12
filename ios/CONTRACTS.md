@@ -172,16 +172,9 @@ enum PromptComposer
 
 ### 设计
 
-```swift
-Theme.accent / .accentSoft / .paper / .cardBackground / .hairline
-Theme.inkPrimary / .inkSecondary / .inkTertiary
-Theme.Radius.small(8) / .medium(12) / .large(18) / .sheet(28)
-Theme.Spacing.xs(4) / .s(8) / .m(12) / .l(16) / .xl(24) / .xxl(32)
-Theme.manuscript(17) / .title(22) / .reply(16) / .mono(13)
+token 和共用组件以 [`docs/DESIGN.md`](../docs/DESIGN.md) 为准（组件清单见 §5.11），实现在 `Core/Design/Theme.swift` 和 `Core/Design/AppComponents.swift`。
 
-.paperBackground()                    // View 扩展，铺纸感底色
-CardContainer { ... }                 // 白底圆角卡片容器
-EmptyStateView(symbol:title:message:)
+```swift
 ToastView / ErrorBanner               // RootView 已经接了，业务侧设 store.toast / store.errorMessage 即可
 ```
 
