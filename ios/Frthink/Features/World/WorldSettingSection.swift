@@ -169,7 +169,7 @@ struct WorldSettingSection: View {
 
     private var refreshStatusLine: String {
         if isBusy {
-            return "正在刷新人物卡，完成前可以先去别的分栏"
+            return "正在整理人物卡，完成前可以先去别的分栏"
         }
         let world = session.payload.world
         let total = session.manuscriptCharacterCount
@@ -180,23 +180,23 @@ struct WorldSettingSection: View {
                 let total = world.analysisSourceCodePointCount
                 let done = min(max(world.refreshedUpTo, 0), total)
                 if world.analysisWorldRefreshComplete {
-                    return "上次刷新人物卡：\(stamp) · 已分析全部 \(total.formatted()) 字"
+                    return "人物卡上次整理于 \(stamp)，已分析全部 \(total.formatted()) 字"
                 }
-                return "上次刷新人物卡：\(stamp) · 已分析 \(done.formatted())/\(total.formatted()) 字"
+                return "人物卡上次整理于 \(stamp)，已分析 \(done.formatted())/\(total.formatted()) 字"
             }
             let segmentCount = world.analysisSegmentCount
             let done = world.completedAnalysisSegments.count
             if segmentCount > 0 {
                 if done >= segmentCount {
-                    return "上次刷新人物卡：\(stamp) · 已完成全部 \(segmentCount) 段"
+                    return "人物卡上次整理于 \(stamp)，已完成全部 \(segmentCount) 段"
                 }
-                return "上次刷新人物卡：\(stamp) · 已完成 \(done)/\(segmentCount) 段"
+                return "人物卡上次整理于 \(stamp)，已完成 \(done)/\(segmentCount) 段"
             }
             if total == 0 {
-                return "上次刷新人物卡：\(stamp)"
+                return "人物卡上次整理于 \(stamp)"
             }
-            return "上次刷新人物卡：\(stamp) · 当前正文 \(total.formatted()) 字"
+            return "人物卡上次整理于 \(stamp)，正文现有 \(total.formatted()) 字"
         }
-        return total == 0 ? "还没有刷新过人物卡" : "还没有刷新过人物卡 · 当前正文 \(total.formatted()) 字"
+        return total == 0 ? "人物卡还没整理过" : "人物卡还没整理过，正文现有 \(total.formatted()) 字"
     }
 }
