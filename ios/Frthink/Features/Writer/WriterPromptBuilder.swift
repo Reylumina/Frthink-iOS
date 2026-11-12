@@ -117,16 +117,19 @@ enum WriterPromptBuilder {
         full.explicitBodyRange = .full
         let preparedFull = prepare(full)
 
+        // 预算基数必须用这次真正会发出去的正文片段：默认只发末尾 5000 码点，
+        // 拿整本正文的估算去裁会把 50 万字的书裁到 55 万字，仍然超窗。
+        let body = effectiveBody(snapshot)
         let excess = preparedFull.estimatedInputTokens - snapshot.inputBudget
         let manuscriptBudget = max(
             512,
-            TokenEstimator.estimate(snapshot.manuscript) - max(excess, 0)
+            TokenEstimator.estimate(body.text) - max(excess, 0)
         )
         let trimmed = WriterBudgeting.trimTail(
-            snapshot.manuscript,
+            body.text,
             toTokens: manuscriptBudget
         )
-        guard !trimmed.isEmpty, trimmed != snapshot.manuscript else {
+        guard !trimmed.isEmpty, trimmed != body.text else {
             return .cannotTrim
         }
 
