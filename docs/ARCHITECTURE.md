@@ -60,7 +60,13 @@ Core/
 
 `AppStore` 标 `@Observable`，只在主线程用。`ProjectSession` 持有 `payload: ProjectPayload`，整份常驻内存。落盘是 2 秒防抖，然后取快照，在后台编码写盘。章节扫描 500ms 防抖，后台执行。生成用 `AsyncThrowingStream`，事件分 `.delta`、`.reasoning`、`.finished`。
 
-没有后台执行（`BGProcessingTask`），切后台可能被系统挂起。
+退到后台前会 `beginBackgroundTask` 包住 `flushDirtySessions()`：不申请额度的话，`scenePhase` 的 onChange 立刻返回，进程可能在写盘途中被挂起。生成期另有自己的后台额度（约 30 秒），系统收回时停流并标中断。
+
+世界刷新、事件、文风、长期规则四种任务按书登记在 `AppStore`：`registerWorldTask(_:for:)` 返回一个令牌，任务收尾用同一令牌调 `finishWorldTask(for:token:)`，只会清掉自己那一条；切书、进回收站、彻底删除走 `cancelWorldTask`。没有令牌时旧任务收尾会把同一本书后来新起的任务一起摘掉。
+
+写作台对话列用 `VStack` 而不是 `LazyVStack`：整列本来就按 `visibleMessageCount` 截过，行数有上限，而流式那一行可能有上万字——`LazyVStack` 的估算行高配 60ms 跟随器的 `scrollTo`，在结束换气泡时会落到内容之外，表现为整屏空白（Stream Check 复现过）。
+
+正文编辑的撤销、重做挂窗口 `UndoManager`（`WriterUndo`）：插入/追加正文是一次独立动作，文字编辑由 `UITextView` 自己登记，两边共用同一个栈，所以 ⌘Z、摇一摇和编辑菜单都能用。
 
 ### 4.4 数据与持久化
 
@@ -109,6 +115,7 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 | 文件存储 | SwiftData、CoreData | 存档要能导出成原版格式，ORM 会把结构绑死在 schema 上 |
 | 编辑器仍整份解密正文 | 编辑器窗口化 | 打开书只读 `body.meta.json`；阅读按页取文，编辑器仍整份解密 |
 | 手写 gzip | Foundation Compression | 不兼容原版的 RFC1952 流 |
+| 对话列用 `VStack` | `LazyVStack` | 流式行上万字时估算行高会让 `scrollTo` 落到内容之外，出现整屏空白；列已按条数截断，不需要懒加载 |
 | 语义色加系统 tint | 品牌主色 | 品牌色和系统冷灰底冲突，也不响应辅助功能设置 |
 | 提示词内嵌 Swift | 资源包加解析 | 规格要求逐字一致，内嵌可用于静态检查，资源包会多一条加载失败路径 |
 | token 估算照抄原版 | 接入 tokenizer | 换了裁剪点，输出就无法比对 |

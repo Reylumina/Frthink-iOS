@@ -387,7 +387,11 @@ HStack {
 | `EmptyStateView`、`InlineEmptyState` | 整页空态、区块空态 |
 | `ChapterNavigationRow` | 阅读目录和写作台章节表共用的章节行 |
 | `IconTile`、`ProviderIcon` | 一级分类图标、服务商图标 |
-| `glassSurface(radius:)` | 唯一的自定义玻璃入口 |
+| `SheetCloseButton`、`SheetConfirmButton` | sheet/编辑页的关闭与确认（iOS 26 由系统画 ×/✓） |
+| `FloatingGlassButton` | 浮在内容上的图标按钮（回到最新、回到底部） |
+| `SettingsLabelRow` | 二级以下页面的导航行：`Label` + 行尾值，无障碍字号下自动竖排 |
+| `WriterTypography` | 气泡与正文的字号/行距/宽度换算，和 `ReaderStyle` 共用同一套公式 |
+| `glassSurface(radius:)`、`glassSurface(_ shape:)` | 唯一的自定义玻璃入口 |
 
 新增共用组件前，先确认系统控件和上表都满足不了需求，并在组件注释里写明补的是什么。
 

@@ -27,7 +27,7 @@ python script/archive_import_check.py <备份路径>
 python script/pbxproj_check.py
 ```
 
-以上都是本地秒级检查，改完一批就跑，不依赖 CI。CI 按批次跑：一个功能点或一组相关改动做完，跑一次 `Self Check`；需要 IPA 时跑 `iOS Build`；界面批次末尾才跑 `UI Screenshots`，按 `DESIGN.md` §9 目检。
+本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上都是本地秒级检查，改完一批就跑，不依赖 CI。CI 按批次跑：一个功能点或一组相关改动做完，跑一次 `Self Check`；需要 IPA 时跑 `iOS Build`；界面批次末尾才跑 `UI Screenshots`，按 `DESIGN.md` §9 目检；流式相关的改动跑 `Stream Check`。
 
 CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检查（清单见 `ios/Frthink/App/SelfCheck.swift`）。结果写入 stdout 后退出，工作流用 `grep -q "ALL PASS"` 断言。真实备份检查需要 `fixture-backup.frthink`，缺少该文件时跳过。
 
@@ -35,10 +35,13 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 
 | 文件 | 产物 | 触发 |
 |---|---|---|
-| `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（65 项） | push、PR、手动 |
+| `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（65 项） | push main、手动 |
 | `.github/workflows/real-import.yml` | 真实备份导入/导出/重开/落盘 | 手动 |
-| `.github/workflows/ios.yml` | 未签名 IPA | push、PR、手动 |
+| `.github/workflows/ios.yml` | 未签名 IPA | push main、手动 |
 | `.github/workflows/ui-screenshots.yml` | 各 Tab 与二、三级页截图（出图前先跑自检） | 手动、push main |
+| `.github/workflows/stream-check.yml` | mock SSE 连跑三次 + 正文行数/段落断言 | 手动 |
+
+分支上的改动不会自动跑 CI，用 `gh workflow run self-check.yml --ref <分支>` 手动触发；同 workflow 同 ref 只保留最新一次，重复触发会取消正在排队/运行的那次，别在它跑的时候再发。
 
 仓库为 public，标准 macOS runner 免费。private 仓库额度耗尽时，job 将在 3 至 5 秒内被拒绝，annotation 是 `The job was not started because recent account payments have failed...`。该失败属于额度问题，与代码无关。
 
@@ -66,6 +69,11 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 9. 人物分组和去重在真实数据上的行为。
 10. 设置和各二级页逐级进出，返回不丢状态。
 11. Android 端读取 iOS 导出的全量备份。
+12. iOS 26 的 sheet 关闭用 `Button(role: .close)`（×）、确认用 `.confirm`（✓）——只能在模拟器/真机上看。
+13. 用户气泡白字对比度（浅色 4.9:1），以及深色模式下同一套 token 的表现。
+14. 摇一摇撤销、⌘Z/⇧⌘Z、编辑菜单里的撤销重做。
+15. 退后台 30 秒后回到前台，最后一段输入仍在（`beginBackgroundTask` 包着 flush，实际额度由系统给）。
+16. iPad 常规宽度：正文 36 字宽、对话列 720、表单 640 的居中观感。
 
 验证方式：安装至真机，在设置页填 API Key，测试连接，然后按 A1 到 A3 逐条跑。
 
@@ -106,6 +114,10 @@ java -cp tools/jadx-1.5.6-all.jar jadx.cli.JadxCLI -d out/jadx dx/classes.dex
 | 后台执行只有约 30 秒额度 | 系统收回后流式中断，已收内容保留 | `WriterController.beginBackgroundTask()` |
 | 56 万字正文全量进 `UITextView` | 打开长书有内存峰值；保存已拆正文文件，输入已防抖 | `ManuscriptTextEditor` |
 | 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` |
+| 长书首次发送仍主线程整本解密 | 第一次续写/世界刷新会卡一下；后续走缓存 | `ProjectSession.manuscript` 是副作用 getter |
+| 生成检查点每 3 秒改 `payload.messages` | 写作台每 3 秒可能整页重算一次，与 PERFORMANCE §2.1 的描述不一致 | `WriterController.persistPendingDelta` |
+| P19 归纳预设只存不用 | 导入导出保真，但不进任何提示词；原版消费点未取证前不接线 | `Archive.swift`、`PromptComposer+Material.swift` |
+| 长文编辑仍有一处在 sheet | `ManuscriptReaderSheet` 全屏读正文，DESIGN §5.10 要求 push | `ManuscriptReaderSheet` |
 
 ## 7. 约定
 
