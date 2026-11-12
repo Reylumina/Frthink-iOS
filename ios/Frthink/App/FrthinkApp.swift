@@ -8,11 +8,6 @@ struct FrthinkApp: App {
     init() {
         UIScrollView.appearance().showsVerticalScrollIndicator = false
         UIScrollView.appearance().showsHorizontalScrollIndicator = false
-        #if DEBUG
-        if LaunchArguments.mockStream {
-            URLProtocol.registerClass(MockStreamURLProtocol.self)
-        }
-        #endif
     }
 
     var body: some Scene {

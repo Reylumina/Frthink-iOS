@@ -60,6 +60,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p screenshots logs
+          python3 script/mock_sse_server.py > logs/server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8765/health >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8765/health >/dev/null
+
           for i in 1 2 3; do
             xcrun simctl terminate "$DEVICE" com.frthink.app || true
             xcrun simctl launch --console-pty "$DEVICE" com.frthink.app \

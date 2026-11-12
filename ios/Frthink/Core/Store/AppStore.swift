@@ -397,7 +397,7 @@ final class AppStore {
         let provider = ProviderSetting(
             id: "mock-stream-provider",
             kind: .deepseek,
-            baseURL: "https://mock.frthink.local/v1",
+            baseURL: "http://127.0.0.1:8765/v1",
             model: "mock-stream",
             temperature: 0.7,
             maxTokens: 8192,
