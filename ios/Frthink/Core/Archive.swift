@@ -724,9 +724,7 @@ enum FrthinkArchive {
             "imitationTemplate": world.styleTemplate,
             // iOS 私有键：文风笔记是用户可编辑数据，原版没有对应字段。
             "styleNotes": world.styleNotes,
-            "characters": world.characterSummaries.isEmpty
-                ? world.characters.map(\.name)
-                : world.characterSummaries,
+            "characters": Self.characterLines(for: world),
             "relationships": world.relationships,
             "events": [],
             "plotEvents": world.events.map { event in
@@ -1120,8 +1118,21 @@ enum FrthinkArchive {
 
     /// 人物卡模型 → 存档 JSON。memories 按原版对象数组写；空字段沿用原版
     /// 「默认值不输出」的习惯，减少与真实备份的差异。
-    private static func characterCardJSON(_ card: CharacterCard) -> [String: Any] {
-        var json: [String: Any] = [
+    /// 导出给 Android 的 `world.characters`。
+    ///
+    /// 用当前人物卡现算「姓名 · 身份」：改名、新建或合并之后，导入时存下的
+    /// `characterSummaries` 会和卡片对不上。只有一张卡都没有时才回落到快照。
+    static func characterLines(for world: WorldBook) -> [String] {
+        let lines: [String] = world.characters.map { card in
+            let identity = card.identity.trimmingCharacters(in: .whitespacesAndNewlines)
+            return identity.isEmpty ? card.name : "\(card.name) · \(identity)"
+        }
+        if !lines.isEmpty { return lines }
+        if !world.characterSummaries.isEmpty { return world.characterSummaries }
+        return []
+    }
+
+    private static func characterCardJSON(_ card: CharacterCard) -> [String: Any] {        var json: [String: Any] = [
             "id": card.id,
             "name": card.name,
             "identity": card.identity,
