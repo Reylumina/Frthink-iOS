@@ -307,19 +307,30 @@ struct EmptyStateView: View {
             }
 
             if let actionTitle, let action {
-                // 默认用次操作按钮，和世界页两栏的空态保持一致；整页只有一个动作时
-                // 传 isPrimaryAction 换成实底（§5.4、§5.7）。
-                Button(actionTitle, action: action)
-                    .buttonStyle(isPrimaryAction ? .borderedProminent : .bordered)
-                    .controlSize(.regular)
-                    // 可见高度 34pt，热区补到 44pt（§5.1）。
-                    .frame(minHeight: Theme.Layout.hitTarget)
-                    .contentShape(Capsule())
-                    .padding(.top, Theme.Spacing.xs)
+                actionButton(title: actionTitle, action: action)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Spacing.xxl)
         .padding(.horizontal, Theme.Spacing.l)
+    }
+
+    /// 默认用次操作按钮，和世界页两栏的空态保持一致；整页只有一个动作时
+    /// 传 isPrimaryAction 换成实底（§5.4、§5.7）。
+    ///
+    /// 两种按钮样式是不同类型，不能写成三元表达式，只能分支分别修饰。
+    @ViewBuilder
+    private func actionButton(title: String, action: @escaping () -> Void) -> some View {
+        let base = Button(title, action: action)
+            .controlSize(.regular)
+            // 可见高度 34pt，热区补到 44pt（§5.1）。
+            .frame(minHeight: Theme.Layout.hitTarget)
+            .contentShape(Capsule())
+            .padding(.top, Theme.Spacing.xs)
+        if isPrimaryAction {
+            base.buttonStyle(.borderedProminent)
+        } else {
+            base.buttonStyle(.bordered)
+        }
     }
 }
