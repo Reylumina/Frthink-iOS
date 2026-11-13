@@ -60,7 +60,8 @@ struct LibraryCoverImage: View {
     /// 书本/文稿符号里按书 id 稳定取一枚，同一本书永远同一个标记。
     private var placeholderMark: some View {
         Image(systemName: symbol)
-            .font(.system(size: height * 0.34, weight: .medium))
+            // 和列表图标方块同一个比例：字形占 50%，视觉重量才一致。
+            .font(.system(size: width * 0.5, weight: .medium))
             // 占位纸色在深浅两档都是压暗的，图标固定白色，是 §1.4 记下的例外。
             .foregroundStyle(Color.white)
             .accessibilityHidden(true)

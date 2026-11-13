@@ -289,7 +289,7 @@ struct TranslationProviderPicker: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.m) {
                 if let kind {
-                    ProviderIcon(kind: kind, size: 24)
+                    ProviderIcon(kind: kind)
                 }
                 Text(title)
                     .font(Theme.label)

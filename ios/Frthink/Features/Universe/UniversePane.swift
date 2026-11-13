@@ -32,7 +32,7 @@ struct UniversePane: View {
         Group {
             if entries.isEmpty {
                 EmptyStateView(
-                    symbol: "sparkles",
+                    symbol: AppDestination.universe.symbol,
                     title: "还没有宇宙资料",
                     actionTitle: "新建宇宙资料",
                     action: startCreating

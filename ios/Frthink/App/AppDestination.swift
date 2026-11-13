@@ -20,7 +20,9 @@ enum AppDestination: String, CaseIterable, Identifiable {
         // `book.pages` 是新版字号的书本符号；`book` 的旧字形在 iOS 26 上显得过时。
         case .reader: return "book.pages"
         case .world: return "point.3.connected.trianglepath.dotted"
-        case .universe: return "sparkles"
+        // 宇宙页是跨书共享的预设、共享世界书和技能：六边形网格读作「一堆共享条目」，
+        // 也和世界页的连接点图标区分开。
+        case .universe: return "circle.hexagongrid"
         case .settings: return "gearshape"
         }
     }
