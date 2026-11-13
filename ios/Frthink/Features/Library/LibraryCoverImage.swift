@@ -168,6 +168,8 @@ private enum ShelfCoverSymbols {
     ]
 
     static func symbol(for seed: String) -> String {
-        symbols[Int(Theme.Identity.stableHash(seed) % UInt64(symbols.count))]
+        // 用加盐的哈希：颜色和符号共用同一个哈希时，相近的 id（比如「分支 1」）
+        // 会同时撞色又撞图标，一排书看着像同一本。
+        symbols[Int(Theme.Identity.stableHash(seed + "#icon") % UInt64(symbols.count))]
     }
 }

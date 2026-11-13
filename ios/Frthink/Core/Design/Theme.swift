@@ -101,12 +101,20 @@ enum Theme {
             colors[index % colors.count]
         }
 
-        /// 稳定哈希：Fowler–Noll–Vo，跨版本、跨设备都一样。
+        /// 稳定哈希：FNV-1a 打底，末尾再做一轮 splitmix 收尾。
+        ///
+        /// 只做 FNV 时，名字相近的 id 会落进相邻槽位，一排书封经常撞色撞图标。
+        /// 收尾那两步把低位打散，跨版本、跨设备结果一致。
         static func stableHash(_ seed: String) -> UInt64 {
             var hash: UInt64 = 1_469_598_103_934_665_603
             for scalar in seed.unicodeScalars {
                 hash = (hash ^ UInt64(scalar.value)) &* 1_099_511_628_211
             }
+            hash ^= hash >> 30
+            hash = hash &* 0xBF58_476D_1CE4_E5B9
+            hash ^= hash >> 27
+            hash = hash &* 0x94D0_49BB_1331_11EB
+            hash ^= hash >> 31
             return hash
         }
 
