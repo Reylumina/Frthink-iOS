@@ -274,10 +274,7 @@ struct ReaderPane: View {
                 Label("阅读显示设置", systemImage: "textformat.size")
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(Font.subheadline)
-                .frame(minWidth: Theme.Layout.hitTarget, minHeight: Theme.Layout.hitTarget)
-                .contentShape(Rectangle())
+            ToolbarCircleIcon(symbol: "ellipsis")
         }
         .accessibilityLabel("更多阅读操作")
     }

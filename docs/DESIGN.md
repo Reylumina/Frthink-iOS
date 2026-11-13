@@ -367,6 +367,8 @@ HStack {
 - 不加自定义的「完成」键盘工具条。
 - 滚动区用 `.scrollDismissesKeyboard(.interactively)`。
 - 底部输入条放在 `.safeAreaInset(edge: .bottom)` 里，键盘避让交给系统。输入条的材质见 §1.6。
+- 键盘弹起时，正文区右上角浮一个圆形 X（`ToolbarCircleIcon`）：点一下收起键盘；滚动收起由 `.scrollDismissesKeyboard(.interactively)` 负责。
+- 顶栏动作统一用 `ToolbarCircleIcon`（30pt 圆 + 细描边 + 单色符号），和系统搜索框的关闭键同形状。
 - 续写、输入框、发送/停止三件控件包在**同一个胶囊表面**里，不各自成块：左侧续写、中间输入、右侧发送，同一条中轴，热区都是 44pt。发送键是 34pt 强调色实心圆，其余可见高度 `Theme.Layout.inlineControl`（34pt）。整条只出现一个玻璃/实底表面，外层不再套第二个胶囊。
 - 输入框随行数长高（最多 5 行）；多行时两侧按钮保持居中。
 

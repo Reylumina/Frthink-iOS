@@ -16,6 +16,8 @@ final class WriterComposerModel {
     var text: String = ""
     /// 父视图要求收起键盘时 +1。子视图收到后清掉自己的 FocusState。
     var dismissRequest: Int = 0
+    /// 键盘是否弹起。父视图据此显示「收起键盘」的 X。
+    var isEditing: Bool = false
 }
 
 struct WriterComposerBar: View {
@@ -59,6 +61,7 @@ struct WriterComposerBar: View {
             }
         }
         .onChange(of: focused) { _, editing in
+            model.isEditing = editing
             if !editing {
                 saveDraft()
             }

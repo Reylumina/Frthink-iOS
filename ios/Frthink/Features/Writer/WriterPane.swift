@@ -35,6 +35,8 @@ struct WriterPane: View {
     @State private var undoPrompt: WriterUndoPrompt?
     /// 输入条（含多选条）的高度：撤销提示浮在它上面，不挤动对话内容。
     @State private var bottomBarHeight: CGFloat = 0
+    /// 出现次数令牌：区分「切 Tab 又切回来」与「真的离开」。
+    @State private var appearanceToken = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
     /// 对话内容高度与视口高度：内容不满一屏时从顶部排，不把几条消息压在底部。
@@ -225,7 +227,7 @@ struct WriterPane: View {
                 Button {
                     openSheet(.manuscript)
                 } label: {
-                    Image(systemName: "doc.text")
+                    ToolbarCircleIcon(symbol: "doc.text")
                 }
                 .disabled(controller.isBusy)
                 .accessibilityLabel("正文")
@@ -233,7 +235,7 @@ struct WriterPane: View {
                 Menu {
                     writerMenu
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    ToolbarCircleIcon(symbol: "ellipsis")
                 }
                 .accessibilityLabel("更多写作操作")
             }
@@ -324,15 +326,25 @@ struct WriterPane: View {
             }
             #endif
         }
+        .onAppear {
+            // 每次出现换一个令牌，用来区分「切 Tab 又切回来」和「真的换了书」。
+            appearanceToken += 1
+        }
         .onDisappear {
             dismissKeyboard()
-            // 切书会重建整个 WriterPane；不停掉旧任务会留下一个孤儿流继续写
-            // 旧会话的 payload，回去时又从磁盘开新会话，两份同时落盘。
-            if controller.isBusy {
-                controller.stop()
-            }
             controller.checkpoint(session: session)
             discardUndoActions()
+
+            // 切 Tab 也会触发 onDisappear，但生成必须继续：只有离开后没再回来
+            // （切书/关页，旧 Pane 被销毁）才停掉旧任务，避免孤儿流继续写旧会话。
+            let token = appearanceToken
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                guard appearanceToken == token else { return }
+                if controller.isBusy {
+                    controller.stop()
+                }
+            }
         }
     }
 
@@ -471,6 +483,22 @@ struct WriterPane: View {
                 GeometryReader { proxy in
                     Color.clear
                         .task(id: proxy.size.height) { viewportHeight = proxy.size.height }
+                }
+            }
+            // 键盘弹起时右侧浮一个圆形 X：点一下收起，和系统搜索的关闭键同形状。
+            // 滚动收起由下面的 .scrollDismissesKeyboard 负责（§5.9）。
+            .overlay(alignment: .topTrailing) {
+                if composer.isEditing {
+                    Button {
+                        composer.dismissRequest += 1
+                    } label: {
+                        ToolbarCircleIcon(symbol: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, Theme.Spacing.l)
+                    .padding(.top, Theme.Spacing.s)
+                    .accessibilityLabel("收起键盘")
+                    .transition(.opacity)
                 }
             }
             .scrollDismissesKeyboard(.interactively)

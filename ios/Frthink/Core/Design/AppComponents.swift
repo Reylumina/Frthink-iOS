@@ -200,6 +200,23 @@ struct ProviderIcon: View {
     }
 }
 
+/// 工具栏圆形按钮的标签：30pt 圆 + 一条细描边。
+///
+/// 和系统搜索框右侧的关闭键同一种形状，顶栏几个动作因此有统一的轮廓，
+/// 不再是一排粗细不一的裸符号。
+struct ToolbarCircleIcon: View {
+    let symbol: String
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.iconTileSize
+
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.46, weight: .semibold))
+            .frame(width: size, height: size)
+            .overlay(Circle().strokeBorder(Theme.separator, lineWidth: 0.5))
+            .contentShape(Circle())
+    }
+}
+
 // MARK: - 区块标题
 
 /// Form / List 的 Section header。
