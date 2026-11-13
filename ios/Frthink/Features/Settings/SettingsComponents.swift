@@ -16,7 +16,7 @@ struct SettingsLabelRow: View {
     var detail: String? = nil
 
     private var tint: Color {
-        symbolTint ?? Theme.Identity.color(for: title)
+        symbolTint ?? Theme.ListIconColor.color(for: title)
     }
 
     var body: some View {

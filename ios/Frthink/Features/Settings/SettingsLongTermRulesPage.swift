@@ -30,7 +30,7 @@ struct SettingsLongTermRulesPage: View {
 
                 if rules.isEmpty {
                     InlineEmptyState(
-                        symbol: "list.bullet.rectangle",
+                        symbol: "doc.plaintext",
                         message: "还没有长期规则"
                     )
                 } else {

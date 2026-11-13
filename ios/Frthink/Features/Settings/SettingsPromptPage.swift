@@ -29,7 +29,7 @@ struct SettingsPromptPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "技能与预设",
-                    symbol: "text.book.closed",
+                    symbol: "wand.and.stars",
                     detail: "\(store.settings.skills.count) 个技能"
                 )
             }
@@ -44,7 +44,7 @@ struct SettingsPromptPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "语料收集库",
-                    symbol: "text.quote",
+                    symbol: "tray.full",
                     detail: "\(store.settings.corpusLibraries.count) 个库"
                 )
             }
@@ -95,7 +95,7 @@ struct SettingsPromptPage: View {
             NavigationLink {
                 SettingsLongTermRulesPage(store: store)
             } label: {
-                SettingsLabelRow(title: "长期规则摘要", symbol: "list.bullet.rectangle")
+                SettingsLabelRow(title: "长期规则摘要", symbol: "checklist")
             }
         } header: {
             AppSectionHeader(title: "对话总结")

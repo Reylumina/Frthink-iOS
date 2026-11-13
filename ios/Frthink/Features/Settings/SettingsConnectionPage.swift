@@ -119,7 +119,7 @@ struct SettingsConnectionPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "翻译模型",
-                    symbol: "character.bubble",
+                    symbol: "bubble.left.and.bubble.right",
                     detail: translationModelShortLabel
                 )
             }
@@ -128,7 +128,7 @@ struct SettingsConnectionPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "摘要模型",
-                    symbol: "text.append",
+                    symbol: "rectangle.compress.vertical",
                     detail: summaryModelShortLabel
                 )
             }
@@ -146,7 +146,7 @@ struct SettingsConnectionPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "全局模型响应",
-                    symbol: "dial.medium",
+                    symbol: "slider.horizontal.3",
                     detail: String(format: "%.2f", store.settings.defaultTemperature)
                 )
             }
@@ -155,7 +155,7 @@ struct SettingsConnectionPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "长上下文预算",
-                    symbol: "gauge.with.dots.needle.33percent",
+                    symbol: "gauge",
                     detail: outputBudgetShortLabel
                 )
             }
