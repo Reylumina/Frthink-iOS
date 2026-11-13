@@ -54,15 +54,21 @@ struct LibraryCoverImage: View {
         .accessibilityHidden(true)
     }
 
-    /// 没有封面时的书脊标记：单色 `book.pages`，不加描边、投影和装饰线。
+    /// 没有封面时的书脊标记：书名首字，衬线字体，白色。
     ///
-    /// 不用 `book.closed` 这类旧字形；`book.pages` 是 iOS 17 起可用的新书稿符号。
+    /// 用一个通用书本图标时，六本书看起来是同一本；换成首字后一行书名自带身份，
+    /// 也省掉一个到处重复的符号。字号跟封面高度走，随 Dynamic Type 缩放。
     private var placeholderMark: some View {
-        Image(systemName: "book.pages")
-            .symbolRenderingMode(.monochrome)
-            .font(.callout.weight(.regular))
-            .foregroundStyle(Color.white.opacity(0.9))
+        Text(initialMark)
+            .font(.system(size: height * 0.36, weight: .medium, design: .serif))
+            .foregroundStyle(Color.white.opacity(0.92))
+            .minimumScaleFactor(0.6)
             .accessibilityHidden(true)
+    }
+
+    /// 书名首字。空白书名退回「无题」的首字，不会显示一个空封面。
+    private var initialMark: String {
+        String(displayTitle.prefix(1))
     }
 
     private var placeholderColor: Color {
