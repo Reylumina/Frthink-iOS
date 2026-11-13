@@ -66,7 +66,7 @@ Frthink 应该看起来像 iOS 自带的写作应用：安静、现代、正文�
 
 ### 1.4 书封占位色
 
-书封用 `Theme.Identity` 的 10 种纸色：色相拉开、明度有深有浅（全用低饱和深色时书架像一排墓碑），按书项目 id 稳定取色，浅色和深色各一档。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放 10 枚书本/文稿符号中的一枚（`book.pages`、`book.closed`、`books.vertical`、`text.book.closed`、`character.book.closed`、`doc.text`、`doc.plaintext`、`scroll`、`quote.opening`、`bookmark`），按同一个 id 稳定取，单色、同一字重、白色。不用书名首字。不加描边和装饰线。
+书封用 `Theme.Identity` 的 10 种纸色，全部取系统动态色（red/orange/brown/green/teal/blue/indigo/purple/pink/gray），按书项目 id 稳定取色。依据 HIG「Color」的 System colors 一节：用系统色（随深浅色、增强对比度和玻璃材质自动适配），不要在代码里写死系统色值——所以这里不出现 hex。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放 10 枚书本/文稿符号中的一枚（`book.pages`、`book.closed`、`books.vertical`、`text.book.closed`、`character.book.closed`、`doc.text`、`doc.plaintext`、`scroll`、`quote.opening`、`bookmark`），按同一个 id 稳定取，单色、同一字重、白色。不用书名首字。不加描边和装饰线。
 
 **一级分类图标**用系统语义亮色 + 同一种形状：实底圆角方块 + 白色符号，每个分类固定一个色相（连接=蓝、提示词=紫、存档=青、存储=橙、外观=粉、关于=绿）。注意纸色（`Theme.Identity`）只给书封用——它是内容身份，低饱和；UI 图标要用系统色，否则整屏发闷。AI 服务商图标与系统图标同尺寸（32pt），用品牌标，不套圆角色块。
 

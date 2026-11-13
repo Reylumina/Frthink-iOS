@@ -150,6 +150,7 @@ private final class CoverThumbnailCache {
 /// 和纸色一样按书 id 稳定取，同一本书不会每次打开换一个图标。
 /// 纸色在 Theme.Identity，和一级分类图标共用一套。
 private enum ShelfCoverSymbols {
+    /// 只用一眼能读出「书 / 文稿」的符号：引号、书签这类小尺寸下会读成标点的形状不要。
     private static let symbols: [String] = [
         "book.pages",
         "book.closed",
@@ -158,9 +159,9 @@ private enum ShelfCoverSymbols {
         "character.book.closed",
         "doc.text",
         "doc.plaintext",
-        "scroll",
-        "quote.opening",
-        "bookmark",
+        "notebook",
+        "newspaper",
+        "doc.richtext",
     ]
 
     static func symbol(for seed: String) -> String {

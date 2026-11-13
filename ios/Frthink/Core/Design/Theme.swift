@@ -73,17 +73,21 @@ enum Theme {
     /// 它不是品牌色，也不用于按钮、开关、状态或页面底——只给「这是哪一本书 /
     /// 哪一类东西」上色。色相拉开、明度有深有浅，深色模式各降一档亮度。
     enum Identity {
+        /// 10 个色相，全部取系统动态色。
+        ///
+        /// HIG「Color」的 System colors 一节要求：用系统色（会随深浅色、增强对比度和
+        /// 玻璃材质自动适配），不要在代码里写死系统色值。所以这里不出现任何 hex。
         static let colors: [Color] = [
-            dynamic(light: 0x3C3A37, dark: 0x2B2926),  // 炭黑
-            dynamic(light: 0x8A5A46, dark: 0x6B4435),  // 陶土
-            dynamic(light: 0x5C6B4F, dark: 0x47543D),  // 苔绿
-            dynamic(light: 0x4E5D6C, dark: 0x3C4957),  // 石板蓝
-            dynamic(light: 0x6A4A5E, dark: 0x523A49),  // 梅子
-            dynamic(light: 0x9A7C58, dark: 0x765E42),  // 赭石
-            dynamic(light: 0x2F6F7E, dark: 0x255967),  // 深青
-            dynamic(light: 0xA34E5A, dark: 0x833C46),  // 砖红
-            dynamic(light: 0x6E5AA8, dark: 0x58478A),  // 靛紫
-            dynamic(light: 0xB07C2E, dark: 0x8D6224),  // 琥珀
+            Color(uiColor: .systemRed),
+            Color(uiColor: .systemOrange),
+            Color(uiColor: .systemBrown),
+            Color(uiColor: .systemGreen),
+            Color(uiColor: .systemTeal),
+            Color(uiColor: .systemBlue),
+            Color(uiColor: .systemIndigo),
+            Color(uiColor: .systemPurple),
+            Color(uiColor: .systemPink),
+            Color(uiColor: .systemGray),
         ]
 
         /// 按 id 稳定取色：同一本书、同一个分类永远同一个颜色。
