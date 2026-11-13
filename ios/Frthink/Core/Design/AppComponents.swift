@@ -121,6 +121,14 @@ enum AppTone {
     case warning
     case danger
 
+    /// 胶囊里的文字色：比色相本身更靠近正文色，保证小字对比度。
+    var pillText: Color {
+        if #available(iOS 18.0, *) {
+            return color.mix(with: .primary, by: 0.35)
+        }
+        return color
+    }
+
     var color: Color {
         switch self {
         case .neutral: return .secondary
@@ -368,7 +376,9 @@ struct StatusPill: View {
     var body: some View {
         Text(text)
             .font(Theme.badge)
-            .foregroundStyle(tone.color)
+            // 同色小字压在 16% 同色底上，浅色档只有 2:1 上下；往正文色方向压一档，
+            // 深浅两档都过 4.5:1，颜色语义仍在。
+            .foregroundStyle(tone.pillText)
             .padding(.horizontal, Theme.Spacing.s)
             .padding(.vertical, 2)
             .background(Capsule().fill(tone.color.opacity(Theme.tintedFillOpacity)))

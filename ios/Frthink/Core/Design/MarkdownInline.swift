@@ -10,6 +10,9 @@ enum MarkdownInline {
     static func attributed(_ raw: String) -> AttributedString? {
         // 加粗、斜体都交给系统解析；解析失败就退回纯文本，不会出现半截标记。
         guard raw.contains("*") || raw.contains("__") else { return nil }
+        // 带方括号或反引号时保持原文：行内解析会把 [注](url) 的方括号和反引号吃掉，
+        // 小说正文里这两个符号比 Markdown 结构更常见。
+        guard !raw.contains("["), !raw.contains("`") else { return nil }
         return try? AttributedString(
             markdown: raw,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
