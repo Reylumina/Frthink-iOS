@@ -14,6 +14,8 @@ struct ReaderParagraphView: View {
     let highlights: [NSRange]
     /// 当前跳到的那一处命中。
     let current: NSRange?
+    /// 这一段就是章节标题所在的那一块：用衬线加粗，和书封首字同一套语气。
+    var isHeading: Bool = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -22,9 +24,14 @@ struct ReaderParagraphView: View {
         DynamicTypeFont.bodySize(Double(fontSize), dynamicTypeSize: dynamicTypeSize)
     }
 
+    /// 章节标题：衬线、略大、稍重。正文仍是系统无衬线，读时不抢注意力。
+    private var headingFont: Font {
+        .system(size: scaledFontSize * 1.08, weight: .semibold, design: .serif)
+    }
+
     var body: some View {
         Text(displayText)
-            .font(ReaderStyle.bodyFont(size: scaledFontSize))
+            .font(isHeading ? headingFont : ReaderStyle.bodyFont(size: scaledFontSize))
             .foregroundStyle(ReaderStyle.ink(dark: darkPage))
             .lineSpacing(ReaderStyle.lineSpacing(size: scaledFontSize, lineHeight: lineHeight))
             .multilineTextAlignment(.leading)

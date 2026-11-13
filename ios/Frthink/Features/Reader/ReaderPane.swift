@@ -284,6 +284,11 @@ struct ReaderPane: View {
 
     // MARK: - 正文
 
+    /// 章节标题所在块的起点；读一次，块循环里只做集合查找。
+    private var chapterStarts: Set<Int> {
+        Set(session.payload.chapters.map(\.location))
+    }
+
     private var readingSurface: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
@@ -301,7 +306,8 @@ struct ReaderPane: View {
                         lineHeight: lineHeight,
                         darkPage: darkPage,
                         highlights: highlightMap[block.start] ?? [],
-                        current: currentHighlight(in: block)
+                        current: currentHighlight(in: block),
+                        isHeading: chapterStarts.contains(block.start)
                     )
                     .id(block.start)
                 }

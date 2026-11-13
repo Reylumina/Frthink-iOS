@@ -75,6 +75,12 @@ enum Theme {
     /// 标题。
     static let heading = Font.title3.weight(.semibold)
 
+    /// 书名的衬线字体。
+    ///
+    /// 书封占位用书名首字的衬线体，书架行和创作页标题跟着用同一套，书名才像
+    /// 「书」而不像列表项。正文保持系统无衬线，阅读时不抢注意力。
+    static let bookTitle = Font.system(.headline, design: .serif)
+
     /// 界面文字。无衬线、系统字号。
     static let label = Font.body
     static let labelEmphasis = Font.headline
