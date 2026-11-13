@@ -39,8 +39,7 @@ enum WriterTypography {
     /// 段距跟着字号走：行距是 0.6 倍字号，段距要比它明显大一截，
     /// 否则段落和折行看起来一样（0.9 倍在默认字号下约 16pt）。
     static func paragraphSpacing(size: CGFloat) -> CGFloat {
-        // 和阅读页同一个 token，不按字号缩放。
-        Theme.Layout.paragraphSpacing
+        Theme.Layout.paragraphSpacing(fontSize: size)
     }
 
     /// 把正文拆成段落：按行拆、丢掉空行、去掉首尾空白。
