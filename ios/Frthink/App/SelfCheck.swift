@@ -2151,8 +2151,9 @@ enum SelfCheck {
                 "正文块没有进来源列表"
             )
             let system = prepared.messages.first?.content ?? ""
-            try expect(system.contains("末尾片段"), "正文末尾片段没有进请求")
-            try expect(!system.contains("开头标记"), "只发末尾时仍带了正文开头")
+            let joinedMessages = prepared.messages.map(\.content).joined(separator: "\n")
+            try expect(joinedMessages.contains("末尾片段"), "正文末尾片段没有进请求")
+            try expect(!joinedMessages.contains("开头标记"), "只发末尾时仍带了正文开头")
             try expect(system.contains("雨夜来客"), "事件卡没有渲染进剧情梗概块")
             try expect(
                 !system.contains("旧梗概不应进提示词"),
