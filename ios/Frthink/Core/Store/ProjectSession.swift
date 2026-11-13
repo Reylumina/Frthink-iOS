@@ -528,7 +528,7 @@ final class ProjectSession {
     private nonisolated static func performDiskWrite(
         store: FileStore,
         kind: SaveKind,
-        baseProject: ProjectRecord,
+        baseProject: Project,
         payloadSnapshot: ProjectPayload,
         windowSnapshot: EditorWindowState?,
         bodySnapshot: String?,
