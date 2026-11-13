@@ -2303,6 +2303,111 @@ enum SelfCheck {
             return "saveNowAndWait 后读盘一致"
         }
 
+        // 0.8.213 对齐：create_character_card 工具请求与 400 无条件关 thinking 重试
+        check("llm.createCharacterCardRequest") {
+            var req = LLMRequest(
+                model: "deepseek-chat",
+                messages: PromptComposer.characterIngestMessages(bubble: "林昭收剑入鞘"),
+                stream: false,
+                temperature: 0.2,
+                maxTokens: 8_192,
+                tools: [PromptComposer.createCharacterCardTool],
+                toolChoiceName: "create_character_card",
+                parallelToolCalls: false,
+                omitThinking: true
+            )
+            let firstData = req.jsonBody(
+                isDeepSeek: true,
+                kind: .deepseek,
+                providerLevel: .high,
+                offStyle: .none
+            )
+            let firstObj = (try? JSONSerialization.jsonObject(with: firstData)) as? [String: Any] ?? [:]
+            try expect(firstObj["thinking"] == nil, "首次工具调用不应发送 thinking")
+            try expect(firstObj["parallel_tool_calls"] as? Bool == false, "parallel_tool_calls 应为 false")
+            try expect(firstObj["max_tokens"] as? Int == 8_192, "max_tokens 应为 8192")
+            try expect((firstObj["tools"] as? [[String: Any]])?.count == 1, "tools 应含 1 个函数定义")
+
+            req.omitThinking = false
+            req.forceThinkingDisabledLiteral = true
+            let retryData = req.jsonBody(
+                isDeepSeek: false,
+                kind: .openAICompatible,
+                providerLevel: .high,
+                offStyle: .none
+            )
+            let retryObj = (try? JSONSerialization.jsonObject(with: retryData)) as? [String: Any] ?? [:]
+            let thinking = retryObj["thinking"] as? [String: String]
+            try expect(thinking == ["type": "disabled"], "400 重试未无条件附带 thinking disabled")
+            return "首次 omitThinking + 重试 thinking disabled ok"
+        }
+
+        // 0.8.213 对齐：长期规则注入门控（enabled / rulesVersion / 暂无长期规则。 / sourceHash）
+        check("prompt.longTermRulesGate") {
+            var world = WorldBook(longTermRules: "保持冷峻文风")
+            world.summaryEnabled = false
+            try expect(
+                PromptAssembly.from(world: world, manuscript: "正文").conversationSummary.isEmpty,
+                "summaryEnabled=false 时不应注入"
+            )
+            world.summaryEnabled = true
+            world.longTermRules = "暂无长期规则。"
+            try expect(
+                PromptAssembly.from(world: world, manuscript: "正文").conversationSummary.isEmpty,
+                "暂无长期规则。 不应注入"
+            )
+            world.longTermRules = "保持冷峻文风"
+            world.summarySourceMessageKeys = ["user:1:abc"]
+            world.summarySourceHash = "wrong-hash"
+            try expect(
+                PromptAssembly.from(world: world, manuscript: "正文").conversationSummary.isEmpty,
+                "sourceHash 不一致时不应注入"
+            )
+            world.summarySourceHash = SummaryKey.sourceHash(keys: ["user:1:abc"])
+            try expect(
+                PromptAssembly.from(world: world, manuscript: "正文").conversationSummary == "保持冷峻文风",
+                "有效规则未注入"
+            )
+            return "长期规则 4 项门控 ok"
+        }
+
+        // 0.8.213 对齐：启用语料库全量注入（无 10 条截断）
+        check("prompt.corpusFullInjection") {
+            let entries = (1...12).map { i in
+                CorpusEntry(source: "测试", title: "词条\(i)", text: "原句内容\(i)")
+            }
+            var settings = AppSettings()
+            settings.corpusEnabled = true
+            settings.corpusLibraries = [CorpusLibrary(name: "全量库", entries: entries, enabled: true)]
+            let assembly = PromptAssembly.from(world: WorldBook(), manuscript: "", settings: settings)
+            try expect(assembly.corpus.count == 12, "语料注入条数应为 12，实际 \(assembly.corpus.count)")
+            return "12 条全量注入 ok"
+        }
+
+        // 0.8.213 对齐：人物卡连通分量合并与句子标点合并
+        check("world.consolidateAndMerge") {
+            let cards = [
+                CharacterCard(name: "林昭", identity: "剑修"),
+                CharacterCard(name: "小昭", personality: "果决"),
+                CharacterCard(name: "林昭", aliases: ["小昭"], goals: "寻剑"),
+            ]
+            let consolidated = WorldMerge.consolidateConnected(cards)
+            try expect(consolidated.count == 1, "连通分量应合并为 1 张，实际 \(consolidated.count)")
+            let merged = WorldMerge.appended("冷静克制，言语不多", "冷静克制，言语不多\n重情重义，不喜张扬")
+            try expect(merged.contains("冷静克制，言语不多"), "原句丢失")
+            try expect(merged.contains("重情重义，不喜张扬"), "新增句丢失")
+            return "连通合并 + 逗号保留 ok"
+        }
+
+        // 0.8.213 对齐：译文目标默认为 body，旧 zh-CN 解码归一化为 body
+        check("translation.defaultTargetBody") {
+            try expect(TranslationSegment.defaultTarget == "body", "defaultTarget 应为 body")
+            let raw = Data(#"{"sourceHash":"h1","segment":0,"target":"zh-CN","payload":"译文"}"#.utf8)
+            let seg = try JSONDecoder().decode(TranslationSegment.self, from: raw)
+            try expect(seg.target == "body", "旧 zh-CN 应归一化为 body，实际 \(seg.target)")
+            return "target=body + 旧存档兼容 ok"
+        }
+
         lines.append("=== \(failures == 0 ? "ALL PASS" : "\(failures) FAILED") ===")
         for line in lines { print(line) }
         fflush(stdout)
