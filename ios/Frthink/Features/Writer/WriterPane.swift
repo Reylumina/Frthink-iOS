@@ -35,8 +35,6 @@ struct WriterPane: View {
     @State private var undoPrompt: WriterUndoPrompt?
     /// 输入条（含多选条）的高度：撤销提示浮在它上面，不挤动对话内容。
     @State private var bottomBarHeight: CGFloat = 0
-    /// 出现次数令牌：区分「切 Tab 又切回来」与「真的离开」。
-    @State private var appearanceToken = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
     /// 对话内容高度与视口高度：内容不满一屏时从顶部排，不把几条消息压在底部。
@@ -326,21 +324,18 @@ struct WriterPane: View {
             }
             #endif
         }
-        .onAppear {
-            // 每次出现换一个令牌，用来区分「切 Tab 又切回来」和「真的换了书」。
-            appearanceToken += 1
-        }
         .onDisappear {
             dismissKeyboard()
             controller.checkpoint(session: session)
             discardUndoActions()
 
-            // 切 Tab 也会触发 onDisappear，但生成必须继续：只有离开后没再回来
-            // （切书/关页，旧 Pane 被销毁）才停掉旧任务，避免孤儿流继续写旧会话。
-            let token = appearanceToken
+            // 切 Tab 也会触发 onDisappear，但生成必须继续。判据不是「回来了没有」，
+            // 而是「当前书还是不是这本」：切书后旧 Pane 被 .id() 销毁，旧任务必须停，
+            // 否则孤儿流会继续往旧会话写。等两秒让切书时的新会话先落定。
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                guard appearanceToken == token else { return }
+                let active = UserDefaults.standard.string(forKey: RootView.activeProjectKey)
+                guard active != session.project.id else { return }
                 if controller.isBusy {
                     controller.stop()
                 }

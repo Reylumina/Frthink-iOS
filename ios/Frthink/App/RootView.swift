@@ -6,7 +6,8 @@ import SwiftUI
 /// 所以这里也把 `LibraryView` 当 sheet 用，Tab 上只显示当前书稿和切换入口。
 struct RootView: View {
     /// 上次打开的书。冷启动直接回到它，不再先给一屏「请选择书稿」。
-    private static let activeProjectKey = "root.activeProjectID"
+    /// 当前书稿 id 的 AppStorage 键。创作页离开时要靠它判断「是不是换了书」。
+    static let activeProjectKey = "root.activeProjectID"
 
     /// 从启动参数里读初始 Tab。
     static var launchDestination: AppDestination {
