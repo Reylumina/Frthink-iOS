@@ -44,17 +44,13 @@ enum Theme {
     /// 用户气泡不在此列，它用实底表达角色（见 `Theme.Bubble`）。
     static let tintedFillOpacity: Double = 0.12
 
-    /// 用户气泡：实底 + 反色文字，和系统「信息」的收发关系一致。
+    /// 用户气泡：系统灰实底 + 正文色文字。
     ///
-    /// 底色是系统强调色压深 18%：原样的系统蓝配白字只有 4.0:1，达不到正文
-    /// 尺寸需要的 4.5:1（§5.6）。压深仍由系统色推导，不引入自定义色值。
-    static let bubbleFill: Color = {
-        if #available(iOS 18.0, *) {
-            return Color.accentColor.mix(with: .black, by: 0.18)
-        }
-        return Color.accentColor
-    }()
-    static let bubbleForeground = Color.white
+    /// 用系统灰（浅色下是浅灰、深色下是深灰）而不是强调色：强调色只留给可点的
+    /// 控件，整块气泡铺蓝会把「唯一的主操作」压掉，也和系统「信息」的收发关系
+    /// 对不上。文字用 `.label`，深浅两种底色都自动满足 4.5:1（§5.6）。
+    static let bubbleFill = Color(uiColor: .systemGray5)
+    static let bubbleForeground = Color(uiColor: .label)
 
     // MARK: - 字体
 
