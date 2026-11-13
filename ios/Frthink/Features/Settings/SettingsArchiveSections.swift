@@ -9,11 +9,10 @@ import UniformTypeIdentifiers
 /// 这一块只负责选文件；导入页和保存面板由 `SettingsArchivePage` 持有。
 struct SettingsProjectArchiveSection: View {
     let store: AppStore
-    let onImportPicked: (URL) -> Void
+    let onPickFile: () -> Void
     let onExportReady: (Data, String) -> Void
 
     @State private var selectedProjectID: String?
-    @State private var isImporting = false
     @State private var isPreparingExport = false
 
     var body: some View {
@@ -44,7 +43,7 @@ struct SettingsProjectArchiveSection: View {
             .disabled(store.activeProjects.isEmpty || isPreparingExport)
 
             Button {
-                isImporting = true
+                onPickFile()
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "square.and.arrow.down")
@@ -53,13 +52,6 @@ struct SettingsProjectArchiveSection: View {
                     Spacer(minLength: 0)
                 }
                 .frame(minHeight: Theme.Layout.controlHeight)
-            }
-            .fileImporter(
-                isPresented: $isImporting,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false
-            ) { result in
-                handleImportResult(result)
             }
         } header: {
             AppSectionHeader(title: "书项目存档")
@@ -109,17 +101,6 @@ struct SettingsProjectArchiveSection: View {
         }
     }
 
-    @MainActor
-    private func handleImportResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .failure(let error):
-            guard !settingsIsUserCancelled(error) else { return }
-            store.errorMessage = "读取存档失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            onImportPicked(url)
-        }
-    }
 }
 
 // MARK: - 全量存档
@@ -127,10 +108,9 @@ struct SettingsProjectArchiveSection: View {
 /// 全量存档 · .frthink：全部项目 + 设置（不含 API 信息）。
 struct SettingsFullArchiveSection: View {
     let store: AppStore
-    let onImportPicked: (URL) -> Void
+    let onPickFile: () -> Void
     let onExportReady: (Data, String) -> Void
 
-    @State private var isImporting = false
     @State private var isPreparingExport = false
 
     var body: some View {
@@ -158,7 +138,7 @@ struct SettingsFullArchiveSection: View {
             .disabled(store.projects.isEmpty || isPreparingExport)
 
             Button {
-                isImporting = true
+                onPickFile()
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
                     Image(systemName: "square.and.arrow.down.on.square")
@@ -167,13 +147,6 @@ struct SettingsFullArchiveSection: View {
                     Spacer(minLength: 0)
                 }
                 .frame(minHeight: Theme.Layout.controlHeight)
-            }
-            .fileImporter(
-                isPresented: $isImporting,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: false
-            ) { result in
-                handleImportResult(result)
             }
         } header: {
             AppSectionHeader(title: "全部项目")
@@ -222,15 +195,4 @@ struct SettingsFullArchiveSection: View {
         }
     }
 
-    @MainActor
-    private func handleImportResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .failure(let error):
-            guard !settingsIsUserCancelled(error) else { return }
-            store.errorMessage = "读取存档失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            onImportPicked(url)
-        }
-    }
 }

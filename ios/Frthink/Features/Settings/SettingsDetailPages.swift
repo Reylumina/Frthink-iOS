@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct SettingsArchivePage: View {
     let store: AppStore
 
+    @State private var importPickKind: ArchiveImportKind?
     @State private var pendingImport: ArchiveImportRequest?
     @State private var importer: ArchiveImportController?
     @State private var exportDocument: ArchiveFileDocument?
@@ -21,18 +22,39 @@ struct SettingsArchivePage: View {
         Form {
             SettingsProjectArchiveSection(
                 store: store,
-                onImportPicked: { url in beginImport(.project, url: url) },
+                onPickFile: { importPickKind = .project },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "书项目存档已导出")
                 }
             )
             SettingsFullArchiveSection(
                 store: store,
-                onImportPicked: { url in beginImport(.full, url: url) },
+                onPickFile: { importPickKind = .full },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "全量存档已导出")
                 }
             )
+        }
+        // 文件选择器挂在这一页，不挂在按钮所在的行上：行会被复用，面板收起时
+        // 同一视图上立刻再弹页面也会被系统丢掉——两种都会表现成「点了没反应」。
+        .fileImporter(
+            isPresented: Binding(
+                get: { importPickKind != nil },
+                set: { if !$0 { importPickKind = nil } }
+            ),
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            let kind = importPickKind
+            importPickKind = nil
+            switch result {
+            case .failure(let error):
+                guard !settingsIsUserCancelled(error) else { return }
+                store.errorMessage = "读取存档失败：\(error.localizedDescription)"
+            case .success(let urls):
+                guard let url = urls.first, let kind else { return }
+                beginImport(kind, url: url)
+            }
         }
         .navigationTitle("存档与备份")
         .navigationBarTitleDisplayMode(.inline)

@@ -19,6 +19,16 @@ enum MarkdownInline {
         )
     }
 
+    /// 整行只有分隔线标记（`---`、`***`、`___`）时返回 true。
+    ///
+    /// 模型很爱在段与段之间插一条横线；小说正文里它们只是噪音，两处渲染都跳过。
+    static func isDivider(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3 else { return false }
+        let markers = Set(trimmed)
+        return markers == ["-"] || markers == ["*"] || markers == ["_"]
+    }
+
     /// 行首的标题层级（1…3）。不是标题返回 nil。
     static func headingLevel(_ raw: String) -> Int? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)

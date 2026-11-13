@@ -397,7 +397,11 @@ struct WriterPane: View {
 
         Button {
             dismissKeyboard()
-            isImportingBody = true
+            // 菜单收起那一帧不能立刻提文件选择器，系统会拒绝，表现为点了没反应。
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                isImportingBody = true
+            }
         } label: {
             Label("导入正文…", systemImage: "square.and.arrow.down")
         }

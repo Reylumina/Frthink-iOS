@@ -47,6 +47,6 @@ enum WriterTypography {
         // 只切 "\n" 会把 \r 留在段尾，完成态那段会多出一行，和流式对不上。
         text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !MarkdownInline.isDivider($0) }
     }
 }
