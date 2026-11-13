@@ -69,8 +69,6 @@ struct SettingsConnectionPage: View {
                 HStack(spacing: Theme.Spacing.s) {
                     if isTesting {
                         ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "bolt.horizontal")
                     }
                     Text(isTesting ? "正在测试…" : "测试连接")
                     Spacer(minLength: 0)

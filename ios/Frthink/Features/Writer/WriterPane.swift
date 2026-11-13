@@ -198,133 +198,133 @@ struct WriterPane: View {
                 guard let text = controller.consumeInstructionToRestore() else { return }
                 composer.text = text
             }
-        .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
-        .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                modelMenu
+            .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
+            .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
+            .toolbar { writerToolbar }
+            .pageBackground()
+            .onChange(of: controller.budgetAlert?.id) { _, newValue in
+                budgetPresented = newValue != nil
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    openSheet(.manuscript)
-                } label: {
-                    Image(systemName: "doc.text")
-                }
-                .disabled(controller.isBusy)
-                .accessibilityLabel("正文")
-
-                Menu {
-                    writerMenu
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("更多写作操作")
-            }
-        }
-        .pageBackground()
-        .onChange(of: controller.budgetAlert?.id) { _, newValue in
-            budgetPresented = newValue != nil
-        }
-        .confirmationDialog(
-            "回退到这条用户指令",
-            isPresented: $showRollbackDialog,
-            titleVisibility: .visible
-        ) {
-            Button("把该指令恢复到输入框并删除其后的对话分支", role: .destructive) {
+            .deleteConfirmationDialog("回退到这条用户指令", isPresented: $showRollbackDialog, actionTitle: "把该指令恢复到输入框并删除其后的对话分支") {
                 performRollback()
             }
-            Button("取消", role: .cancel) {
-                rollbackTarget = nil
+            .confirmationDialog(
+                messageAction?.title ?? "确认操作",
+                isPresented: messageActionBinding,
+                titleVisibility: .visible
+            ) {
+                if let action = messageAction {
+                    Button(action.confirmTitle, role: action.confirmRole) {
+                        performMessageAction(action)
+                    }
+                }
+                Button("取消", role: .cancel) { messageAction = nil }
             }
-        }
-        .alert(messageAction?.title ?? "确认操作", isPresented: messageActionBinding) {
-            Button("取消", role: .cancel) { messageAction = nil }
-            if let action = messageAction {
-                Button(action.confirmTitle, role: action.confirmRole) {
-                    performMessageAction(action)
+            .sheet(item: $activeSheet, onDismiss: sheetDidDismiss) { sheet in
+                sheetContent(for: sheet)
+            }
+            .fileImporter(
+                isPresented: $isImportingBody,
+                allowedContentTypes: [.item, .plainText, .text],
+                allowsMultipleSelection: false
+            ) { result in
+                handleBodyImport(result)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // 退后台时立刻把已收增量并回会话并落盘；系统随后可能直接杀进程。
+                if phase == .background {
+                    controller.checkpoint(session: session)
                 }
             }
-        } message: {
-            Text(messageAction?.messageText ?? "")
-        }
-        .sheet(item: $activeSheet, onDismiss: sheetDidDismiss) { sheet in
-            sheetContent(for: sheet)
-        }
-        .fileImporter(
-            isPresented: $isImportingBody,
-            allowedContentTypes: [.item, .plainText, .text],
-            allowsMultipleSelection: false
-        ) { result in
-            handleBodyImport(result)
-        }
-        .onChange(of: scenePhase) { _, phase in
-            // 退后台时立刻把已收增量并回会话并落盘；系统随后可能直接杀进程。
-            if phase == .background {
-                controller.checkpoint(session: session)
-            }
-        }
-        .onAppear {
-            if composer.text.isEmpty, !session.payload.composerDraft.isEmpty {
-                composer.text = session.payload.composerDraft
-            }
-            session.refreshDerivedValues()
-            if cursorOffset < 0 {
-                cursorOffset = session.manuscriptLength
-                cursorPlaced = false
-            }
+            .onAppear(perform: handleAppear)
+            .onDisappear(perform: handleDisappear)
+    }
 
-            #if DEBUG
-            if LaunchArguments.writerFocus == "manuscript" {
-                // 截图流水线要拍「正文单区」：等首帧排版完再拉 sheet，避免 sheet 抢在列表前面。
-                Task { @MainActor in
-                    await Task.yield()
-                    openSheet(.manuscript)
-                }
-            }
-            if LaunchArguments.streamPreview {
-                let message = session.beginAssistantMessage(model: "stream-preview")
-                let preview = """
-                林昭把梯子挪到最里侧的书架前。灰尘在手电的光柱里浮着，像静止的雪。
-
-                ninety-two 年的那批书堆在最底层，纸页边缘已经发脆。她抽出第三本的时候，有什么东西从书页间滑了出来，轻飘飘地落在她脚边。
-
-                是一封信。信封上写着地址，邮票还在，却从来没有盖过邮戳。
-
-                「这个……」她把信捡起来，指尖有点抖。窗外的雨声突然变得很远，整间书店像是被谁按下了静音键。
-                """
-                controller.debugStartPreview(text: preview, messageID: message.id)
-            }
-            if LaunchArguments.mockStream, LaunchArguments.mockAutoSend, !didMockSend {
-                didMockSend = true
-                Task { @MainActor in
-                    await Task.yield()
-                    _ = controller.send(
-                        "写一段雨夜旧书店的正文，让林昭发现一封信。",
-                        session: session,
-                        store: store
-                    )
-                }
-            }
-            #endif
+    @ToolbarContentBuilder
+    private var writerToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            modelMenu
         }
-        .onDisappear {
-            dismissKeyboard()
-            controller.checkpoint(session: session)
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Button {
+                openSheet(.manuscript)
+            } label: {
+                Image(systemName: "doc.text")
+            }
+            .disabled(controller.isBusy)
+            .accessibilityLabel("正文")
 
-            // 切 Tab 也会触发 onDisappear，但生成和撤销栈必须继续保留。
-            //
-            // 判据是「这个会话还在不在缓存里」：切书时 RootView 会把旧会话从缓存里
-            // 驱逐，旧 Pane 的流和撤销动作必须清掉；切 Tab 时会话仍在缓存里，什么都不做。
-            // 用 activeProjectID 判不对——切走两秒内切回同一本时那个 id 会骗过判断，
-            // 旧流和新流就会并发写同一份会话。
+            Menu {
+                writerMenu
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("更多写作操作")
+        }
+    }
+
+    private func handleAppear() {
+        if composer.text.isEmpty, !session.payload.composerDraft.isEmpty {
+            composer.text = session.payload.composerDraft
+        }
+        session.refreshDerivedValues()
+        if cursorOffset < 0 {
+            cursorOffset = session.manuscriptLength
+            cursorPlaced = false
+        }
+
+        #if DEBUG
+        if LaunchArguments.writerFocus == "manuscript" {
+            // 截图流水线要拍「正文单区」：等首帧排版完再拉 sheet，避免 sheet 抢在列表前面。
             Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                let stillCached = store.cachedSession(for: session.project.id) === session
-                guard !stillCached else { return }
-                discardUndoActions()
-                if controller.isBusy {
-                    controller.stop()
-                }
+                await Task.yield()
+                openSheet(.manuscript)
+            }
+        }
+        if LaunchArguments.streamPreview {
+            let message = session.beginAssistantMessage(model: "stream-preview")
+            let preview = """
+            林昭把梯子挪到最里侧的书架前。灰尘在手电的光柱里浮着，像静止的雪。
+
+            ninety-two 年的那批书堆在最底层，纸页边缘已经发脆。她抽出第三本的时候，有什么东西从书页间滑了出来，轻飘飘地落在她脚边。
+
+            是一封信。信封上写着地址，邮票还在，却从来没有盖过邮戳。
+
+            「这个……」她把信捡起来，指尖有点抖。窗外的雨声突然变得很远，整间书店像是被谁按下了静音键。
+            """
+            controller.debugStartPreview(text: preview, messageID: message.id)
+        }
+        if LaunchArguments.mockStream, LaunchArguments.mockAutoSend, !didMockSend {
+            didMockSend = true
+            Task { @MainActor in
+                await Task.yield()
+                _ = controller.send(
+                    "写一段雨夜旧书店的正文，让林昭发现一封信。",
+                    session: session,
+                    store: store
+                )
+            }
+        }
+        #endif
+    }
+
+    private func handleDisappear() {
+        dismissKeyboard()
+        controller.checkpoint(session: session)
+
+        // 切 Tab 也会触发 onDisappear，但生成和撤销栈必须继续保留。
+        //
+        // 判据是「这个会话还在不在缓存里」：切书时 RootView 会把旧会话从缓存里
+        // 驱逐，旧 Pane 的流和撤销动作必须清掉；切 Tab 时会话仍在缓存里，什么都不做。
+        // 用 activeProjectID 判不对——切走两秒内切回同一本时那个 id 会骗过判断，
+        // 旧流和新流就会并发写同一份会话。
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            let stillCached = store.cachedSession(for: session.project.id) === session
+            guard !stillCached else { return }
+            discardUndoActions()
+            if controller.isBusy {
+                controller.stop()
             }
         }
     }
@@ -718,7 +718,7 @@ struct WriterPane: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 64)
+        .padding(.top, Theme.Spacing.xxl * 2)
     }
 
     /// 每项只产出一个视图：流式气泡和普通气泡在 row 内部二选一。

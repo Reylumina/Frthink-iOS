@@ -18,29 +18,14 @@ enum Keychain {
     }
 
     static func get(_ account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
+        guard case .found(let data) = readData(service: service, account: account),
               let text = String(data: data, encoding: .utf8)
         else { return nil }
         return text
     }
 
     static func delete(_ account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(query as CFDictionary)
+        _ = delete(service: service, account: account)
     }
 
     /// 每个供应方一个 account，避免换模型时串 key。
@@ -99,10 +84,14 @@ enum Keychain {
     }
 
     static func readPayloadKey() -> PayloadKeyStatus {
+        readData(service: payloadService, account: payloadAccount)
+    }
+
+    private static func readData(service: String, account: String) -> PayloadKeyStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: payloadService,
-            kSecAttrAccount as String: payloadAccount,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]

@@ -40,22 +40,11 @@ struct RequestSnapshotsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .alert("清空回看记录？", isPresented: $confirmingClear) {
-                Button("清空", role: .destructive) {
-                    session.clearRequestSnapshots()
-                }
-                Button("取消", role: .cancel) {}
+            .deleteConfirmationDialog("清空回看记录？", isPresented: $confirmingClear, actionTitle: "清空") {
+                session.clearRequestSnapshots()
             }
-            .alert("删除这条回看记录？", isPresented: deleteAlertBinding) {
-                Button("删除", role: .destructive) {
-                    if let snapshot = pendingDelete {
-                        session.deleteRequestSnapshots([snapshot.id])
-                    }
-                    pendingDelete = nil
-                }
-                Button("取消", role: .cancel) { pendingDelete = nil }
-            } message: {
-                Text("删除后无法恢复。")
+            .deleteConfirmationDialog({ _ in "删除这条回看记录？" }, item: $pendingDelete) { snapshot in
+                session.deleteRequestSnapshots([snapshot.id])
             }
             .sheet(item: $selected) { snapshot in
                 RequestSnapshotDetail(snapshot: snapshot)
@@ -88,12 +77,12 @@ struct RequestSnapshotsSheet: View {
             if snapshot.omittedHistoryMessages > 0 {
                 Text("丢弃 \(snapshot.omittedHistoryMessages) 条历史消息")
                     .font(Font.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(AppTone.warning.color)
             }
             if !snapshot.sourceIds.isEmpty {
                 Text(snapshot.sourceIds.joined(separator: " · "))
                     .font(Theme.numericSmall)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
@@ -124,13 +113,6 @@ struct RequestSnapshotsSheet: View {
 
     private func formatted(_ date: Date) -> String {
         Self.formatter.string(from: date)
-    }
-
-    private var deleteAlertBinding: Binding<Bool> {
-        Binding(
-            get: { pendingDelete != nil },
-            set: { if !$0 { pendingDelete = nil } }
-        )
     }
 
     private func tokenLine(_ snapshot: RequestSnapshot) -> String {

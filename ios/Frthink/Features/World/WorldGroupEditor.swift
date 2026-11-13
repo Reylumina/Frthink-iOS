@@ -36,9 +36,8 @@ struct WorldGroupEditor: View {
                 }
             }
         }
-        .alert(deleteTitle, isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDeleteOffsets = nil }
-            Button("删除", role: .destructive) { confirmDeleteGroups() }
+        .deleteConfirmationDialog(deleteTitle, isPresented: deleteAlertBinding) {
+            confirmDeleteGroups()
         }
         .onChange(of: session.payload.world.characterGroups) { _, _ in
             session.scheduleSave()

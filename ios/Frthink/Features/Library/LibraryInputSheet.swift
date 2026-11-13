@@ -85,39 +85,36 @@ struct LibraryInputSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             // 重命名/改简介的结果句要在这个 sheet 里可见。
             .sheetToast()
-            .interactiveDismissDisabled(hasChanges)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") {
-                        if hasChanges {
-                            confirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        commit()
-                    } label: {
-                        Text(confirmLabel)
-                    }
-                    .disabled(!canCommit)
-                }
-            }
-            .confirmationDialog(
-                "放弃未保存的输入？",
-                isPresented: $confirmingDiscard,
-                titleVisibility: .visible
-            ) {
-                Button("放弃输入", role: .destructive) { dismiss() }
-                Button("继续编辑", role: .cancel) {}
+            .toolbar { toolbarContent }
+            .discardChangesDialog(isPresented: $confirmingDiscard, hasChanges: hasChanges) {
+                dismiss()
             }
             .presentationDetents([.medium, .large])
         }
         .onAppear {
             // 单行输入一进来就给焦点，省一次点击。
             focused = !multiline
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("取消") {
+                if hasChanges {
+                    confirmingDiscard = true
+                } else {
+                    dismiss()
+                }
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                commit()
+            } label: {
+                Text(confirmLabel)
+            }
+            .disabled(!canCommit)
         }
     }
 

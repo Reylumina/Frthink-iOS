@@ -7,7 +7,7 @@ import Foundation
 /// 对应 Keychain + CryptoKit。落盘文件是「魔数 + nonce + 密文 + 标签」，
 /// 魔数用来区分密文和迁移前的明文 JSON。
 ///
-/// 只加密 `payload.json`、`source.json` 和 `translations.json`。
+/// 加密项目正文与配置数据（含 `payload.json`、`source.json`、`translations.json`、`body.meta.json` 及 `body.pages/*.bin`）。
 /// `project.json` 只有书名和计数，明文便于排查。
 enum PayloadCipher {
     /// 文件头。长度固定 8 字节，改动它就等于换格式，旧文件会按明文重新迁移。

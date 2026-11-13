@@ -56,91 +56,92 @@ struct CorpusEntryEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    AppTextField(
-                        title: "标题",
-                        text: $title,
-                        placeholder: "潮水退去后的礁石"
-                    )
+            editorForm
+                .scrollContentBackground(.hidden)
+                .groupedPageBackground()
+                .keyboardDismissOnScroll()
+                .navigationTitle(isNew ? "新增语料" : "编辑语料")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { toolbarContent }
+                .discardChangesDialog(isPresented: $confirmingDiscard, hasChanges: hasChanges) {
+                    dismiss()
                 }
+        }
+    }
 
-                Section {
-                    AppTextArea(
-                        title: "原句",
-                        text: $text,
-                        placeholder: "原句",
-                        minLines: 6,
-                        maxLines: 12
-                    )
-                    if text.count > Self.maxTextLength {
-                        Text("已超出 3000 字")
-                            .font(Theme.metadata)
-                            .foregroundStyle(AppTone.danger.color)
-                    }
-                }
+    private var editorForm: some View {
+        Form {
+            Section {
+                AppTextField(
+                    title: "标题",
+                    text: $title,
+                    placeholder: "潮水退去后的礁石"
+                )
+            }
 
-                Section {
-                    AppTextField(
-                        title: "分类",
-                        text: $category,
-                        placeholder: "环境描写"
-                    )
-                    suggestedCategoriesGrid
-                }
-
-                Section {
-                    AppTextField(
-                        title: "标签",
-                        text: $tagText,
-                        placeholder: "用逗号分隔"
-                    )
-                }
-
-                Section {
-                    AppTextField(
-                        title: "来源",
-                        text: $source,
-                        placeholder: "手动录入"
-                    )
+            Section {
+                AppTextArea(
+                    title: "原句",
+                    text: $text,
+                    placeholder: "原句",
+                    minLines: 6,
+                    maxLines: 12
+                )
+                if text.count > Self.maxTextLength {
+                    Text("已超出 3000 字")
+                        .font(Theme.metadata)
+                        .foregroundStyle(AppTone.danger.color)
                 }
             }
-            .scrollContentBackground(.hidden)
-            .groupedPageBackground()
-            .keyboardDismissOnScroll()
-            .navigationTitle(isNew ? "新增语料" : "编辑语料")
-            .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(hasChanges)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    SheetCloseButton {
-                        if hasChanges {
-                            confirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    SheetConfirmButton(title: "保存", isEnabled: canSave) {
-                        var updated = entry
-                        updated.title = trimmedTitle
-                        updated.text = text
-                        updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
-                        updated.tags = parseTags(tagText)
-                        updated.source = source.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSave(updated)
-                        dismiss()
-                    }
+
+            Section {
+                AppTextField(
+                    title: "分类",
+                    text: $category,
+                    placeholder: "环境描写"
+                )
+                suggestedCategoriesGrid
+            }
+
+            Section {
+                AppTextField(
+                    title: "标签",
+                    text: $tagText,
+                    placeholder: "用逗号分隔"
+                )
+            }
+
+            Section {
+                AppTextField(
+                    title: "来源",
+                    text: $source,
+                    placeholder: "手动录入"
+                )
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            SheetCloseButton {
+                if hasChanges {
+                    confirmingDiscard = true
+                } else {
+                    dismiss()
                 }
             }
-            .confirmationDialog(
-                "放弃未保存的修改？",
-                isPresented: $confirmingDiscard,
-                titleVisibility: .visible
-            ) {
-                Button("放弃修改", role: .destructive) { dismiss() }
-                Button("继续编辑", role: .cancel) {}
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            SheetConfirmButton(title: "保存", isEnabled: canSave) {
+                var updated = entry
+                updated.title = trimmedTitle
+                updated.text = text
+                updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+                updated.tags = parseTags(tagText)
+                updated.source = source.trimmingCharacters(in: .whitespacesAndNewlines)
+                onSave(updated)
+                dismiss()
             }
         }
     }

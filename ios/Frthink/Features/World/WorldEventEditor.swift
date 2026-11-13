@@ -43,16 +43,11 @@ struct WorldEventEditor: View {
         .onDisappear { commitDraft() }
         // 标题冲突且有未保存改动时不能滑走：滑走会走 onDisappear，草稿被静默丢掉。
         // 用户必须先改标题，或点「取消」确认放弃。
-        .interactiveDismissDisabled(blocksDismissal)
-        .confirmationDialog(
-            "删除事件卡",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                deleteEvent()
-            }
-            Button("取消", role: .cancel) {}
+        .discardChangesDialog(isPresented: $confirmingDiscard, hasChanges: blocksDismissal) {
+            discardDraft()
+        }
+        .deleteConfirmationDialog("删除事件卡", isPresented: $confirmingDelete) {
+            deleteEvent()
         }
     }
 
@@ -139,14 +134,6 @@ struct WorldEventEditor: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .confirmationDialog(
-            "放弃未保存的修改？",
-            isPresented: $confirmingDiscard,
-            titleVisibility: .visible
-        ) {
-            Button("放弃修改", role: .destructive) { discardDraft() }
-            Button("继续编辑", role: .cancel) {}
-        }
     }
 
     @ViewBuilder
@@ -155,7 +142,7 @@ struct WorldEventEditor: View {
             // 同名事件卡不允许保存。
             Text("事件名称重复，请先整理事件卡")
                 .font(Font.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTone.warning.color)
         }
     }
 

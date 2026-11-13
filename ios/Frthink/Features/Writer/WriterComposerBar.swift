@@ -195,14 +195,14 @@ private struct WriterComposerShell<Content: View>: View {
     }
 
     var body: some View {
+        let padded = content
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.s)
+
         if #available(iOS 26.0, *) {
-            content
-                .padding(.horizontal, Theme.Spacing.m)
-                .padding(.vertical, Theme.Spacing.s)
+            padded
         } else {
-            content
-                .padding(.horizontal, Theme.Spacing.m)
-                .padding(.vertical, Theme.Spacing.s)
+            padded
                 .background(.bar)
                 .overlay(alignment: .top) {
                     Rectangle()

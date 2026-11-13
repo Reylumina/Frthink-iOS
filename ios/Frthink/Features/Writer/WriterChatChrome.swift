@@ -64,7 +64,6 @@ struct WriterSelectionBar: View {
                     )
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.red)
             .disabled(selectedCount == 0 || isBusy)
             .accessibilityLabel("删除选中的消息")
 

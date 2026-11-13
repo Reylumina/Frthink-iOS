@@ -110,7 +110,7 @@ struct WorldPane: View {
                 WorldSettingSection(
                     session: session,
                     onOpenTab: { newTab in
-                        withAnimation(.snappy(duration: 0.2)) { tab = newTab }
+                        withAnimation(Theme.motionSelection) { tab = newTab }
                     }
                 )
             case .characters:
@@ -233,7 +233,7 @@ struct WorldPane: View {
             ProgressView().controlSize(.mini)
         } else if statusMessage != nil {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(AppTone.success.color)
         } else {
             Image(systemName: "doc.text.magnifyingglass")
                 .foregroundStyle(.secondary)

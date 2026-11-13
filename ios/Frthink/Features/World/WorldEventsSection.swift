@@ -97,9 +97,8 @@ struct WorldEventsSection: View {
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
         .keyboardDismissOnScroll()
-        .alert(deleteTitle, isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDeleteIDs.removeAll() }
-            Button("删除", role: .destructive) { confirmDelete() }
+        .deleteConfirmationDialog(deleteTitle, isPresented: deleteAlertBinding) {
+            confirmDelete()
         }
     }
 

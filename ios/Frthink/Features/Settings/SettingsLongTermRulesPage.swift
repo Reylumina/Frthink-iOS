@@ -20,48 +20,11 @@ struct SettingsLongTermRulesPage: View {
 
     var body: some View {
         Form {
-            Section {
-                Picker("当前书", selection: $selectedProjectID) {
-                    ForEach(store.activeProjects) { project in
-                        Text(project.title.isEmpty ? Project.untitledTitle : project.title)
-                            .tag(Optional(project.id))
-                    }
-                }
-                .pickerStyle(.menu)
-
-                if rules.isEmpty {
-                    InlineEmptyState(
-                        symbol: "doc.plaintext",
-                        message: "还没有长期规则"
-                    )
-                } else {
-                    Text(rules)
-                        .font(Theme.reply)
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                NavigationLink {
-                    LongTermRulesEditorPage(initialText: rules) { text in
-                        Task { await save(text) }
-                    }
-                } label: {
-                    Label("编辑摘要", systemImage: "square.and.pencil")
-                }
-                .disabled(selectedProject == nil)
-
-                if updatedAt > 0 {
-                    AppValueRow(title: "上次更新", value: updatedText)
-                }
-            } header: {
-                AppSectionHeader(title: "当前摘要")
-            }
+            summarySection
 
             Section {
                 DestructiveActionRow(
                     title: "恢复上一版",
-                    systemImage: "arrow.uturn.backward",
                     isEnabled: revisionCount > 0
                 ) {
                     pendingRestore = true
@@ -81,15 +44,48 @@ struct SettingsLongTermRulesPage: View {
             guard oldValue != nil, oldValue != newValue else { return }
             Task { await reloadRules() }
         }
-        .confirmationDialog(
-            "恢复上一版摘要？",
-            isPresented: $pendingRestore,
-            titleVisibility: .visible
-        ) {
-            Button("恢复", role: .destructive) {
-                Task { await restore() }
+        .deleteConfirmationDialog("恢复上一版摘要？", isPresented: $pendingRestore, actionTitle: "恢复") {
+            Task { await restore() }
+        }
+    }
+
+    private var summarySection: some View {
+        Section {
+            Picker("当前书", selection: $selectedProjectID) {
+                ForEach(store.activeProjects) { project in
+                    Text(project.title.isEmpty ? Project.untitledTitle : project.title)
+                        .tag(Optional(project.id))
+                }
             }
-            Button("取消", role: .cancel) {}
+            .pickerStyle(.menu)
+
+            if rules.isEmpty {
+                InlineEmptyState(
+                    symbol: "doc.plaintext",
+                    message: "还没有长期规则"
+                )
+            } else {
+                Text(rules)
+                    .font(Theme.reply)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            NavigationLink {
+                LongTermRulesEditorPage(initialText: rules) { text in
+                    Task { await save(text) }
+                }
+            } label: {
+                Text("编辑摘要")
+            }
+            .disabled(selectedProject == nil)
+
+            if updatedAt > 0 {
+                AppValueRow(title: "上次更新", value: updatedText)
+            }
+        } header: {
+            AppSectionHeader(title: "当前摘要")
         }
     }
 

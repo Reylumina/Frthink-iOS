@@ -168,7 +168,6 @@ struct UniversePane: View {
             .keyboardDismissOnScroll()
             .navigationTitle("新建宇宙资料")
             .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(hasDraftChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     SheetCloseButton {
@@ -190,13 +189,8 @@ struct UniversePane: View {
                     }
                 }
             }
-            .confirmationDialog(
-                "放弃未保存的内容？",
-                isPresented: $confirmingDiscardDraft,
-                titleVisibility: .visible
-            ) {
-                Button("放弃", role: .destructive) { isCreating = false }
-                Button("继续编辑", role: .cancel) {}
+            .discardChangesDialog(isPresented: $confirmingDiscardDraft, hasChanges: hasDraftChanges) {
+                isCreating = false
             }
         }
     }

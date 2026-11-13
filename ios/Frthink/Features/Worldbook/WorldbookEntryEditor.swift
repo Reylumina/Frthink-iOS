@@ -68,7 +68,6 @@ struct WorldbookEntryEditor: View {
             .groupedPageBackground()
             .navigationTitle(isNew ? "新建世界书词条" : "编辑世界书词条")
             .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(hasChanges)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
@@ -92,13 +91,8 @@ struct WorldbookEntryEditor: View {
                     .disabled(!canSave)
                 }
             }
-            .confirmationDialog(
-                "放弃未保存的修改？",
-                isPresented: $confirmingDiscard,
-                titleVisibility: .visible
-            ) {
-                Button("放弃修改", role: .destructive) { dismiss() }
-                Button("继续编辑", role: .cancel) {}
+            .discardChangesDialog(isPresented: $confirmingDiscard, hasChanges: hasChanges) {
+                dismiss()
             }
         }
     }

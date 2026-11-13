@@ -701,18 +701,14 @@ enum FrthinkArchive {
         let characters: [[String: Any]] = world.characters.map(FrthinkArchive.characterCardJSON)
         try encodeAny(characters, key: .characterCards, into: &c)
 
-        let books: [[String: Any]] = world.worldbookEntries.map { entry in
-            [
-                "id": entry.id,
-                "title": entry.title,
-                "keywords": "",
-                "content": entry.body,
-                "enabled": entry.enabled,
-                "dynamic": false,
-            ]
+        let books = world.worldbookEntries.map {
+            Self.androidWorldbookJSON(id: $0.id, title: $0.title, content: $0.body, enabled: $0.enabled)
         }
         try encodeAny(books, key: .worldbooks, into: &c)
 
+        let groupJSON: [[String: Any]] = world.characterGroups.map { group in
+            ["id": group.id, "name": group.name, "enabled": group.enabled]
+        }
         let worldDict: [String: Any] = [
             "currentState": world.currentState,
             "plotOutline": world.plotOutline,
@@ -733,9 +729,7 @@ enum FrthinkArchive {
                     "consequence": event.consequence,
                 ]
             },
-            "characterGroups": world.characterGroups.map { group in
-                ["id": group.id, "name": group.name, "enabled": group.enabled]
-            },
+            "characterGroups": groupJSON,
             "materialChunkHashes": world.materialChunkHashes,
             "materialSourceProgress": world.materialSourceProgress.mapValues { progress in
                 [
@@ -748,9 +742,6 @@ enum FrthinkArchive {
         try encodeAny(worldDict, key: .world, into: &c)
 
         // Android 在 snapshot 顶层读 characterGroups；world 里的那份留给旧 iOS 存档。
-        let groupJSON: [[String: Any]] = world.characterGroups.map { group in
-            ["id": group.id, "name": group.name, "enabled": group.enabled]
-        }
         try encodeAny(groupJSON, key: .characterGroups, into: &c)
 
         // 原版键格式是 `user:<id>:<sha256>`；旧 iOS 数据只有消息 id 时现补。
@@ -1122,9 +1113,23 @@ enum FrthinkArchive {
             let identity = card.identity.trimmingCharacters(in: .whitespacesAndNewlines)
             return identity.isEmpty ? card.name : "\(card.name) · \(identity)"
         }
-        if !lines.isEmpty { return lines }
-        if !world.characterSummaries.isEmpty { return world.characterSummaries }
-        return []
+        return lines.isEmpty ? world.characterSummaries : lines
+    }
+
+    private static func androidWorldbookJSON(
+        id: String,
+        title: String,
+        content: String,
+        enabled: Bool
+    ) -> [String: Any] {
+        [
+            "id": id,
+            "title": title,
+            "keywords": "",
+            "content": content,
+            "enabled": enabled,
+            "dynamic": false,
+        ]
     }
 
     private static func characterCardJSON(_ card: CharacterCard) -> [String: Any] {        var json: [String: Any] = [
@@ -1441,14 +1446,12 @@ enum FrthinkArchive {
             dict["worldbooks"] = settings.universeEntries
                 .filter { $0.kind == .worldbook }
                 .map {
-                    [
-                        "id": $0.id,
-                        "title": $0.title,
-                        "keywords": "",
-                        "content": $0.body,
-                        "enabled": $0.enabled,
-                        "dynamic": false,
-                    ]
+                    FrthinkArchive.androidWorldbookJSON(
+                        id: $0.id,
+                        title: $0.title,
+                        content: $0.body,
+                        enabled: $0.enabled
+                    )
                 }
             return AnyCodable(raw: dict)
         }
@@ -2101,12 +2104,10 @@ enum FrthinkArchive {
         }
         // 存档里没有 activeProviderID（Android 备份）时保留本机选中的供应方；
         // 不能退化成 providers.first，否则用户可能被切到没填 Key 的那条。
-        if result.providers.contains(where: { $0.id == result.activeProviderID }) {
-            // 存档自带的选择有效，保留。
-        } else if result.providers.contains(where: { $0.id == local.activeProviderID }) {
-            result.activeProviderID = local.activeProviderID
-        } else {
-            result.activeProviderID = result.providers.first?.id ?? ""
+        if !result.providers.contains(where: { $0.id == result.activeProviderID }) {
+            result.activeProviderID = result.providers.contains(where: { $0.id == local.activeProviderID })
+                ? local.activeProviderID
+                : (result.providers.first?.id ?? "")
         }
         result.universeEntries = mergedUniverseEntries(
             imported.universeEntries,

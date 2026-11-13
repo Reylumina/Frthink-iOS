@@ -10,86 +10,9 @@ struct WriterMaterialsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    AppValueRow(
-                        title: "正文",
-                        value: "\(session.manuscriptCharacterCount.formatted()) 字"
-                    )
-                    AppValueRow(
-                        title: "章节",
-                        value: "\(session.payload.chapters.count) 章"
-                    )
-                    AppValueRow(
-                        title: "人物卡",
-                        value: "\(session.payload.world.characters.count) 张"
-                    )
-                    AppValueRow(
-                        title: "世界书",
-                        value: "\(session.payload.world.worldbookEntries.count) 条"
-                    )
-                    AppValueRow(
-                        title: "事件卡",
-                        value: "\(session.payload.world.events.count) 张"
-                    )
-                    AppValueRow(
-                        title: "原文",
-                        value: session.sourceText.isEmpty
-                            ? "未导入"
-                            : "\(session.sourceText.count.formatted()) 字"
-                    )
-                } header: {
-                    AppSectionHeader(title: "这本书")
-                }
-
-                Section {
-                    materialLink(
-                        title: "世界状态",
-                        symbol: "globe.asia.australia",
-                        text: session.payload.world.currentState
-                    )
-                    materialLink(
-                        title: "仿写模板",
-                        symbol: "doc.on.doc",
-                        text: session.payload.world.styleTemplate
-                    )
-                    materialLink(
-                        title: "剧情梗概",
-                        symbol: "list.bullet.rectangle",
-                        text: session.payload.world.plotOutline
-                    )
-                    materialLink(
-                        title: "长期写作规则",
-                        symbol: "text.badge.checkmark",
-                        text: session.payload.world.longTermRules
-                    )
-                    materialLink(
-                        title: "项目补充指令",
-                        symbol: "text.append",
-                        text: session.payload.assistantSupplement
-                    )
-                } header: {
-                    AppSectionHeader(title: "会写进提示词")
-                }
-
-                Section {
-                    AppValueRow(
-                        title: "正文发送范围",
-                        value: session.payload.bodyPromptSendWhole
-                            ? "整篇正文"
-                            : "末尾 \(session.payload.bodyPromptTailCodePoints.formatted()) 字"
-                    )
-                    if let anchor = session.payload.continuationAnchor {
-                        AppValueRow(title: "续写锚点", value: "第 \(anchor.formatted()) 字处")
-                    } else {
-                        AppValueRow(title: "续写锚点", value: "正文末尾")
-                    }
-                    AppValueRow(
-                        title: "提示词回看",
-                        value: "\(session.payload.requestSnapshots.count) 条记录"
-                    )
-                } header: {
-                    AppSectionHeader(title: "续写")
-                }
+                bookSection
+                promptMaterialsSection
+                continuationSection
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -101,6 +24,93 @@ struct WriterMaterialsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+        }
+    }
+
+    private var bookSection: some View {
+        Section {
+            AppValueRow(
+                title: "正文",
+                value: "\(session.manuscriptCharacterCount.formatted()) 字"
+            )
+            AppValueRow(
+                title: "章节",
+                value: "\(session.payload.chapters.count) 章"
+            )
+            AppValueRow(
+                title: "人物卡",
+                value: "\(session.payload.world.characters.count) 张"
+            )
+            AppValueRow(
+                title: "世界书",
+                value: "\(session.payload.world.worldbookEntries.count) 条"
+            )
+            AppValueRow(
+                title: "事件卡",
+                value: "\(session.payload.world.events.count) 张"
+            )
+            AppValueRow(
+                title: "原文",
+                value: session.sourceText.isEmpty
+                    ? "未导入"
+                    : "\(session.sourceText.count.formatted()) 字"
+            )
+        } header: {
+            AppSectionHeader(title: "这本书")
+        }
+    }
+
+    private var promptMaterialsSection: some View {
+        Section {
+            materialLink(
+                title: "世界状态",
+                symbol: "globe.asia.australia",
+                text: session.payload.world.currentState
+            )
+            materialLink(
+                title: "仿写模板",
+                symbol: "doc.on.doc",
+                text: session.payload.world.styleTemplate
+            )
+            materialLink(
+                title: "剧情梗概",
+                symbol: "list.bullet.rectangle",
+                text: session.payload.world.plotOutline
+            )
+            materialLink(
+                title: "长期写作规则",
+                symbol: "text.badge.checkmark",
+                text: session.payload.world.longTermRules
+            )
+            materialLink(
+                title: "项目补充指令",
+                symbol: "text.append",
+                text: session.payload.assistantSupplement
+            )
+        } header: {
+            AppSectionHeader(title: "会写进提示词")
+        }
+    }
+
+    private var continuationSection: some View {
+        Section {
+            AppValueRow(
+                title: "正文发送范围",
+                value: session.payload.bodyPromptSendWhole
+                    ? "整篇正文"
+                    : "末尾 \(session.payload.bodyPromptTailCodePoints.formatted()) 字"
+            )
+            if let anchor = session.payload.continuationAnchor {
+                AppValueRow(title: "续写锚点", value: "第 \(anchor.formatted()) 字处")
+            } else {
+                AppValueRow(title: "续写锚点", value: "正文末尾")
+            }
+            AppValueRow(
+                title: "提示词回看",
+                value: "\(session.payload.requestSnapshots.count) 条记录"
+            )
+        } header: {
+            AppSectionHeader(title: "续写")
         }
     }
 

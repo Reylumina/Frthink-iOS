@@ -48,12 +48,8 @@ struct WorldbookPane: View {
                 WorldbookPromptPreviewSheet(entries: entries)
             }
         }
-        .alert("删除这条世界书词条？", isPresented: deleteAlertBinding) {
-            Button("取消", role: .cancel) { pendingDelete = nil }
-            Button("删除", role: .destructive) {
-                if let entry = pendingDelete { delete(entry) }
-                pendingDelete = nil
-            }
+        .deleteConfirmationDialog({ _ in "删除这条世界书词条？" }, item: $pendingDelete) { entry in
+            delete(entry)
         }
     }
 

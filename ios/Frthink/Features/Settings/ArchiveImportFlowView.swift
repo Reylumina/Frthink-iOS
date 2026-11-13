@@ -160,8 +160,8 @@ struct ArchiveImportFlowView: View {
     private func errorView(_ text: String) -> some View {
         VStack(spacing: Theme.Spacing.l) {
             Image(systemName: "exclamationmark.triangle")
-                .font(Font.system(size: 40))
-                .foregroundStyle(.orange)
+                .font(.largeTitle)
+                .foregroundStyle(AppTone.warning.color)
             Text("导入失败")
                 .font(Theme.heading)
             Text(text)

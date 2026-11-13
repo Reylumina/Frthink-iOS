@@ -18,19 +18,11 @@ enum TokenEstimator {
             return 1.0
         }
         // 空白：0.2
-        if CharacterSet.whitespacesAndNewlines.contains(scalar)
-            || CharacterSet.whitespaces.contains(scalar) {
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) {
             return 0.2
         }
-        // 其它且（≥128 或 不是字母数字且不是 `_`）：0.6
-        if value >= 128 {
-            if !(scalar.properties.isAlphabetic || scalar.properties.numericType != nil)
-                || value == 0x5F {
-                return 0.6
-            }
-            return 0.6
-        }
-        if !isASCIISafe(value) {
+        // 非 ASCII 或非常规符号：0.6
+        if value >= 128 || !isASCIISafe(value) {
             return 0.6
         }
         // ASCII 字母 / 数字 / `_`：0.28

@@ -68,106 +68,10 @@ struct WorldCharacterEditor: View {
 
     private var editor: some View {
         Form {
-            Section {
-                AppTextField(
-                    title: "姓名",
-                    text: $draft.name,
-                    placeholder: "人物本名",
-                    flat: true
-                )
-                WorldTagsField(
-                    title: "别称",
-                    values: $draft.aliases,
-                    placeholder: "用、分隔"
-                )
-                AppTextField(
-                    title: "身份",
-                    text: $draft.identity,
-                    placeholder: "身份、职业、阵营",
-                    flat: true
-                )
-                Toggle("参与写作提示词", isOn: Binding(
-                    get: { draft.enabled ?? true },
-                    set: { draft.enabled = $0 }
-                ))
-                Picker("分组", selection: Binding(
-                    get: { draft.groupId ?? "" },
-                    set: { draft.groupId = $0.isEmpty ? nil : $0 }
-                )) {
-                    Text("未分组").tag("")
-                    ForEach(session.payload.world.characterGroups) { group in
-                        Text(group.name).tag(group.id)
-                    }
-                }
-            } header: {
-                AppSectionHeader(title: "基本")
-            } footer: {
-                nameWarning
-            }
-
-            Section {
-                AppTextArea(
-                    title: "性格",
-                    text: $draft.personality,
-                    placeholder: "稳定的性格与价值观",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "语气",
-                    text: $draft.voice,
-                    placeholder: "措辞、语气与对不同对象的说话方式",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "目标",
-                    text: $draft.goals,
-                    placeholder: "目标与具体动机",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "底线",
-                    text: $draft.boundaries,
-                    placeholder: "不会做的事、不能触碰的边界",
-                    minLines: 3,
-                    flat: true
-                )
-            } header: {
-                AppSectionHeader(title: "说话与行为")
-            }
-
-            Section {
-                AppTextArea(
-                    title: "人物记忆",
-                    text: $draft.personalMemory,
-                    placeholder: "角色亲历或明确知晓、对其行为有持续影响的经历",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "关系态度",
-                    text: $draft.relationshipAttitudes,
-                    placeholder: "按对象分别记录印象、态度、信任与变化",
-                    minLines: 3,
-                    flat: true
-                )
-            } header: {
-                AppSectionHeader(title: "记忆与关系")
-            }
-
-            Section {
-                customEntryRows
-                Button {
-                    addCustomEntry()
-                } label: {
-                    Label("添加自定义词条", systemImage: "plus")
-                        .font(Font.body)
-                }
-            } header: {
-                AppSectionHeader(title: "自定义词条")
-            }
+            basicSection
+            personalitySection
+            memorySection
+            customEntriesSection
 
             Section {
                 DestructiveActionRow(title: "删除人物卡") {
@@ -178,12 +82,121 @@ struct WorldCharacterEditor: View {
         .scrollContentBackground(.hidden)
     }
 
+    private var basicSection: some View {
+        Section {
+            AppTextField(
+                title: "姓名",
+                text: $draft.name,
+                placeholder: "人物本名",
+                flat: true
+            )
+            WorldTagsField(
+                title: "别称",
+                values: $draft.aliases,
+                placeholder: "用、分隔"
+            )
+            AppTextField(
+                title: "身份",
+                text: $draft.identity,
+                placeholder: "身份、职业、阵营",
+                flat: true
+            )
+            Toggle("参与写作提示词", isOn: Binding(
+                get: { draft.enabled ?? true },
+                set: { draft.enabled = $0 }
+            ))
+            Picker("分组", selection: Binding(
+                get: { draft.groupId ?? "" },
+                set: { draft.groupId = $0.isEmpty ? nil : $0 }
+            )) {
+                Text("未分组").tag("")
+                ForEach(session.payload.world.characterGroups) { group in
+                    Text(group.name).tag(group.id)
+                }
+            }
+        } header: {
+            AppSectionHeader(title: "基本")
+        } footer: {
+            nameWarning
+        }
+    }
+
+    private var personalitySection: some View {
+        Section {
+            AppTextArea(
+                title: "性格",
+                text: $draft.personality,
+                placeholder: "稳定的性格与价值观",
+                minLines: 3,
+                flat: true
+            )
+            AppTextArea(
+                title: "语气",
+                text: $draft.voice,
+                placeholder: "措辞、语气与对不同对象的说话方式",
+                minLines: 3,
+                flat: true
+            )
+            AppTextArea(
+                title: "目标",
+                text: $draft.goals,
+                placeholder: "目标与具体动机",
+                minLines: 3,
+                flat: true
+            )
+            AppTextArea(
+                title: "底线",
+                text: $draft.boundaries,
+                placeholder: "不会做的事、不能触碰的边界",
+                minLines: 3,
+                flat: true
+            )
+        } header: {
+            AppSectionHeader(title: "说话与行为")
+        }
+    }
+
+    private var memorySection: some View {
+        Section {
+            AppTextArea(
+                title: "人物记忆",
+                text: $draft.personalMemory,
+                placeholder: "角色亲历或明确知晓、对其行为有持续影响的经历",
+                minLines: 3,
+                flat: true
+            )
+            AppTextArea(
+                title: "关系态度",
+                text: $draft.relationshipAttitudes,
+                placeholder: "按对象分别记录印象、态度、信任与变化",
+                minLines: 3,
+                flat: true
+            )
+        } header: {
+            AppSectionHeader(title: "记忆与关系")
+        }
+    }
+
+    private var customEntriesSection: some View {
+        Section {
+            customEntryRows
+            Button {
+                addCustomEntry()
+            } label: {
+                Label("添加自定义词条", systemImage: "plus")
+                    .font(Font.body)
+            }
+        } header: {
+            AppSectionHeader(title: "自定义词条")
+        }
+    }
+
     @ViewBuilder
     private var nameWarning: some View {
         if isNameEmpty {
             Text("姓名为空")
                 .font(Font.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTone.warning.color)
         }
     }
 

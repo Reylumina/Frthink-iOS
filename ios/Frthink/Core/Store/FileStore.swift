@@ -424,20 +424,7 @@ struct FileStore {
                 return .corrupted
             }
             if let count = meta.pageCount, count > 0 {
-                var text = ""
-                text.reserveCapacity(meta.utf16Length)
-                for index in 0..<count {
-                    switch readEncryptedResult(bodyPageURL(projectID, index: index)) {
-                    case .loaded(let data):
-                        guard let page = String(data: data, encoding: .utf8) else {
-                            return .corrupted
-                        }
-                        text += page
-                    case .missing, .unreadable:
-                        return .corrupted
-                    }
-                }
-                return .loaded(BodyDocument(text: text, chapters: meta.chapters))
+                return loadPagedBody(meta: meta, pageCount: count, projectID: projectID)
             }
         case .missing:
             break
@@ -456,6 +443,20 @@ struct FileStore {
         }
     }
 
+    private func loadPagedBody(meta: BodyMeta, pageCount: Int, projectID: String) -> BodyLoadResult {
+        var text = ""
+        text.reserveCapacity(meta.utf16Length)
+        for index in 0..<pageCount {
+            guard case .loaded(let data) = readEncryptedResult(bodyPageURL(projectID, index: index)),
+                  let page = String(data: data, encoding: .utf8)
+            else {
+                return .corrupted
+            }
+            text += page
+        }
+        return .loaded(BodyDocument(text: text, chapters: meta.chapters))
+    }
+
     /// 编辑器/导出用：把所有页拼回完整正文。打开书不要调用。
     func loadBody(_ projectID: String) -> BodyDocument? {
         if case .loaded(let doc) = loadBodyResult(projectID) {
@@ -472,43 +473,18 @@ struct FileStore {
     ) throws {
         let ns = text as NSString
         let ranges = Self.pageRanges(text)
-        let directory = bodyPagesDirectory(projectID)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        let start = max(0, min(changedFromPage, ranges.count))
-        for index in start..<ranges.count {
-            try writeEncrypted(
-                Data(ns.substring(with: ranges[index]).utf8),
-                to: bodyPageURL(projectID, index: index)
-            )
-        }
-        // 删掉上次多出来的页。
-        let existing = (try? FileManager.default.contentsOfDirectory(
-            atPath: directory.path
-        )) ?? []
-        let keep = Set(ranges.indices.map { String(format: "%04d.bin", $0) })
-        for name in existing where !keep.contains(name) {
-            try? FileManager.default.removeItem(
-                at: directory.appendingPathComponent(name)
-            )
-        }
-
-        let meta = BodyMeta(
-            characterCount: text.count,
-            utf16Length: ns.length,
+        let firstWriteOffset = max(0, min(changedFromPage, ranges.count))
+        try writeBodyPagesAndMeta(
+            ns: ns,
+            ranges: ranges,
+            startPage: 0,
+            firstWriteOffset: firstWriteOffset,
+            totalCharacterCount: text.count,
+            totalUTF16Length: ns.length,
             chapters: chapters,
             blocks: BodyBlockIndex.blocks(from: text),
-            pageSize: Self.bodyPageSize,
-            pageCount: ranges.count
+            projectID: projectID
         )
-        try writeEncrypted(
-            try encoder.encode(meta),
-            to: file("body.meta.json", in: projectID)
-        )
-        // 元数据写成功后再删旧单文件，迁移失败还能回退。
-        try? FileManager.default.removeItem(at: file("body.json", in: projectID))
     }
 
     /// 只重写正文尾部窗口：窗口从整页边界开始，窗口之前的页原样保留。
@@ -524,28 +500,6 @@ struct FileStore {
     ) throws {
         let ns = text as NSString
         let ranges = Self.pageRanges(text)
-        let directory = bodyPagesDirectory(projectID)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        for index in ranges.indices {
-            try writeEncrypted(
-                Data(ns.substring(with: ranges[index]).utf8),
-                to: bodyPageURL(projectID, index: startPage + index)
-            )
-        }
-        let lastPage = startPage + ranges.count
-        let existing = (try? FileManager.default.contentsOfDirectory(
-            atPath: directory.path
-        )) ?? []
-        for name in existing {
-            guard let page = Int(name.prefix(4)), page >= lastPage else { continue }
-            try? FileManager.default.removeItem(
-                at: directory.appendingPathComponent(name)
-            )
-        }
-
         let oldMeta = loadBodyMeta(projectID)
         var prefixBlocks = (oldMeta?.blocks ?? []).filter { $0.start < windowStart }
         for index in prefixBlocks.indices {
@@ -556,18 +510,64 @@ struct FileStore {
         let windowBlocks = BodyBlockIndex.blocks(from: text).map {
             BodyBlock(start: $0.start + windowStart, length: $0.length)
         }
-        let meta = BodyMeta(
-            characterCount: prefixCharacterCount + text.count,
-            utf16Length: windowStart + ns.length,
+        try writeBodyPagesAndMeta(
+            ns: ns,
+            ranges: ranges,
+            startPage: startPage,
+            firstWriteOffset: 0,
+            totalCharacterCount: prefixCharacterCount + text.count,
+            totalUTF16Length: windowStart + ns.length,
             chapters: chapters,
             blocks: prefixBlocks + windowBlocks,
+            projectID: projectID
+        )
+    }
+
+    private func writeBodyPagesAndMeta(
+        ns: NSString,
+        ranges: [NSRange],
+        startPage: Int,
+        firstWriteOffset: Int,
+        totalCharacterCount: Int,
+        totalUTF16Length: Int,
+        chapters: [Chapter],
+        blocks: [BodyBlock],
+        projectID: String
+    ) throws {
+        let directory = bodyPagesDirectory(projectID)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        for offset in firstWriteOffset..<ranges.count {
+            try writeEncrypted(
+                Data(ns.substring(with: ranges[offset]).utf8),
+                to: bodyPageURL(projectID, index: startPage + offset)
+            )
+        }
+        // 删掉上次多出来的页。
+        let totalPageCount = startPage + ranges.count
+        let existing = (try? FileManager.default.contentsOfDirectory(
+            atPath: directory.path
+        )) ?? []
+        for name in existing {
+            guard let page = Int(name.prefix(4)), page >= totalPageCount else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
+
+        let meta = BodyMeta(
+            characterCount: totalCharacterCount,
+            utf16Length: totalUTF16Length,
+            chapters: chapters,
+            blocks: blocks,
             pageSize: Self.bodyPageSize,
-            pageCount: lastPage
+            pageCount: totalPageCount
         )
         try writeEncrypted(
             try encoder.encode(meta),
             to: file("body.meta.json", in: projectID)
         )
+        // 元数据写成功后再删旧单文件，迁移失败还能回退。
         try? FileManager.default.removeItem(at: file("body.json", in: projectID))
     }
 

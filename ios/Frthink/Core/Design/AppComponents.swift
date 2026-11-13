@@ -61,6 +61,66 @@ struct CircleIconButton: View {
     }
 }
 
+// MARK: - 确认弹层
+
+extension View {
+    /// 删除确认弹层（§5.8、§8.2）。只放标题与「删除 / 取消」，不加说明文案。
+    func deleteConfirmationDialog(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        actionTitle: String = "删除",
+        onConfirm: @escaping () -> Void
+    ) -> some View {
+        confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+            Button(actionTitle, role: .destructive, action: onConfirm)
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    /// 按待删条目绑定的删除确认弹层（§5.8、§8.2）。
+    func deleteConfirmationDialog<Item>(
+        _ title: @escaping (Item) -> String,
+        item: Binding<Item?>,
+        actionTitle: String = "删除",
+        onConfirm: @escaping (Item) -> Void
+    ) -> some View {
+        confirmationDialog(
+            item.wrappedValue.map(title) ?? "",
+            isPresented: Binding(
+                get: { item.wrappedValue != nil },
+                set: { if !$0 { item.wrappedValue = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(actionTitle, role: .destructive) {
+                guard let target = item.wrappedValue else { return }
+                item.wrappedValue = nil
+                onConfirm(target)
+            }
+            Button("取消", role: .cancel) {
+                item.wrappedValue = nil
+            }
+        }
+    }
+
+    /// 表单未保存退出前的放弃确认。
+    func discardChangesDialog(
+        isPresented: Binding<Bool>,
+        hasChanges: Bool,
+        onDiscard: @escaping () -> Void
+    ) -> some View {
+        interactiveDismissDisabled(hasChanges)
+            .confirmationDialog(
+                "放弃未保存的修改？",
+                isPresented: isPresented,
+                titleVisibility: .visible
+            ) {
+                Button("放弃修改", role: .destructive, action: onDiscard)
+                Button("继续编辑", role: .cancel) {}
+            }
+    }
+}
+
 /// 行内搜索框：36pt 胶囊 + 放大镜 + 清除键（§5.1）。
 ///
 /// 清除键跟胶囊同高，不参与行高：写成 44pt 会让输入文字后整条长高 8pt。
@@ -144,17 +204,17 @@ enum AppTone {
 
 /// 设置行 / 分类入口左侧的图标印章。
 ///
-/// 尺寸走 `@ScaledMetric`（基准 30pt）：系统设置的方块在无障碍字号下也会跟着放大。
-/// 圆角、字形比例对着系统设置量的：22.6% 圆角、50% 字形、medium 字重。
+/// 尺寸走 `@ScaledMetric`（基准 28pt）：系统设置的方块在无障碍字号下也会跟着放大。
+/// 圆角、字形比例对着系统设置量的：22.6% 圆角、54% 字形、medium 字重。
 struct IconTile: View {
     let symbol: String
     var tint: Color = Theme.accent
-    /// 显式尺寸（可选，用于特殊场合）。不传就按 30pt 基准跟随 Dynamic Type 缩放。
+    /// 显式尺寸（可选，用于特殊场合）。不传就按 28pt 基准跟随 Dynamic Type 缩放。
     var size: CGFloat? = nil
     /// 实底 + 白色符号（一级分类用，和 Apple 设置同一个做法）；默认是淡底 + tint 符号。
     var filled: Bool = false
 
-    /// 基准 30pt、圆角 22.6%、字形 50%、medium：对着系统设置的方块量的。
+    /// 基准 28pt、圆角 22.6%、字形 54%、medium：对着系统设置的方块量的。
     @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = Theme.Layout.iconTileSize
 
     private var effectiveSize: CGFloat { size ?? baseSize }
@@ -213,7 +273,7 @@ struct ProviderIcon: View {
     }
 }
 
-/// 工具栏圆形按钮的标签：30pt 圆 + 一条细描边。
+/// 工具栏圆形按钮的标签：28pt 圆 + 一条细描边。
 ///
 /// 和系统搜索框右侧的关闭键同一种形状，顶栏几个动作因此有统一的轮廓，
 /// 不再是一排粗细不一的裸符号。
@@ -278,13 +338,7 @@ struct AppSettingsRow: View {
                 .font(.body)
                 .foregroundStyle(.primary)
             Spacer(minLength: Theme.Spacing.s)
-            if let detail, !detail.isEmpty {
-                Text(detail)
-                    .font(Theme.label)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
+            detailText(lineLimit: 1)
         }
         .contentShape(Rectangle())
         .frame(minHeight: Theme.Layout.rowContentHeight)
@@ -300,15 +354,21 @@ struct AppSettingsRow: View {
                     .font(.body)
                     .foregroundStyle(.primary)
             }
-            if let detail, !detail.isEmpty {
-                Text(detail)
-                    .font(Theme.label)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
+            detailText(lineLimit: nil)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: Theme.Layout.rowContentHeight)
+    }
+
+    @ViewBuilder
+    private func detailText(lineLimit: Int?) -> some View {
+        if let detail, !detail.isEmpty {
+            Text(detail)
+                .font(Theme.label)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(lineLimit)
+        }
     }
 }
 
@@ -453,33 +513,24 @@ private struct FieldChrome: ViewModifier {
     var flat: Bool = false
 
     func body(content: Content) -> some View {
-        if flat {
-            content
-                .padding(.horizontal, horizontal)
-                .padding(.vertical, vertical)
-                .overlay(
-                    Rectangle()
-                        .strokeBorder(
-                            focused ? Theme.accent.opacity(0.45) : Color.clear,
-                            lineWidth: 1
-                        )
-                )
-                .themeAnimation(Theme.motionSelection, value: focused)
-        } else {
-            content
-                .padding(.horizontal, horizontal)
-                .padding(.vertical, vertical)
-                .background(Theme.field)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                        .strokeBorder(
-                            focused ? Theme.accent.opacity(0.45) : Color.clear,
-                            lineWidth: 1
-                        )
-                )
-                .themeAnimation(Theme.motionSelection, value: focused)
+        let padded = content
+            .padding(.horizontal, horizontal)
+            .padding(.vertical, vertical)
+        let strokeColor = focused ? Theme.accent.opacity(0.45) : Color.clear
+
+        Group {
+            if flat {
+                padded
+                    .overlay(Rectangle().strokeBorder(strokeColor, lineWidth: 1))
+            } else {
+                let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                padded
+                    .background(Theme.field)
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(strokeColor, lineWidth: 1))
+            }
         }
+        .themeAnimation(Theme.motionSelection, value: focused)
     }
 }
 
@@ -533,17 +584,12 @@ struct AppTextField: View {
 
     @FocusState private var focused: Bool
 
-    private var isOverLimit: Bool {
-        guard let maxLength else { return false }
-        return text.count > maxLength
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             FieldCaption(
                 title: title,
                 count: showsCount ? "\(text.count) 字" : nil,
-                countTone: isOverLimit ? .danger : .neutral
+                countTone: isOverMaxLength(text, maxLength: maxLength) ? .danger : .neutral
             )
 
             TextField(placeholder, text: $text)
@@ -555,10 +601,7 @@ struct AppTextField: View {
                 .focused($focused)
                 .accessibilityLabel(title)
                 .modifier(FieldChrome(focused: focused, flat: flat))
-                .onChange(of: text) { _, newValue in
-                    guard let maxLength, newValue.count > maxLength else { return }
-                    text = String(newValue.prefix(maxLength))
-                }
+                .clampMaxLength($text, maxLength: maxLength)
 
             fieldHint(hint)
         }
@@ -580,17 +623,12 @@ struct AppTextArea: View {
 
     @FocusState private var focused: Bool
 
-    private var isOverLimit: Bool {
-        guard let maxLength else { return false }
-        return text.count > maxLength
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             FieldCaption(
                 title: title,
                 count: showsCount ? "\(text.count) 字" : nil,
-                countTone: isOverLimit ? .danger : .neutral
+                countTone: isOverMaxLength(text, maxLength: maxLength) ? .danger : .neutral
             )
 
             TextField(placeholder, text: $text, axis: .vertical)
@@ -600,10 +638,7 @@ struct AppTextArea: View {
                 .focused($focused)
                 .accessibilityLabel(title)
                 .modifier(FieldChrome(focused: focused, flat: flat))
-                .onChange(of: text) { _, newValue in
-                    guard let maxLength, newValue.count > maxLength else { return }
-                    text = String(newValue.prefix(maxLength))
-                }
+                .clampMaxLength($text, maxLength: maxLength)
 
             fieldHint(hint)
         }
@@ -679,11 +714,6 @@ struct AppTextEditor: View {
 
     @FocusState private var focused: Bool
 
-    private var isOverLimit: Bool {
-        guard let maxLength else { return false }
-        return text.count > maxLength
-    }
-
     /// 编辑器没有可见标题时退回占位文案，避免 VoiceOver 只念「文本栏」。
     private var accessibilityTitle: String {
         if !title.isEmpty { return title }
@@ -697,7 +727,7 @@ struct AppTextEditor: View {
                     Spacer(minLength: 0)
                     Text("\(text.count) 字")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(isOverLimit ? Color.red : Color.secondary)
+                        .foregroundStyle(isOverMaxLength(text, maxLength: maxLength) ? Color.red : Color.secondary)
                 }
             }
 
@@ -728,10 +758,21 @@ struct AppTextEditor: View {
                     vertical: Theme.Spacing.xs
                 )
             )
-            .onChange(of: text) { _, newValue in
-                guard let maxLength, newValue.count > maxLength else { return }
-                text = String(newValue.prefix(maxLength))
-            }
+            .clampMaxLength($text, maxLength: maxLength)
+        }
+    }
+}
+
+private func isOverMaxLength(_ text: String, maxLength: Int?) -> Bool {
+    guard let maxLength else { return false }
+    return text.count > maxLength
+}
+
+private extension View {
+    func clampMaxLength(_ text: Binding<String>, maxLength: Int?) -> some View {
+        onChange(of: text.wrappedValue) { _, newValue in
+            guard let maxLength, newValue.count > maxLength else { return }
+            text.wrappedValue = String(newValue.prefix(maxLength))
         }
     }
 }
@@ -978,13 +1019,72 @@ struct FloatingGlassButton: View {
             } else {
                 Image(systemName: symbol)
                     .font(Font.subheadline.weight(.semibold))
-                    .frame(width: size, height: size)
-                    // 圆形按钮看起来是 36pt，热区补到 44pt（§5.1）。
+                    // 圆形按钮视觉上窄于 44pt，外层热区补到 44pt（§5.1）。
                     .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                     .contentShape(Rectangle())
             }
         }
         .disabled(!isEnabled)
         .accessibilityLabel(label)
+    }
+}
+
+// MARK: - 确认弹层
+
+extension View {
+    /// 删除确认弹层（§5.8、§8.2）。只放标题与「删除 / 取消」，不加说明文案。
+    func deleteConfirmationDialog(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        actionTitle: String = "删除",
+        onConfirm: @escaping () -> Void
+    ) -> some View {
+        confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+            Button(actionTitle, role: .destructive, action: onConfirm)
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    /// 按待删条目绑定的删除确认弹层（§5.8、§8.2）。
+    func deleteConfirmationDialog<Item>(
+        _ title: @escaping (Item) -> String,
+        item: Binding<Item?>,
+        actionTitle: String = "删除",
+        onConfirm: @escaping (Item) -> Void
+    ) -> some View {
+        confirmationDialog(
+            item.wrappedValue.map(title) ?? "",
+            isPresented: Binding(
+                get: { item.wrappedValue != nil },
+                set: { if !$0 { item.wrappedValue = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(actionTitle, role: .destructive) {
+                guard let target = item.wrappedValue else { return }
+                item.wrappedValue = nil
+                onConfirm(target)
+            }
+            Button("取消", role: .cancel) {
+                item.wrappedValue = nil
+            }
+        }
+    }
+
+    /// 表单未保存退出前的放弃确认。
+    func discardChangesDialog(
+        isPresented: Binding<Bool>,
+        hasChanges: Bool,
+        onDiscard: @escaping () -> Void
+    ) -> some View {
+        interactiveDismissDisabled(hasChanges)
+            .confirmationDialog(
+                "放弃未保存的修改？",
+                isPresented: isPresented,
+                titleVisibility: .visible
+            ) {
+                Button("放弃修改", role: .destructive, action: onDiscard)
+                Button("继续编辑", role: .cancel) {}
+            }
     }
 }

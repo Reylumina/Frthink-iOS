@@ -128,13 +128,9 @@ final class ProjectSession {
         let pageSize = meta.pageSize ?? FileStore.bodyPageSize
         let startPage = max(0, pageCount - 2)
         let start = startPage * pageSize
-        var text = ""
-        for index in startPage..<pageCount {
-            guard let page = store.loadBodyPage(project.id, index: index) else {
-                loadManuscriptIfNeeded()
-                return
-            }
-            text += page
+        guard let text = loadBodyPageRange(startPage..<pageCount) else {
+            loadManuscriptIfNeeded()
+            return
         }
         let length = (text as NSString).length
         guard !text.isEmpty, start + length == meta.utf16Length else {
@@ -178,11 +174,7 @@ final class ProjectSession {
         let targetPage = min(max(0, offset / pageSize), pageCount - 1)
         guard targetPage < current.startPage else { return }
         // 只从磁盘补读前面新增的页，保留当前窗口里尚未落盘的编辑内容。
-        var earlierText = ""
-        for index in targetPage..<current.startPage {
-            guard let page = store.loadBodyPage(project.id, index: index) else { return }
-            earlierText += page
-        }
+        guard let earlierText = loadBodyPageRange(targetPage..<current.startPage) else { return }
         let combined = earlierText + current.text
         let earlierUTF16 = (earlierText as NSString).length
         let newStart = max(0, current.start - earlierUTF16)
@@ -737,16 +729,13 @@ final class ProjectSession {
 
     /// 清理历史版本：只保留当前展示的版本（原版「清理历史版本」）。
     func keepOnlySelectedVariant(for messageID: String) {
-        guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
-        else { return }
-        var message = payload.messages[index]
-        guard message.variants.count > 1 else { return }
-        let selected = min(max(message.selectedVariant, 0), message.variants.count - 1)
-        let content = message.variants[selected]
-        message.variants = [content]
-        message.selectedVariant = 0
-        payload.messages[index] = message
-        scheduleSave()
+        mutateMessage(messageID) { message in
+            guard message.variants.count > 1 else { return false }
+            let selected = min(max(message.selectedVariant, 0), message.variants.count - 1)
+            message.variants = [message.variants[selected]]
+            message.selectedVariant = 0
+            return true
+        }
     }
 
     /// 删除整条消息（原版「删除这条消息？」）。用户指令和码字机回复都适用。
@@ -988,40 +977,55 @@ final class ProjectSession {
     }
 
     func appendDelta(_ text: String, to messageID: String) {
-        guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
-        else { return }
-        var message = payload.messages[index]
-        message.content += text
-        payload.messages[index] = message
+        mutateMessage(messageID, save: false) { message in
+            message.content += text
+            return true
+        }
     }
 
     func finishAssistantMessage(_ messageID: String, model: String?) {
-        guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
-        else { return }
-        var message = payload.messages[index]
-        message.model = model ?? message.model
-        payload.messages[index] = message
-        scheduleSave()
+        mutateMessage(messageID) { message in
+            message.model = model ?? message.model
+            return true
+        }
     }
 
     /// 重新生成：把这条助手消息当成新分支，旧内容留在 variants 里。
     func addVariant(to messageID: String) {
-        guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
-        else { return }
-        var message = payload.messages[index]
-        message.variants.append("")
-        message.selectedVariant = message.variants.count - 1
-        payload.messages[index] = message
+        mutateMessage(messageID, save: false) { message in
+            message.variants.append("")
+            message.selectedVariant = message.variants.count - 1
+            return true
+        }
     }
 
     func selectVariant(_ variant: Int, for messageID: String) {
-        guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
-        else { return }
+        mutateMessage(messageID) { message in
+            guard message.variants.indices.contains(variant) else { return false }
+            message.selectedVariant = variant
+            return true
+        }
+    }
+
+    private func loadBodyPageRange(_ range: Range<Int>) -> String? {
+        var text = ""
+        for index in range {
+            guard let page = store.loadBodyPage(project.id, index: index) else { return nil }
+            text += page
+        }
+        return text
+    }
+
+    private func mutateMessage(
+        _ messageID: String,
+        save: Bool = true,
+        _ transform: (inout ChatMessage) -> Bool
+    ) {
+        guard let index = payload.messages.firstIndex(where: { $0.id == messageID }) else { return }
         var message = payload.messages[index]
-        guard message.variants.indices.contains(variant) else { return }
-        message.selectedVariant = variant
+        guard transform(&message) else { return }
         payload.messages[index] = message
-        scheduleSave()
+        if save { scheduleSave() }
     }
 
     /// 删除当前展示的版本（原版「删除当前版本」）。

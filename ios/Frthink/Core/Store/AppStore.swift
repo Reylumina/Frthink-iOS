@@ -452,18 +452,7 @@ final class AppStore {
     #endif
 
     func clientForActiveProvider() throws -> any LLMClient {
-        guard let provider = settings.activeProvider else {
-            throw LLMError.notConfigured
-        }
-        let key = apiKey(for: provider.id)
-        guard !key.isEmpty else {
-            throw LLMError.missingAPIKey(provider.kind.displayName)
-        }
-        return OpenAICompatibleClient(
-            baseURL: provider.baseURLForDisplay,
-            apiKey: key,
-            provider: provider
-        )
+        try client(for: settings.activeProvider)
     }
 
     /// 翻译任务用的供应方。设置里单独指定了就用它，否则复用当前供应方。
@@ -476,7 +465,11 @@ final class AppStore {
     }
 
     func clientForTranslation() throws -> any LLMClient {
-        guard let provider = translationProvider else {
+        try client(for: translationProvider)
+    }
+
+    private func client(for provider: ProviderSetting?) throws -> any LLMClient {
+        guard let provider else {
             throw LLMError.notConfigured
         }
         let key = apiKey(for: provider.id)

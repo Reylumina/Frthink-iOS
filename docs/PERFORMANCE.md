@@ -9,6 +9,7 @@
 | ProMotion 120Hz | Apple《Optimizing iPhone and iPad apps to support ProMotion displays》 | `Info.plist` 要设 `CADisableMinimumFrameDurationOnPhone = true`，否则 Core Animation 不采用高于系统默认的帧率 |
 | 生成式 Info.plist | Apple《Managing your app's information property list values》 | 用户自定义的 `INFOPLIST_KEY_*` 不保证写进生成的 plist，自定义键要走真正的 `Info.plist` 合并 |
 | SwiftUI 视图更新 | Apple WWDC25《Optimize SwiftUI performance with Instruments》 | `@Observable` 的依赖尽量窄，频繁变化的属性隔离到小视图或独立模型，避免在 `body` 中执行重负载操作 |
+| SwiftUI 几何读取 | Apple `onGeometryChange(for:of:action:)` 文档 | 用 `.onGeometryChange` 返回轻量 `Equatable` 尺寸，替代 `GeometryReader` 避免额外布局读取开销 |
 | SwiftUI `Text` 流式渲染 | JuniperPhoton《Pro to SwiftUI: Text performance issue and workaround》 | `Text` 不是 `UITextView` 或 `NSTextView`。流式长文本每追加一次都会全量重排，行数到 50 到 100 以上时主线程 CPU 显著升高，改用 `UITextView` 可明显改善 |
 | token 合并 | Tanay Shah《Why Your iOS Streaming Chat Is Cooking the GPU》 | 逐 token 渲染等于反复解析越来越长的字符串。按时间窗口合并，遇到换行立即刷新，兼顾流畅和段落语义 |
 | URLSession | SwiftLee《URLSessionConfiguration: Exploring opt-in configurations》和 Apple 文档 | 交互式请求用 `waitsForConnectivity = false` 快速失败，流式响应不写 URL 缓存，复用 session 复用连接 |

@@ -97,10 +97,6 @@ enum Theme {
             colors[Int(stableHash(seed) % UInt64(colors.count))]
         }
 
-        static func color(at index: Int) -> Color {
-            colors[index % colors.count]
-        }
-
         /// 稳定哈希：FNV-1a 打底，末尾再做一轮 splitmix 收尾。
         ///
         /// 只做 FNV 时，名字相近的 id 会落进相邻槽位，一排书封经常撞色撞图标。
