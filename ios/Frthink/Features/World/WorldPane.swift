@@ -161,57 +161,69 @@ struct WorldPane: View {
             HStack(spacing: Theme.Spacing.s) {
                 statusIcon
                     .frame(width: statusIconWidth)
-
-                if busy == nil, statusMessage == nil, lastRawResponse != nil {
-                    Button {
-                        showingRawResponse = true
-                    } label: {
-                        HStack(spacing: Theme.Spacing.s) {
-                            Text("查看上一次原始响应")
-                                .lineLimit(1)
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
-                        }
-                        .font(Font.footnote)
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Text(statusText)
-                        .font(Font.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    Spacer(minLength: Theme.Spacing.s)
-
-                    if busy != nil, worldTask != nil {
-                        Button("停止") {
-                            worldTask?.cancel()
-                        }
-                        .font(Font.footnote.weight(.semibold))
-                        .buttonStyle(.borderless)
-                        .frame(minHeight: Theme.Layout.hitTarget)
-                        .contentShape(Rectangle())
-                    } else if statusMessage != nil {
-                        Button {
-                            self.statusMessage = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(Font.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("关闭提示")
-                    }
-                }
+                statusContent
             }
             .frame(minHeight: statusSlotHeight)
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xs)
+        }
+    }
+
+    @ViewBuilder
+    private var statusContent: some View {
+        if busy == nil, statusMessage == nil, lastRawResponse != nil {
+            rawResponseButton
+        } else {
+            Text(statusText)
+                .font(Font.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: Theme.Spacing.s)
+            statusTrailingAction
+        }
+    }
+
+    private var rawResponseButton: some View {
+        Button {
+            showingRawResponse = true
+        } label: {
+            HStack(spacing: Theme.Spacing.s) {
+                Text("查看上一次原始响应")
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+            }
+            .font(Font.footnote)
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var statusTrailingAction: some View {
+        if busy != nil, worldTask != nil {
+            Button("停止") {
+                worldTask?.cancel()
+            }
+            .font(Font.footnote.weight(.semibold))
+            .buttonStyle(.borderless)
+            .frame(minHeight: Theme.Layout.hitTarget)
+            .contentShape(Rectangle())
+        } else if statusMessage != nil {
+            Button {
+                self.statusMessage = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(Font.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("关闭提示")
         }
     }
 

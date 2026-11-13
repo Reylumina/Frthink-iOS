@@ -90,136 +90,154 @@ final class OpenAICompatibleClient: LLMClient {
     func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                do {
-                    var req = request
-                    req.stream = true
-                    let urlRequest = try makeRequest(
-                        path: "/chat/completions",
-                        body: req.jsonBody(
-                            isDeepSeek: provider.isDeepSeek,
-                            kind: provider.kind,
-                            providerLevel: provider.effectiveThinkingLevel,
-                            offStyle: provider.effectiveReasoningOffStyle
-                        ),
-                        accept: "text/event-stream",
-                        attemptId: req.attemptId
-                    )
-                    let (bytes, response) = try await session.bytes(for: urlRequest)
-
-                    guard let http = response as? HTTPURLResponse else {
-                        throw LLMError.decoding("拿不到 HTTP 状态码")
-                    }
-                    guard (200..<300).contains(http.statusCode) else {
-                        let body = try await Self.drain(bytes)
-                        throw LLMError.http(status: http.statusCode, body: body)
-                    }
-
-                    var finishReason: String?
-                    var emittedAnything = false
-                    var sawDone = false
-                    var undecodableLines = 0
-                    // 收到的原始 SSE 行。判定「空响应」时一并带出去——
-                    // 只说「空响应」没法区分是鉴权、参数还是模型名的问题。
-                    var rawLog: [String] = []
-                    // 一个解码器复用整条流：每个 chunk 新建 JSONDecoder 是纯浪费。
-                    let chunkDecoder = JSONDecoder()
-
-                    for try await line in bytes.lines {
-                        if Task.isCancelled {
-                            continuation.finish(throwing: LLMError.cancelled)
-                            return
-                        }
-                        if rawLog.count < 40, !line.isEmpty {
-                            rawLog.append(line)
-                        }
-                        guard line.hasPrefix("data:") else { continue }
-                        let payload = line
-                            .dropFirst("data:".count)
-                            .trimmingCharacters(in: .whitespaces)
-
-                        if payload == "[DONE]" {
-                            sawDone = true
-                            break
-                        }
-                        if payload.isEmpty { continue }
-
-                        guard let data = payload.data(using: .utf8) else { continue }
-                        // 长时间流式循环里每行都在产生临时对象，autoreleasepool
-                        // 把每块的生命周期限制在本行，避免几万行后一起释放。
-                        guard let chunk = autoreleasepool(invoking: {
-                            try? chunkDecoder.decode(StreamChunk.self, from: data)
-                        }) else {
-                            undecodableLines += 1
-                            continue
-                        }
-                        // 200 流里也会下发错误（限流、内容过滤、上下文超限），
-                        // 不能整块丢掉，否则半截正文会被当成正常结束。
-                        if let streamError = chunk.error {
-                            throw LLMError.streamError(detail: streamError.detail)
-                        }
-
-                        if let choice = chunk.choices?.first {
-                            if finishReason == nil {
-                                finishReason = choice.finish_reason
-                                    ?? choice.delta?.stop_reason
-                                    ?? chunk.stop_reason
-                            }
-                            let delta = choice.delta
-                            let content = delta?.contentText ?? chunk.contentText
-                            let reasoning = delta?.reasoningText ?? chunk.reasoningText
-
-                            if let reasoning, !reasoning.isEmpty {
-                                emittedAnything = true
-                                continuation.yield(.reasoning(reasoning))
-                            }
-                            if let content, !content.isEmpty {
-                                emittedAnything = true
-                                continuation.yield(.delta(content))
-                            }
-                        } else {
-                            if finishReason == nil { finishReason = chunk.stop_reason }
-                            if let content = chunk.contentText, !content.isEmpty {
-                                emittedAnything = true
-                                continuation.yield(.delta(content))
-                            } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
-                                emittedAnything = true
-                                continuation.yield(.reasoning(reasoning))
-                            }
-                        }
-                    }
-
-                    if emittedAnything, undecodableLines > 0,
-                       finishReason == nil, !sawDone {
-                        throw LLMError.streamError(
-                            detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
-                        )
-                    }
-
-                    if !emittedAnything {
-                        let detail = rawLog.joined(separator: " / ")
-                        continuation.finish(
-                            throwing: LLMError.emptyResponse(
-                                detail: detail.isEmpty
-                                    ? "（连接建立但没有收到任何 SSE 行）"
-                                    : detail
-                            )
-                        )
-                        return
-                    }
-                    continuation.yield(.finished(reason: finishReason))
-                    continuation.finish()
-                } catch is CancellationError {
-                    continuation.finish(throwing: LLMError.cancelled)
-                } catch let urlError as URLError where urlError.code == .cancelled {
-                    continuation.finish(throwing: LLMError.cancelled)
-                } catch {
-                    continuation.finish(throwing: error)
-                }
+                await runStream(request, continuation: continuation)
             }
-
             continuation.onTermination = { _ in
                 task.cancel()
             }
+        }
+    }
+
+    private func runStream(
+        _ request: LLMRequest,
+        continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
+    ) async {
+        do {
+            var req = request
+            req.stream = true
+            let urlRequest = try makeRequest(
+                path: "/chat/completions",
+                body: req.jsonBody(
+                    isDeepSeek: provider.isDeepSeek,
+                    kind: provider.kind,
+                    providerLevel: provider.effectiveThinkingLevel,
+                    offStyle: provider.effectiveReasoningOffStyle
+                ),
+                accept: "text/event-stream",
+                attemptId: req.attemptId
+            )
+            let (bytes, response) = try await session.bytes(for: urlRequest)
+
+            guard let http = response as? HTTPURLResponse else {
+                throw LLMError.decoding("拿不到 HTTP 状态码")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let body = try await Self.drain(bytes)
+                throw LLMError.http(status: http.statusCode, body: body)
+            }
+
+            var finishReason: String?
+            var emittedAnything = false
+            var sawDone = false
+            var undecodableLines = 0
+            // 收到的原始 SSE 行。判定「空响应」时一并带出去——
+            // 只说「空响应」没法区分是鉴权、参数还是模型名的问题。
+            var rawLog: [String] = []
+            // 一个解码器复用整条流：每个 chunk 新建 JSONDecoder 是纯浪费。
+            let chunkDecoder = JSONDecoder()
+
+            for try await line in bytes.lines {
+                if Task.isCancelled {
+                    continuation.finish(throwing: LLMError.cancelled)
+                    return
+                }
+                if rawLog.count < 40, !line.isEmpty {
+                    rawLog.append(line)
+                }
+                guard line.hasPrefix("data:") else { continue }
+                let payload = line
+                    .dropFirst("data:".count)
+                    .trimmingCharacters(in: .whitespaces)
+
+                if payload == "[DONE]" {
+                    sawDone = true
+                    break
+                }
+                if payload.isEmpty { continue }
+
+                guard let data = payload.data(using: .utf8) else { continue }
+                // 长时间流式循环里每行都在产生临时对象，autoreleasepool
+                // 把每块的生命周期限制在本行，避免几万行后一起释放。
+                guard let chunk = autoreleasepool(invoking: {
+                    try? chunkDecoder.decode(StreamChunk.self, from: data)
+                }) else {
+                    undecodableLines += 1
+                    continue
+                }
+                try handleChunk(
+                    chunk,
+                    continuation: continuation,
+                    finishReason: &finishReason,
+                    emittedAnything: &emittedAnything
+                )
+            }
+
+            if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
+                throw LLMError.streamError(
+                    detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
+                )
+            }
+
+            if !emittedAnything {
+                let detail = rawLog.joined(separator: " / ")
+                continuation.finish(
+                    throwing: LLMError.emptyResponse(
+                        detail: detail.isEmpty ? "（连接建立但没有收到任何 SSE 行）" : detail
+                    )
+                )
+                return
+            }
+            continuation.yield(.finished(reason: finishReason))
+            continuation.finish()
+        } catch is CancellationError {
+            continuation.finish(throwing: LLMError.cancelled)
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            continuation.finish(throwing: LLMError.cancelled)
+        } catch {
+            continuation.finish(throwing: error)
+        }
+    }
+
+    private func handleChunk(
+        _ chunk: StreamChunk,
+        continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
+        finishReason: inout String?,
+        emittedAnything: inout Bool
+    ) throws {
+        // 200 流里也会下发错误（限流、内容过滤、上下文超限），
+        // 不能整块丢掉，否则半截正文会被当成正常结束。
+        if let streamError = chunk.error {
+            throw LLMError.streamError(detail: streamError.detail)
+        }
+
+        if let choice = chunk.choices?.first {
+            if finishReason == nil {
+                finishReason = choice.finish_reason
+                    ?? choice.delta?.stop_reason
+                    ?? chunk.stop_reason
+            }
+            let delta = choice.delta
+            let content = delta?.contentText ?? chunk.contentText
+            let reasoning = delta?.reasoningText ?? chunk.reasoningText
+
+            if let reasoning, !reasoning.isEmpty {
+                emittedAnything = true
+                continuation.yield(.reasoning(reasoning))
+            }
+            if let content, !content.isEmpty {
+                emittedAnything = true
+                continuation.yield(.delta(content))
+            }
+            return
+        }
+
+        if finishReason == nil { finishReason = chunk.stop_reason }
+        if let content = chunk.contentText, !content.isEmpty {
+            emittedAnything = true
+            continuation.yield(.delta(content))
+        } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
+            emittedAnything = true
+            continuation.yield(.reasoning(reasoning))
         }
     }
 

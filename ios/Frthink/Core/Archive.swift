@@ -1459,24 +1459,28 @@ enum FrthinkArchive {
                 "id": "ios-corpus",
                 "name": "本机语料库",
                 "enabled": settings.corpusEnabled,
-                "collections": settings.corpusLibraries.map { library in
-                    [
-                        "id": library.id,
-                        "name": library.name,
-                        "enabled": library.enabled,
-                        "entries": library.entries.map { entry in
-                            [
-                                "source": entry.source,
-                                "title": entry.title,
-                                "text": entry.text,
-                                "category": entry.category,
-                                "tags": entry.tags,
-                            ]
-                        },
-                    ] as [String: Any]
-                },
+                "collections": settings.corpusLibraries.map(Self.encodeCorpusLibrary),
             ]
             return AnyCodable(raw: node)
+        }
+
+        private static func encodeCorpusLibrary(_ library: CorpusLibrary) -> [String: Any] {
+            [
+                "id": library.id,
+                "name": library.name,
+                "enabled": library.enabled,
+                "entries": library.entries.map(encodeCorpusEntry),
+            ]
+        }
+
+        private static func encodeCorpusEntry(_ entry: CorpusEntry) -> [String: Any] {
+            [
+                "source": entry.source,
+                "title": entry.title,
+                "text": entry.text,
+                "category": entry.category,
+                "tags": entry.tags,
+            ]
         }
     }
 

@@ -253,27 +253,7 @@ struct WorldCharactersSection: View {
                     .background(Circle().fill(Theme.accentSoft))
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        Text(card.name.isEmpty ? "未命名人物" : card.name)
-                            .font(Font.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-
-                        if !card.aliases.isEmpty {
-                            Text(card.aliases.prefix(2).joined(separator: "、"))
-                                .font(Font.caption)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(Font.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
+                summaryColumn
 
                 Spacer(minLength: 0)
 
@@ -283,6 +263,30 @@ struct WorldCharactersSection: View {
             }
             .padding(.vertical, Theme.Spacing.xs)
             .contentShape(Rectangle())
+        }
+
+        private var summaryColumn: some View {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Text(card.name.isEmpty ? "未命名人物" : card.name)
+                        .font(Font.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    if !card.aliases.isEmpty {
+                        Text(card.aliases.prefix(2).joined(separator: "、"))
+                            .font(Font.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(Font.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
         }
     }
 

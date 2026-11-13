@@ -15,37 +15,40 @@ struct LibraryTrashView: View {
         }
     }
 
-    var body: some View {
-        Group {
-            if projects.isEmpty {
-                EmptyStateView(
-                    symbol: "trash",
-                    title: "回收站是空的"
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    Section {
-                        ForEach(projects) { project in
-                            LibraryTrashRow(
-                                project: project,
-                                onRestore: { restore(project) },
-                                onDelete: { pendingDelete = project }
-                            )
-                        }
+    @ViewBuilder
+    private var trashContent: some View {
+        if projects.isEmpty {
+            EmptyStateView(
+                symbol: "trash",
+                title: "回收站是空的"
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                Section {
+                    ForEach(projects) { project in
+                        LibraryTrashRow(
+                            project: project,
+                            onRestore: { restore(project) },
+                            onDelete: { pendingDelete = project }
+                        )
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .frame(maxWidth: Theme.Layout.formMaxWidth)
-                .frame(maxWidth: .infinity)
-                .softScrollEdge()
-                .themeAnimation(Theme.motionLayout, value: projects.count)
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: Theme.Layout.formMaxWidth)
+            .frame(maxWidth: .infinity)
+            .softScrollEdge()
+            .themeAnimation(Theme.motionLayout, value: projects.count)
         }
-        .groupedPageBackground()
-        .navigationTitle("回收站")
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    var body: some View {
+        trashContent
+            .groupedPageBackground()
+            .navigationTitle("回收站")
+            .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
             pendingDelete.map { "彻底删除「\($0.shelfTitle)」？" } ?? "彻底删除这本书？",
             isPresented: deleteDialogBinding,

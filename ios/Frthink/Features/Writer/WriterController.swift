@@ -736,47 +736,10 @@ final class WriterController {
         )
 
         task = Task { @MainActor in
-            var failure: Error?
-            do {
-                if useStreaming {
-                    for try await event in client.stream(request) {
-                        switch event {
-                        case .delta(let text):
-                            // 只更新控制器里的缓冲；气泡按「换行或时间」合并显示，
-                            // 不去碰整份 payload（那是整页重算的源头）。
-                            self.pendingDelta += text
-                            self.displayBuffer += text
-                            self.displayCharacterCount += text.count
-                            self.scheduleStreamingFlush(session: session, messageID: messageID)
-                            if text.contains("\n") {
-                                // 段落边界立刻上屏，避免时间片把一句话切在中间。
-                                self.flushStreamingDisplay()
-                            } else {
-                                self.scheduleStreamingDisplay()
-                            }
-                        case .reasoning(let text):
-                            self.reasoningBuffer += text
-                            self.reasoningBufferCharacterCount += text.count
-                            self.scheduleStreamingDisplay()
-                        case .finished:
-                            break
-                        }
-                        if Task.isCancelled { break }
-                    }
-                } else {
-                    // 用户在设置里关掉了流式：一次性拿完整段再落盘。
-                    let text = try await client.complete(request)
-                    if !text.isEmpty {
-                        self.streamingText = text
-                        self.streamingCharacterCount = text.count
-                        self.pendingDelta += text
-                        self.flushStreaming(session: session, messageID: messageID)
-                    }                }
-            } catch {
-                failure = error
-            }
-            self.finish(
-                failure: failure,
+            await runGeneration(
+                request: request,
+                client: client,
+                useStreaming: useStreaming,
                 session: session,
                 store: store,
                 messageID: messageID,
@@ -784,6 +747,78 @@ final class WriterController {
                 fallbackVariant: fallbackVariant,
                 model: model
             )
+        }
+    }
+
+    @MainActor
+    private func runGeneration(
+        request: LLMRequest,
+        client: OpenAICompatibleClient,
+        useStreaming: Bool,
+        session: ProjectSession,
+        store: AppStore,
+        messageID: String,
+        isNewMessage: Bool,
+        fallbackVariant: Int?,
+        model: String
+    ) async {
+        var failure: Error?
+        do {
+            if useStreaming {
+                for try await event in client.stream(request) {
+                    handleStreamEvent(event, session: session, messageID: messageID)
+                    if Task.isCancelled { break }
+                }
+            } else {
+                // 用户在设置里关掉了流式：一次性拿完整段再落盘。
+                let text = try await client.complete(request)
+                if !text.isEmpty {
+                    streamingText = text
+                    streamingCharacterCount = text.count
+                    pendingDelta += text
+                    flushStreaming(session: session, messageID: messageID)
+                }
+            }
+        } catch {
+            failure = error
+        }
+        finish(
+            failure: failure,
+            session: session,
+            store: store,
+            messageID: messageID,
+            isNewMessage: isNewMessage,
+            fallbackVariant: fallbackVariant,
+            model: model
+        )
+    }
+
+    @MainActor
+    private func handleStreamEvent(
+        _ event: LLMStreamEvent,
+        session: ProjectSession,
+        messageID: String
+    ) {
+        switch event {
+        case .delta(let text):
+            // 只更新控制器里的缓冲；气泡按「换行或时间」合并显示，
+            // 不去碰整份 payload（那是整页重算的源头）。
+            pendingDelta += text
+            displayBuffer += text
+            displayCharacterCount += text.count
+            scheduleStreamingFlush(session: session, messageID: messageID)
+            if text.contains("\n") {
+                // 段落边界立刻上屏，避免时间片把一句话切在中间。
+                flushStreamingDisplay()
+            } else {
+                scheduleStreamingDisplay()
+            }
+        case .reasoning(let text):
+            reasoningBuffer += text
+            reasoningBufferCharacterCount += text.count
+            scheduleStreamingDisplay()
+        case .finished:
+            break
         }
     }
 

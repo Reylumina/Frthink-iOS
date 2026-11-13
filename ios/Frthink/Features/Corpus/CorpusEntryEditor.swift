@@ -153,24 +153,28 @@ struct CorpusEntryEditor: View {
             spacing: Theme.Spacing.s
         ) {
             ForEach(Self.suggestedCategories, id: \.self) { item in
-                Button {
-                    category = item
-                } label: {
-                    Text(item)
-                        .font(Theme.labelSmall)
-                        .foregroundStyle(Theme.accent)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: Theme.Layout.hitTarget)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
-                                .fill(Theme.accentSoft)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                categoryChip(item)
             }
         }
         .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    private func categoryChip(_ item: String) -> some View {
+        Button {
+            category = item
+        } label: {
+            Text(item)
+                .font(Theme.labelSmall)
+                .foregroundStyle(Theme.accent)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: Theme.Layout.hitTarget)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.small, style: .continuous)
+                        .fill(Theme.accentSoft)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func parseTags(_ raw: String) -> [String] {

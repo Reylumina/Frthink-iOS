@@ -547,28 +547,7 @@ struct ModelPickerSheet: View {
         NavigationStack {
             List {
                 ForEach(filtered, id: \.self) { model in
-                    Button {
-                        onPick(model)
-                        dismiss()
-                    } label: {
-                        HStack(spacing: Theme.Spacing.s) {
-                            Text(model)
-                                .font(.system(.callout, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: Theme.Spacing.s)
-                            if model == currentModel {
-                                Image(systemName: "checkmark")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(Theme.accent)
-                                    .accessibilityLabel("当前")
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .frame(minHeight: Theme.Layout.rowContentHeight)
-                    }
-                    .buttonStyle(.plain)
+                    modelRow(model)
                 }
             }
             .listStyle(.plain)
@@ -586,6 +565,31 @@ struct ModelPickerSheet: View {
                 }
             }
         }
+    }
+
+    private func modelRow(_ model: String) -> some View {
+        Button {
+            onPick(model)
+            dismiss()
+        } label: {
+            HStack(spacing: Theme.Spacing.s) {
+                Text(model)
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: Theme.Spacing.s)
+                if model == currentModel {
+                    Image(systemName: "checkmark")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .accessibilityLabel("当前")
+                }
+            }
+            .contentShape(Rectangle())
+            .frame(minHeight: Theme.Layout.rowContentHeight)
+        }
+        .buttonStyle(.plain)
     }
 
     private var filtered: [String] {

@@ -132,49 +132,47 @@ struct WorldbookPane: View {
                     .controlSize(.small)
                     .accessibilityLabel(entry.title.isEmpty ? "启用未命名词条" : "启用 \(entry.title)")
 
-                Button {
-                    onEdit()
-                } label: {
-                    HStack(alignment: .top, spacing: Theme.Spacing.s) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.title.isEmpty ? "未命名词条" : entry.title)
-                                .font(Font.subheadline.weight(.medium))
-                                .foregroundStyle(.primary)
-                            if !entry.summary.isEmpty {
-                                Text(entry.summary)
-                                    .font(Font.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
-                            Text("更新于 \(entry.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                .font(Font.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(Font.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, Theme.Spacing.xs)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                Button(action: onEdit) {
+                    rowLabel
                 }
                 .buttonStyle(.plain)
             }
             .padding(.vertical, Theme.Spacing.xs)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    onDelete()
-                } label: {
+                Button(role: .destructive, action: onDelete) {
                     Label("删除", systemImage: "trash")
                 }
-                Button {
-                    onEdit()
-                } label: {
+                Button(action: onEdit) {
                     Label("编辑", systemImage: "square.and.pencil")
                 }
                 .tint(Theme.accent)
             }
+        }
+
+        private var rowLabel: some View {
+            HStack(alignment: .top, spacing: Theme.Spacing.s) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.title.isEmpty ? "未命名词条" : entry.title)
+                        .font(Font.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    if !entry.summary.isEmpty {
+                        Text(entry.summary)
+                            .font(Font.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Text("更新于 \(entry.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(Font.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(Font.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, Theme.Spacing.xs)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
     }
 
@@ -257,38 +255,41 @@ struct WorldbookPromptPreviewSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if renderedEntries.isEmpty {
-                    EmptyStateView(
-                        symbol: "text.book.closed",
-                        title: "没有启用的词条"
-                    )
-                } else {
-                    List {
-                        Section {
-                            ForEach(renderedEntries) { entry in
-                                Text(entry.promptBlock ?? "")
-                                    .font(Theme.numeric)
-                                    .foregroundStyle(.primary)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        } header: {
-                            AppSectionHeader(title: "提示词块")
-                        }
+            promptPreviewContent
+                .groupedPageBackground()
+                .navigationTitle("提示词块预览")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("关闭") { dismiss() }
                     }
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var promptPreviewContent: some View {
+        if renderedEntries.isEmpty {
+            EmptyStateView(
+                symbol: "text.book.closed",
+                title: "没有启用的词条"
+            )
+        } else {
+            List {
+                Section {
+                    ForEach(renderedEntries) { entry in
+                        Text(entry.promptBlock ?? "")
+                            .font(Theme.numeric)
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } header: {
+                    AppSectionHeader(title: "提示词块")
                 }
             }
-            .groupedPageBackground()
-            .navigationTitle("提示词块预览")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
-                }
-            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
         }
     }
 }

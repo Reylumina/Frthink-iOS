@@ -488,21 +488,25 @@ private struct CorpusRowContent: View {
             }
 
             if !highlighted.tags.isEmpty {
-                HStack(spacing: Theme.Spacing.xs) {
-                    ForEach(highlighted.tags) { pill in
-                        Text(pill.text)
-                            .font(Theme.badge)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, Theme.Spacing.s)
-                            .padding(.vertical, Theme.Spacing.xs)
-                            .background(
-                                Capsule().fill(pill.matched ? Theme.accentSoft : Theme.field)
-                            )
-                    }
-                }
+                tagsRow(highlighted.tags)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func tagsRow(_ tags: [CorpusTagPill]) -> some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            ForEach(tags) { pill in
+                Text(pill.text)
+                    .font(Theme.badge)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Spacing.s)
+                    .padding(.vertical, Theme.Spacing.xs)
+                    .background(
+                        Capsule().fill(pill.matched ? Theme.accentSoft : Theme.field)
+                    )
+            }
+        }
     }
 
     static func highlight(_ entry: CorpusEntry, tokens: [String]) -> CorpusRowHighlight {

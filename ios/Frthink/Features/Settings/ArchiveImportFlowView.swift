@@ -123,66 +123,17 @@ struct ArchiveImportFlowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                LazyVStack(spacing: 0) {
-                    // 分隔线叠在行底，不进 ForEach 的子视图列表：每项只产出一个视图，
-                    // 条件分支不会改变元素的结构身份。
-                    ForEach(outcome.books) { book in
-                        bookRow(book)
-                            .overlay(alignment: .bottom) {
-                                if book.id != outcome.books.last?.id {
-                                    Divider().overlay(Theme.separator)
-                                }
-                            }
-                    }
-                }
-                .cardSurface()
+                ArchiveImportBooksCard(
+                    books: outcome.books,
+                    detailLine: detailLine(_:)
+                )
 
                 if !outcome.settingsHighlights.isEmpty {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("全局设置")
-                            .font(Theme.sectionTitle)
-                            .foregroundStyle(.secondary)
-                        Text(outcome.settingsHighlights.joined(separator: " · "))
-                            .font(Font.footnote)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(Theme.Spacing.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surfaceSecondary)
-                    .clipShape(RoundedRectangle(
-                        cornerRadius: Theme.Radius.medium,
-                        style: .continuous
-                    ))
+                    ArchiveImportSettingsCard(highlights: outcome.settingsHighlights)
                 }
             }
             .padding(Theme.Spacing.l)
         }
-    }
-
-    private func bookRow(_ book: ArchiveBookSummary) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
-                Text(book.title)
-                    .font(Font.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                if book.isTrashed {
-                    Text("回收站")
-                        .font(Theme.badge)
-                        .foregroundStyle(AppTone.warning.color)
-                }
-                Spacer(minLength: 0)
-                Text("\(book.bodyCharacters.formatted()) 字")
-                    .font(Theme.numeric)
-                    .foregroundStyle(.secondary)
-            }
-            Text(detailLine(book))
-                .font(Font.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(Theme.Spacing.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func detailLine(_ book: ArchiveBookSummary) -> String {
@@ -233,5 +184,74 @@ struct ArchiveImportFlowView: View {
     private func cancel() {
         controller.cancel()
         dismiss()
+    }
+}
+
+private struct ArchiveImportBooksCard: View {
+    let books: [ArchiveBookSummary]
+    let detailLine: (ArchiveBookSummary) -> String
+
+    var body: some View {
+        LazyVStack(spacing: 0) {
+            // 分隔线叠在行底，不进 ForEach 的子视图列表：每项只产出一个视图，
+            // 条件分支不会改变元素的结构身份。
+            ForEach(books) { book in
+                bookRow(book)
+                    .overlay(alignment: .bottom) {
+                        if book.id != books.last?.id {
+                            Divider().overlay(Theme.separator)
+                        }
+                    }
+            }
+        }
+        .cardSurface()
+    }
+
+    private func bookRow(_ book: ArchiveBookSummary) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                Text(book.title)
+                    .font(Font.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if book.isTrashed {
+                    Text("回收站")
+                        .font(Theme.badge)
+                        .foregroundStyle(AppTone.warning.color)
+                }
+                Spacer(minLength: 0)
+                Text("\(book.bodyCharacters.formatted()) 字")
+                    .font(Theme.numeric)
+                    .foregroundStyle(.secondary)
+            }
+            Text(detailLine(book))
+                .font(Font.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(Theme.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ArchiveImportSettingsCard: View {
+    let highlights: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("全局设置")
+                .font(Theme.sectionTitle)
+                .foregroundStyle(.secondary)
+            Text(highlights.joined(separator: " · "))
+                .font(Font.footnote)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surfaceSecondary)
+        .clipShape(RoundedRectangle(
+            cornerRadius: Theme.Radius.medium,
+            style: .continuous
+        ))
     }
 }

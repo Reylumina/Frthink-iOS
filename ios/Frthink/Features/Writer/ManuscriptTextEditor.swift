@@ -87,8 +87,9 @@ struct ManuscriptTextEditor: UIViewRepresentable {
                 uiView.resignFirstResponder()
             } else {
                 // 从阅读切到编辑时直接弹键盘，少一次“再点一下正文”的动作。
-                // 放到下一轮 runloop，等 isEditable 生效后再成为 first responder。
-                DispatchQueue.main.async {
+                // 放到下一轮主线程调度，等 isEditable 生效后再成为 first responder。
+                Task { @MainActor in
+                    await Task.yield()
                     guard uiView.isEditable, uiView.window != nil else { return }
                     uiView.becomeFirstResponder()
                 }

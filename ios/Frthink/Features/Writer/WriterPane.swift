@@ -179,33 +179,15 @@ struct WriterPane: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 bottomBar
-                    .background {
-                        GeometryReader { proxy in
-                            Color.clear
-                                .onAppear { updateBottomBarHeight(proxy.size.height) }
-                                .onChange(of: proxy.size.height) { _, height in
-                                    updateBottomBarHeight(height)
-                                }
-                        }
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { height in
+                        updateBottomBarHeight(height)
                     }
             }
             // 撤销提示浮在输入条上方，不改变对话区高度（§4.3）。
             .overlay(alignment: .bottom) {
-                if let prompt = undoPrompt {
-                    undoPromptView(prompt)
-                        .glassStack()
-                        .padding(.bottom, bottomBarHeight + Theme.Spacing.s)
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .move(edge: .bottom).combined(with: .opacity)
-                        )
-                        .task(id: prompt.id) {
-                            try? await Task.sleep(for: .seconds(4))
-                            guard !Task.isCancelled else { return }
-                            undoPrompt = nil
-                        }
-                }
+                undoPromptOverlay
             }
             .themeAnimation(Theme.motionLayout, value: undoPrompt?.id)
             .onChange(of: controller.isGenerating) { _, active in
@@ -647,6 +629,25 @@ struct WriterPane: View {
     /// 插入/追加成功后显示带「撤销」的轻提示（§4.3）。
     private func presentUndoPrompt(_ text: String, undo: @escaping () -> Void) {
         undoPrompt = WriterUndoPrompt(text: text, action: undo)
+    }
+
+    @ViewBuilder
+    private var undoPromptOverlay: some View {
+        if let prompt = undoPrompt {
+            undoPromptView(prompt)
+                .glassStack()
+                .padding(.bottom, bottomBarHeight + Theme.Spacing.s)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity)
+                )
+                .task(id: prompt.id) {
+                    try? await Task.sleep(for: .seconds(4))
+                    guard !Task.isCancelled else { return }
+                    undoPrompt = nil
+                }
+        }
     }
 
     private func undoPromptView(_ prompt: WriterUndoPrompt) -> some View {

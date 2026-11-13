@@ -10,25 +10,7 @@ struct WorldGroupEditor: View {
     var body: some View {
         Form {
             Section {
-                if session.payload.world.characterGroups.isEmpty {
-                    Text("还没有分组")
-                        .font(Font.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach($session.payload.world.characterGroups) { $group in
-                        HStack(spacing: Theme.Spacing.s) {
-                            TextField("分组名", text: $group.name)
-                                .font(Font.body)
-                            Toggle("", isOn: $group.enabled)
-                                .labelsHidden()
-                                .controlSize(.small)
-                                .accessibilityLabel("启用分组")
-                        }
-                    }
-                    .onDelete { offsets in
-                        pendingDeleteOffsets = offsets
-                    }
-                }
+                groupRows
             } header: {
                 AppSectionHeader(title: "分组")
             }
@@ -63,6 +45,29 @@ struct WorldGroupEditor: View {
         }
         .onDisappear {
             session.scheduleSave()
+        }
+    }
+
+    @ViewBuilder
+    private var groupRows: some View {
+        if session.payload.world.characterGroups.isEmpty {
+            Text("还没有分组")
+                .font(Font.footnote)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach($session.payload.world.characterGroups) { $group in
+                HStack(spacing: Theme.Spacing.s) {
+                    TextField("分组名", text: $group.name)
+                        .font(Font.body)
+                    Toggle("", isOn: $group.enabled)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .accessibilityLabel("启用分组")
+                }
+            }
+            .onDelete { offsets in
+                pendingDeleteOffsets = offsets
+            }
         }
     }
 
