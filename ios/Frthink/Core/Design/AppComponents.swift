@@ -171,7 +171,7 @@ struct IconTile: View {
 struct ProviderIcon: View {
     let kind: ProviderKind
     var tint: Color = Theme.accent
-    /// 和系统图标方块同尺寸（`Theme.Layout.iconTileSize`），整页图标视觉重量一致。
+    /// 和服务商原本的品牌标尺寸一致：28pt。全应用图标同一把尺子。
     var size: CGFloat = Theme.Layout.iconTileSize
 
     var body: some View {

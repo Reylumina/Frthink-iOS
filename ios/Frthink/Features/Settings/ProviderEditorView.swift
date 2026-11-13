@@ -189,7 +189,6 @@ struct ProviderEditorView: View {
                     : draft.kind.defaultBaseURL,
                 keyboard: .URL
             )
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
 
             AppTextField(
                 title: "模型",
@@ -197,7 +196,6 @@ struct ProviderEditorView: View {
                 placeholder: "模型名",
                 hint: deprecatedModelHint
             )
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
 
             Button {
                 loadModels()
@@ -212,7 +210,7 @@ struct ProviderEditorView: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
             .disabled(isBusy)
         } header: {
@@ -262,7 +260,6 @@ struct ProviderEditorView: View {
                 Slider(value: $draft.temperature, in: 0...2, step: 0.05)
                     .tint(Theme.accent)
             }
-            .padding(.vertical, 2)
         } header: {
             AppSectionHeader(title: "生成")
         }
@@ -296,7 +293,6 @@ struct ProviderEditorView: View {
                 text: $keyInput,
                 placeholder: storedKey.isEmpty ? "粘贴 API Key" : "留空表示不修改"
             )
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
         }
     }
 
@@ -317,7 +313,7 @@ struct ProviderEditorView: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
             .disabled(isBusy)
 
@@ -335,7 +331,7 @@ struct ProviderEditorView: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
             .disabled(isActive || isBusy)
         } header: {
@@ -551,7 +547,7 @@ struct ModelPickerSheet: View {
                             }
                         }
                         .contentShape(Rectangle())
-                        .frame(minHeight: Theme.Layout.hitTarget)
+                        .frame(minHeight: Theme.Layout.rowContentHeight)
                     }
                     .buttonStyle(.plain)
                 }
