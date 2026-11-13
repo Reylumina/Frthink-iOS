@@ -37,33 +37,21 @@ struct WriterComposerBar: View {
     var body: some View {
         // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。
         WriterComposerShell {
-            // 三件控件同一条中轴：输入框随行数长高时，两侧按钮跟着居中，
-            // 不再按底边对齐：底对齐时圆钮会被玻璃内边距顶高一截。
-            HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                inputField
-                if controller.isGenerating {
-                    // 生成中主操作变成停止（§5.7）。
-                    // 页面上只留这一个停止入口，气泡头部不再放第二个。
-                    WriterComposerPrimaryButton(
-                        symbol: "stop.fill",
-                        label: "停止创作",
-                        isEnabled: true
-                    ) {
-                        controller.stop()
-                    }
-                } else if controller.isPreparing {
-                    ProgressView()
-                        .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                } else {
-                    WriterComposerPrimaryButton(
-                        symbol: "paperplane.fill",
-                        label: "发送",
-                        isEnabled: canSend
-                    ) {
-                        send()
-                    }
-                }
+            // 一块输入区域把续写、输入、发送包在一起（§5.9）：三件控件共用同一个
+            // 胶囊表面，不再各自成块。行内控件同一条中轴，输入框长高时两侧跟着居中。
+            HStack(alignment: .center, spacing: Theme.Spacing.xs) {
+                continuationButton
+                TextField(inputPlaceholder, text: $model.text, axis: .vertical)
+                    .font(Font.body)
+                    .lineLimit(1...5)
+                    .focused($focused)
+                primaryControl
             }
+            .padding(.leading, Theme.Spacing.s)
+            .padding(.trailing, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.xs)
+            .frame(minHeight: controlSize)
+            .modifier(WriterComposerFieldSurface())
         }
         .onAppear {
             if autoFocus {
@@ -111,19 +99,29 @@ struct WriterComposerBar: View {
     /// 续写图标的可视边长。
     private var glyph: CGFloat { controlSize * 0.82 }
 
-    private var inputField: some View {
-        HStack(alignment: .center, spacing: Theme.Spacing.xs) {
-            continuationButton
-            TextField(inputPlaceholder, text: $model.text, axis: .vertical)
-                .font(Font.body)
-                .lineLimit(1...5)
-                .focused($focused)
+    /// 行尾主操作：生成中是停止，准备中是转圈，其余是发送（§5.7）。
+    @ViewBuilder
+    private var primaryControl: some View {
+        if controller.isGenerating {
+            WriterComposerPrimaryButton(
+                symbol: "stop.fill",
+                label: "停止创作",
+                isEnabled: true
+            ) {
+                controller.stop()
+            }
+        } else if controller.isPreparing {
+            ProgressView()
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+        } else {
+            WriterComposerPrimaryButton(
+                symbol: "paperplane.fill",
+                label: "发送",
+                isEnabled: canSend
+            ) {
+                send()
+            }
         }
-        .padding(.leading, Theme.Spacing.s)
-        .padding(.trailing, Theme.Spacing.m)
-        .padding(.vertical, Theme.Spacing.s)
-        .frame(minHeight: controlSize)
-        .modifier(WriterComposerFieldSurface())
     }
 
     /// 草稿只在收键盘/离开页面时落盘。
