@@ -170,7 +170,8 @@ struct IconTile: View {
 struct ProviderIcon: View {
     let kind: ProviderKind
     var tint: Color = Theme.accent
-    var size: CGFloat = 28
+    /// 和服务商行里的系统图标同尺寸：28 时比旁边的分类图标小一圈，看着像次要元素。
+    var size: CGFloat = 32
 
     var body: some View {
         Group {
