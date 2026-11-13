@@ -753,7 +753,7 @@ final class WriterController {
     @MainActor
     private func runGeneration(
         request: LLMRequest,
-        client: OpenAICompatibleClient,
+        client: any LLMClient,
         useStreaming: Bool,
         session: ProjectSession,
         store: AppStore,
