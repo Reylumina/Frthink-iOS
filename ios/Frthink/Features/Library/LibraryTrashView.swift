@@ -1,6 +1,6 @@
 // 回收站：单独一页。恢复是主操作，彻底删除只走滑动/确认，避免误触。
 //
-// 彻底删除不可恢复，确认用 `confirmationDialog`，只留标题和动作按钮（§5.8）。
+// 彻底删除不可恢复，确认用 `confirmationDialog`，只留标题和动作按钮。
 
 import SwiftUI
 

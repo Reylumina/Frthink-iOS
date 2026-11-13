@@ -7,7 +7,7 @@ struct StreamingTextView: UIViewRepresentable {
     var text: String
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
-    /// 与完成态 `Text` 共用的行距（`WriterTypography.lineSpacing`）。
+    /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
     ///
     /// 两处不一致时，生成结束换成普通气泡的那一刻整段会突然变高，
     /// 视口还停在旧高度上，底部就露出一片空白。
@@ -58,11 +58,7 @@ struct StreamingTextView: UIViewRepresentable {
         let rendered = coordinator.window.rendered(text).text
         guard coordinator.appliedText != rendered else { return }
 
-        // 先算出「整段应有的排版」，再只替换和屏幕上不同的那一段。
-        //
-        // 原来靠「原始文本前缀相等」判断能不能追加：屏幕上放的其实是归一化后的
-        // 文本（段落合并、去掉标记），两者对不上，下一批就接错位置。现在按显示串
-        // 求公共前缀，公共部分不动，只重排尾部——通常只有最后一段。
+        // 按显示串求公共前缀，只替换尾部差异（通常只有最后一段），避免整段重排。
         let newAttributed = Self.attributed(
             rendered,
             fontSize: fontSize,
@@ -130,10 +126,7 @@ struct StreamingTextView: UIViewRepresentable {
         "\(fontSize)-\(lineSpacing)"
     }
 
-    /// 流式期间的排版：Markdown 照常渲染（标题、加粗、斜体），但不留段间距。
-    ///
-    /// 段距要留在生成结束由正式气泡一次给：中途每多一段就把下面所有内容往下推，
-    /// 屏幕上已有的字不断重排，观感就是「一跳一跳」。分割线按正文处理。
+    /// 流式期间的排版：Markdown 照常渲染，最后一段先左对齐、落定后再两端对齐。
     private static func attributed(
         _ text: String,
         fontSize: CGFloat,
@@ -185,7 +178,6 @@ struct StreamingTextView: UIViewRepresentable {
         return result
     }
 
-    /// 段落样式：对齐、断行策略、行距、段距。
     private static func paragraphStyle(
         justified: Bool,
         lineSpacing: CGFloat

@@ -50,7 +50,7 @@ enum WorldMaterialWorkflow {
         }
         let tail = ns.substring(from: offset)
         let allChunks = await Task.detached(priority: .userInitiated) {
-            // 原版剧情素材从已归纳偏移继续，3000 token、无重叠，最多 256 段。
+            // 剧情素材从已归纳偏移继续，3000 token、无重叠，最多 256 段。
             WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
                 .map(\.text)
         }.value
@@ -147,7 +147,7 @@ enum WorldMaterialWorkflow {
         }
         let tail = ns.substring(from: offset)
         let allChunks = await Task.detached(priority: .userInitiated) {
-            // 原版素材归纳从已归纳偏移继续，3000 token、无重叠，最多 256 段。
+            // 素材归纳从已归纳偏移继续，3000 token、无重叠，最多 256 段。
             WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
                 .map(\.text)
         }.value

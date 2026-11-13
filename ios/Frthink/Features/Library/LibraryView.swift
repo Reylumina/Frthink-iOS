@@ -1,7 +1,7 @@
 // 书架根页面：继续写作 + 全部书稿 + 回收站/设置入口。
 //
 // 一屏三件事：回到正在写的书、打开另一本、处理回收站。新建在右上角。
-// 不再用大封面网格：书脊、书名和最近编辑时间就是索引。
+// 列表以书脊、书名和最近编辑时间作为索引。
 //
 // 宽屏（iPad、可调整大小的窗口）下列表按 `Theme.Layout.formMaxWidth` 居中，
 // 页面底色铺满，内容不随窗口拉伸。
@@ -55,7 +55,7 @@ struct LibraryView: View {
         .frame(maxWidth: Theme.Layout.formMaxWidth)
         .frame(maxWidth: .infinity)
         .softScrollEdge()
-        // 移入回收站、新建、恢复都会增删行；列表增删按 §4.1 用 motionLayout。
+        // 移入回收站、新建、恢复都会增删行；列表增删使用 motionLayout。
         .themeAnimation(Theme.motionLayout, value: store.activeProjects.count)
         .groupedPageBackground()
         .navigationTitle("书架")

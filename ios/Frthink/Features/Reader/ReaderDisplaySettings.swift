@@ -30,7 +30,6 @@ enum ReaderStyle {
         dark ? Color.white.opacity(0.9) : .primary
     }
 
-    /// 正文字体：跟随设置字号，系统字体。
     static func bodyFont(size: CGFloat) -> Font {
         Font.system(size: size, weight: .regular)
     }
@@ -45,7 +44,6 @@ enum ReaderStyle {
         size * 36
     }
 
-    /// 命中高亮底色。
     static func highlightColor(current: Bool) -> Color {
         current ? Theme.accent.opacity(0.5) : Theme.accent.opacity(0.26)
     }

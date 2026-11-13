@@ -26,11 +26,11 @@ SSE 增量先进入 `WriterController` 的缓冲，也就是 `displayBuffer` 和
 
 流式气泡单独渲染。`WriterStreamingBubble` 只读控制器文本，不触发正文和其他气泡重算。流式文本用 `StreamingTextView`（`UITextView`），每帧先算整段排版再按显示串求公共前缀，只替换尾部差异，窗口攒满才整段重置。生成结束后切到完成态气泡，同样是 TextKit 渲染（`JustifiedText`），气泡内文字不开放选词，整条复制走长按菜单。
 
-生成期间不整份重写 payload。每约 3 秒做一次检查点：把已收增量 `persistPendingDelta` 后只写 `payload.json`（并裁掉其中的整本正文，正文页已独立存在）；离开页面、停止或结束时再全量写一次。流式文本仍只更新 `WriterController.streamingText`，33ms 合并，换行立即刷；气泡用独立的 `WriterStreamingBubble` 订阅控制器，不经过父视图。流式与完成态共用 `MarkdownInline.runs(_:)` 解析行内加粗/斜体；只在文本含 `*` 时才走解析，普通正文保持纯文本。
+生成期间的 3 秒检查点策略见 §2.5。流式与完成态共用 `MarkdownInline.runs(_:)` 解析行内加粗和斜体；仅在文本含 `*` 时走解析，普通正文保持纯文本。
 
 ### 2.2 主线程与依赖
 
-正文编辑器停止输入 200ms 后才把整串交给 session，光标同步 120ms 防抖。外部插入、撤销和导入通过 `manuscriptRevision` 回灌，避免每次重绘都比较 56 万字。
+正文编辑器停止输入 400ms 后才把整串交给 session，光标同步 120ms 防抖。外部插入、撤销和导入通过 `manuscriptRevision` 回灌，避免每次重绘都比较 56 万字。
 
 正文字数在后台和章节扫描一起算，`body` 只读缓存值。`String.count` 是 O(n)，不能放在渲染路径里。
 

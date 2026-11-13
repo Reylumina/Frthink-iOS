@@ -85,7 +85,7 @@ struct WorldSettingSection: View {
             onOpenTab(tab)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                // §2.4：这一屏是分类入口，用带实底方块的设置行（和设置一级列表同款）。
+                // 这一屏是分类入口，使用带实底方块的设置行，与设置一级列表保持一致。
                 AppSettingsRow(
                     title: title,
                     symbol: symbol,

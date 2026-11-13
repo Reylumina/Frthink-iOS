@@ -102,7 +102,6 @@ enum WorldRulesWorkflow {
             throw WorldRunError(message: "摘要未更新：\(error.localizedDescription)")
         }
         // 请求期间用户可能点了停止：取消后不写规则、不落盘，按「已停止」上报。
-        // 其它三个世界流程都在 await 之后检查，这里以前漏了，点了停止仍会写摘要。
         try Task.checkCancellation()
 
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -174,8 +173,7 @@ enum WorldRulesWorkflow {
 
     /// 手动「用最近对话更新」只取还没进过摘要的用户消息。
     ///
-    /// 以前固定取最后 12 条用户消息：连点两次会把同一批轮次重复送进 P55，
-    /// 每次都多一版历史；与自动摘要（`WriterController` 先过滤已摘要 id）的口径也不一致。
+    /// 避免连点两次重复生成历史版本，并与自动摘要（`WriterController`）口径保持一致。
     static func pendingUserMessages(
         _ messages: [ChatMessage],
         summarized: [String],

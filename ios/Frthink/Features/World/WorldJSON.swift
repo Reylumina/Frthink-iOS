@@ -198,7 +198,7 @@ enum WorldJSON {
 
     /// 解析事件卡 JSON 数组；也接受 `{"events":[...]}` 或单个事件对象。
     ///
-    /// 原版要求 `events` / `plot_events` 两个键最多出现一个：模型同时给出两份
+    /// 要求 `events` / `plot_events` 两个键最多出现一个：模型同时给出两份
     /// 数组时无法判断哪份是准的，直接报错而不是悄悄挑一个。
     static func parseEvents(_ raw: String) throws -> [EventCard] {
         let root = try decodeRoot(raw)
@@ -239,8 +239,8 @@ enum WorldJSON {
                 continue
             }
             let scene = prose(field(object, ["scene"]))
-            // APK `s2/a.java` 同款校验：人物只接受数组或分隔字符串。对象数组
-            // （`[{"name":"…"}]`）或数字会让 iOS 静默得到「没有人物」，直接报错。
+            // 人物只接受数组或分隔字符串；对象数组（`[{"name":"…"}]`）或数字
+            // 会导致静默得到「没有人物」，直接报错。
             let characterValue = field(object, ["characters", "casts"])
             if let characterValue, !isValidEventCharacters(characterValue) {
                 throw WorldJSONError.invalidJSON("事件卡人物格式无效")
@@ -283,9 +283,9 @@ enum WorldJSON {
         return list.allSatisfy { $0 is String || $0 is NSNull }
     }
 
-    /// 逐项解析人物卡，并在别称类型不对时按原版报错。
+    /// 逐项解析人物卡，并在别称类型不对时报错。
     ///
-    /// 原版 `aliases` 只接受字符串、字符串数组或空值；数字、对象、混合数组都会
+    /// `aliases` 只接受字符串、字符串数组或空值；数字、对象、混合数组都会
     /// 抛「人物别称格式无效」。静默丢掉会让同一人物下次刷新时重复建卡。
     private static func characterCards(from items: [Any]) throws -> [CharacterCard] {
         var cards: [CharacterCard] = []
@@ -393,8 +393,7 @@ enum WorldJSON {
     /// 这里并段并补最小标点：行间缺分隔补「，」，段末补「。」，半角转全角。
     /// 纯英文段落按空格并段，不套中文标点。标题和人物不走这里。
     ///
-    /// 空行是段落分隔：段内按上面的规则并成一句，段与段之间保留一个换行。
-    /// 以前把空行也当噪声滤掉，模型分好的段全被压成一整块，长「经过」读不动。
+    /// 空行作为段落分隔保留（段间保留一个换行），避免长「经过」被压成一整块。
     static func prose(_ value: Any?) -> String {
         let lines = string(value)
             .components(separatedBy: .newlines)

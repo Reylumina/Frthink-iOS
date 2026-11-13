@@ -35,8 +35,6 @@ struct SettingsArchivePage: View {
                 }
             )
         }
-        // 文件选择器挂在这一页，不挂在按钮所在的行上：行会被复用，面板收起时
-        // 同一视图上立刻再弹页面也会被系统丢掉——两种都会表现成「点了没反应」。
         .fileImporter(
             isPresented: Binding(
                 get: { importPickKind != nil },

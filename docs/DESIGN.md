@@ -66,7 +66,7 @@ Frthink 应该看起来像 iOS 自带的写作应用：安静、现代、正文�
 
 ### 1.4 书封占位色
 
-书封用 `Theme.Identity` 的 12 种纸色（朱红/橙/琥珀/橄榄/绿/青/湖蓝/靛/紫/玫/赭/石墨），按书项目 id 稳定取色，每种给出浅色与深色两档。这是全项目**唯一允许写死 hex 的地方**：它是内容身份色，不是语义色——系统动态色在白底上偏灰，一排书封看着像褪了色；手调色相才能让 12 本书一眼分开。除这里以外的任何颜色都必须来自语义色或资产目录。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放四种书本轮廓之一（`book`/`book.closed`/`book.pages`/`books.vertical`），按 id 稳定取；不用带字、带文字行或非书类的图形（箱子、文件夹、报纸都不算书）（`book.pages`、`book.closed`、`books.vertical`、`text.book.closed`、`character.book.closed`、`doc.text`、`doc.plaintext`、`scroll`、`quote.opening`、`bookmark`），按同一个 id 稳定取，单色、同一字重、白色。不用书名首字。不加描边和装饰线。
+书封用 `Theme.Identity` 的 12 种纸色（朱红/橙/琥珀/橄榄/绿/青/湖蓝/靛/紫/玫/赭/石墨），按书项目 id 稳定取色，每种给出浅色与深色两档。这是全项目**唯一允许写死 hex 的地方**：它是内容身份色，不是语义色——系统动态色在白底上偏灰，一排书封看着像褪了色；手调色相才能让 12 本书一眼分开。除这里以外的任何颜色都必须来自语义色或资产目录。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放四种书本轮廓之一（`book`/`book.closed`/`book.pages`/`books.vertical`），按 id 稳定取，单色、同一字重、白色；不用带字、带文字行或非书类的图形（箱子、文件夹、报纸都不算书）。不用书名首字，不加描边和装饰线。
 
 **一级分类图标**用系统语义亮色 + 同一种形状：实底圆角方块 + 白色符号，每个分类固定一个色相（连接=蓝、提示词=紫、存档=青、存储=橙、外观=粉、关于=绿）。注意纸色（`Theme.Identity`）只给书封用——它是内容身份，低饱和；UI 图标要用系统色，否则整屏发闷。一级分类与系统设置同一个尺度（28pt、圆角 22.6%、字形 54%）。AI 服务商图标与系统图标同尺寸（32pt），用品牌标，不套圆角色块。
 
@@ -121,7 +121,7 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 | 行标题、按钮、界面正文 | `.body` | `Theme.label` |
 | 行尾的值 | `.body`，`.secondary` 色 | `Theme.label` |
 | 行内第二行、辅助信息 | `.subheadline`，`.secondary` 色 | `Theme.labelSmall` |
-| 元信息（时间、字数、条数） | `.footnote`，`.secondary` 色 | `Theme.metadata`（新值） |
+| 元信息（时间、字数、条数） | `.footnote`，`.secondary` 色 | `Theme.metadata` |
 | 胶囊、角标 | `.caption.weight(.semibold)` | `Theme.badge` |
 | 作品正文、码字机回复 | 正文字号基数（§2.3） | `ReaderStyle.bodyFont(size:)` |
 | 用户消息 | `.body` | — |
@@ -207,7 +207,7 @@ iOS 26 的形状跟随容器：嵌在别的圆角容器里的形状，圆角要�
 
 - iOS 26：嵌套在 sheet、卡片或玻璃容器里的自绘形状用 `ConcentricRectangle`，或 `.rect(corners: .concentric(minimum:))`，最小值取 §3.2 的对应档。
 - iOS 17–25：回落到 §3.2 的固定值。
-- 两档的切换统一封装在 `Theme` 里（新增 `Theme.containerShape(minimum:)`），页面里不写 `#available` 分支。
+- 两档的切换统一封装在 `Theme` 里（`Theme.containerShape(minimum:)`），页面里不写 `#available` 分支。
 - 内外圆角的估算关系：内圆角 = 外圆角 − 内边距。算出来小于 8 时取 8。
 
 ## 4. 动效与反馈
@@ -219,8 +219,8 @@ iOS 26 的形状跟随容器：嵌在别的圆角容器里的形状，圆角要�
 | token | 预设 | 用在 |
 |---|---|---|
 | `Theme.motionSelection` | `.snappy(duration: 0.2)` | 选中、开关、分段切换、聚焦描边 |
-| `Theme.motionLayout`（新增） | `.smooth` | 展开收起、搜索栏出现、toast 进出、列表插入删除 |
-| `Theme.motionEmphasis`（新增） | `.bouncy` | 直接操作的结果，例如消息发出、插入正文成功；一屏同时最多一个 |
+| `Theme.motionLayout` | `.smooth` | 展开收起、搜索栏出现、toast 进出、列表插入删除 |
+| `Theme.motionEmphasis` | `.bouncy` | 直接操作的结果，例如消息发出、插入正文成功；一屏同时最多一个 |
 
 - 不用 `.easeInOut`、`.easeOut`、`.linear` 和自定义时长。
 - 页面跳转、sheet 弹出、标签切换都用系统转场，不自定义。
@@ -264,7 +264,7 @@ HStack {
 - 不给文字写死 `.frame(width:height:)`，Dynamic Type 放大时会裁字。图标、封面、控件可以有固定尺寸，但要用 `@ScaledMetric`。
 - 可点目标的热区至少 44×44pt。图标按钮看起来可以小，热区用 `.frame(minWidth: 44, minHeight: 44)` 加 `.contentShape(Rectangle())` 扩大，不能只放大图标。
 - 同一行里的控件可见高度统一成 `Theme.Layout.controlHeight`（36pt）：搜索框、次要操作胶囊、圆形图标按钮。圆形按钮按 36pt 画圆，外面再包一层 44pt 的透明框，所以行高是 44、视觉是 36，三者对齐。
-- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。列表行内容一律用 `Theme.Layout.rowContentHeight`（28pt）——包括只读数值行、开关行、章节行、语料行；44pt 是行总高，由系统内边距补足（28pt），实测（1206×2622 模拟器截图）从 198px/行收到 143px/行，即 66pt → 47.7pt，整行可点，热区够。行内边距仍交给系统（§3.1）。
+- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。列表行内容一律用 `Theme.Layout.rowContentHeight`（28pt）——包括只读数值行、开关行、章节行、语料行；44pt 是行总高，由系统内边距补足（28pt），实测（1206×2622 模拟器截图）行高从 198px 降至 143px（66pt → 47.7pt），整行可点且热区足够。行内边距仍交由系统处理（§3.1）。
 - `controlHeight`、`inlineControl` 这些控件尺寸是基准值，视图里用 `@ScaledMetric(relativeTo: .body)` 读，随字号一起放大（§2.4）。
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
@@ -295,9 +295,9 @@ HStack {
 
 | 页面 | 最大宽度 | token |
 |---|---|---|
-| 正文（阅读、编辑器、码字机回复） | 字号 × 36 | 由 `ReaderStyle` 计算（新增） |
-| 对话列（创作页整列） | 720pt | `Theme.Layout.chatMaxWidth`（新增） |
-| 表单（设置、世界资料、编辑器） | 640pt | `Theme.Layout.formMaxWidth`（新增） |
+| 正文（阅读、编辑器、码字机回复） | 字号 × 36 | 由 `ReaderStyle` 计算 |
+| 对话列（创作页整列） | 720pt | `Theme.Layout.chatMaxWidth` |
+| 表单（设置、世界资料、编辑器） | 640pt | `Theme.Layout.formMaxWidth` |
 | 用户气泡 | 所在列宽的 80% | — |
 
 - 超出最大宽度时内容居中，两侧露出页面底色。用 `.frame(maxWidth:)` 或 `.contentMargins` 实现，不写死宽度。

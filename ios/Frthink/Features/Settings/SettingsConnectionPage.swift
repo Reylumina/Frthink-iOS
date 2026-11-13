@@ -111,7 +111,7 @@ struct SettingsConnectionPage: View {
 
     // MARK: - 任务模型
 
-    /// 翻译和摘要各自可以指定模型，合并成一块，二级页保持四个区块（§5.10）。
+    /// 翻译和摘要各自可以指定模型，合并成一块，二级页保持四个区块。
     private var taskModelSection: some View {
         Section {
             NavigationLink {

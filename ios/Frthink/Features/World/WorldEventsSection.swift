@@ -13,7 +13,7 @@ struct WorldEventsSection: View {
     @State private var searchText = ""
     @State private var route: Route? = nil
     @State private var pendingDeleteIDs: Set<String> = []
-    /// 抽取胶囊的可见高度，跟随字号缩放（§2.4、§5.1）。
+    /// 抽取胶囊的可见高度，跟随字号缩放。
     @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = Theme.Layout.controlHeight
 
     private struct Route: Identifiable {
@@ -67,7 +67,7 @@ struct WorldEventsSection: View {
             .padding(.horizontal, Theme.Spacing.m)
             .frame(minHeight: controlSize)
             .background(Theme.field, in: Capsule())
-            // 可见高度 36pt，热区补到 44pt（§5.1）。
+            // 可见高度 36pt，热区补到 44pt。
             .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Capsule())
         }
@@ -156,7 +156,7 @@ struct WorldEventsSection: View {
     @ViewBuilder
     private var emptyState: some View {
         if session.payload.world.events.isEmpty {
-            // 整页空态只留一套组件（§5.7）：和「宇宙」「没有匹配」两处一致。
+            // 整页空态只留一套组件，和「宇宙」「没有匹配」两处一致。
             EmptyStateView(
                 symbol: "calendar",
                 title: "还没有事件卡",

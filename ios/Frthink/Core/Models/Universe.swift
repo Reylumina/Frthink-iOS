@@ -3,8 +3,8 @@ import Foundation
 /// 宇宙层：跨书项目共享的设定与预设。
 ///
 /// 和「世界」的区别在数据归属上——世界的资料只属于一本书
-/// （`ProjectPayload.world`），宇宙资料属于全局，每本书单独决定启用哪几条
-/// （`AppSettings.enabledUniverseEntryIds`）。
+/// （`ProjectPayload.world`），宇宙资料属于全局（`AppSettings.universeEntries`），
+/// 每本书单独决定启用哪几条（`ProjectPayload.enabledUniverseEntryIDs`）。
 ///
 /// 原版的证据：设置项 `settings.universeWorldbooks`、状态
 /// `DreamUiState.enabledUniverseEntryIds`，页面文案

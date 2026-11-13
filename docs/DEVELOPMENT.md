@@ -27,7 +27,7 @@ python script/archive_import_check.py <备份路径>
 python script/pbxproj_check.py
 ```
 
-本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上都是本地秒级检查，改完一批就跑，不依赖 CI。CI 按批次跑：一个功能点或一组相关改动做完，跑一次 `Self Check`；需要 IPA 时跑 `iOS Build`；界面批次末尾才跑 `UI Screenshots`，按 `DESIGN.md` §9 目检；流式相关的改动跑 `Stream Check`。
+本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上都是本地秒级检查，每批改动后即可运行，不依赖 CI。CI 按批次跑：一个功能点或一组相关改动做完，跑一次 `Self Check`；需要 IPA 时跑 `iOS Build`；界面批次末尾才跑 `UI Screenshots`，按 `DESIGN.md` §9 目检；流式相关的改动跑 `Stream Check`。
 
 CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检查（清单见 `ios/Frthink/App/SelfCheck.swift`）。结果写入 stdout 后退出，工作流用 `grep -q "ALL PASS"` 断言。真实备份检查需要 `fixture-backup.frthink`，缺少该文件时跳过。
 
@@ -42,7 +42,7 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 | `.github/workflows/stream-check.yml` | mock SSE 连跑三次 + 正文行数/段落断言 | 手动 |
 | `.github/workflows/cleanup-runs.yml` | 删除旧的已完成运行（保留最近 N 次） | 每周一 03:00 UTC、手动 |
 
-分支上的改动不会自动跑 CI，用 `gh workflow run self-check.yml --ref <分支>` 手动触发；同 workflow 同 ref 只保留最新一次，重复触发会取消正在排队/运行的那次，别在它跑的时候再发。
+分支上的改动不会自动跑 CI，用 `gh workflow run self-check.yml --ref <分支>` 手动触发；同 workflow 同 ref 只保留最新一次，重复触发会取消正在排队或运行中的任务，避免在运行期间重复触发。
 
 仓库为 public，标准 macOS runner 免费。private 仓库额度耗尽时，job 将在 3 至 5 秒内被拒绝，annotation 是 `The job was not started because recent account payments have failed...`。该失败属于额度问题，与代码无关。
 
@@ -113,7 +113,6 @@ java -cp tools/jadx-1.5.6-all.jar jadx.cli.JadxCLI -d out/jadx dx/classes.dex
 | 编辑器窗口只覆盖书末 | 跳到更早章节会扩窗口至书末；改写仍拼全文 | `ProjectSession.editorWindow` |
 | 结构改动仍整份写 `payload.json` | 打字只写正文，世界/对话改动仍全量编码 | `ProjectSession.flushSave()` |
 | 后台执行只有约 30 秒额度 | 系统收回后流式中断，已收内容保留 | `WriterController.beginBackgroundTask()` |
-| 56 万字正文全量进 `UITextView` | 打开长书有内存峰值；保存已拆正文文件，输入已防抖 | `ManuscriptTextEditor` |
 | 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` |
 | 长书首次发送仍主线程整本解密 | 第一次续写/世界刷新会卡一下；后续走缓存 | `ProjectSession.manuscript` 是副作用 getter |
 | 生成检查点每 3 秒改 `payload.messages` | 写作台每 3 秒可能整页重算一次，与 PERFORMANCE §2.1 的描述不一致 | `WriterController.persistPendingDelta` |

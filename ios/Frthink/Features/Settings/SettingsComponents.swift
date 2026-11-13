@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 // MARK: - 行
 
-/// 二级、三级页的导航行：标题 + 行尾的值（DESIGN §2.4、§5.1）。
+/// 二级、三级页的导航行：标题 + 行尾的值。
 ///
 /// 二级页不放图标：那些页面里每行都挂一个色块时，图标既不对应功能，
 /// 又把注意力从「标题 + 值」上带走。和系统设置的二级页一致。
@@ -13,7 +13,7 @@ struct SettingsLabelRow: View {
     var detail: String? = nil
 
     var body: some View {
-        // 无障碍字号下放不下一行时改竖排：标题在上、值在下（DESIGN §5.5）。
+        // 无障碍字号下放不下一行时改竖排：标题在上、值在下。
         ViewThatFits(in: .horizontal) {
             horizontal
             vertical
@@ -60,7 +60,7 @@ struct SettingsLabelRow: View {
 
 /// 长文编辑页：整页只有一个多行编辑框，自动保存（停手 0.6 秒），离开页面强制落盘。
 ///
-/// 长文编辑不进 sheet（DESIGN §5.8），列表里只留一行入口；只有「保存」没有
+/// 长文编辑不进 sheet，列表里只留一行入口；只有「保存」没有
 /// 「取消」，所以左滑返回也保存非空改动。
 struct SettingsTextEditorPage: View {
     let title: String
@@ -117,7 +117,7 @@ struct SettingsTextEditorPage: View {
 // MARK: - 宽度
 
 extension View {
-    /// 常规宽度下把表单收窄到 640pt 并居中（DESIGN §5.3）。
+    /// 常规宽度下把表单收窄到 640pt 并居中。
     ///
     /// 紧凑宽度原样返回；iPad 宽窗口下两侧露出分组页底，不把行宽拉长。
     @ViewBuilder
@@ -160,12 +160,10 @@ func settingsBinding<T>(
     )
 }
 
-/// 字节数，例如 `12.3 MB`。
 func settingsByteText(_ bytes: Int64) -> String {
     bytes.formatted(.byteCount(style: .file))
 }
 
-/// 估算 token 数。
 func settingsTokenText(_ tokens: Int) -> String {
     "\(tokens.formatted()) tokens"
 }

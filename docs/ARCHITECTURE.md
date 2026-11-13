@@ -58,7 +58,7 @@ Core/
 
 ### 4.3 状态与并发
 
-`AppStore` 标 `@Observable`，只在主线程用。`ProjectSession` 持有 `payload: ProjectPayload`，整份常驻内存。落盘是 2 秒防抖，然后取快照，在后台编码写盘。章节扫描 500ms 防抖，后台执行。生成用 `AsyncThrowingStream`，事件分 `.delta`、`.reasoning`、`.finished`。
+`AppStore` 标 `@Observable`，只在主线程使用。`ProjectSession` 持有 `payload: ProjectPayload`，整份常驻内存。落盘采用 2 秒防抖，随后取快照并在后台编码写盘；章节扫描采用 1.5 秒防抖，同样在后台执行。生成基于 `AsyncThrowingStream`，事件分为 `.delta`、`.reasoning`、`.finished`。
 
 退到后台前会 `beginBackgroundTask` 包住 `flushDirtySessions()`：不申请额度的话，`scenePhase` 的 onChange 立刻返回，进程可能在写盘途中被挂起。生成期另有自己的后台额度（约 30 秒），系统收回时停流并标中断。
 
@@ -115,7 +115,7 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 | 决策 | 备选 | 不选备选的原因 |
 |---|---|---|
 | 文件存储 | SwiftData、CoreData | 存档要能导出成原版格式，ORM 会把结构绑死在 schema 上 |
-| 编辑器仍整份解密正文 | 编辑器窗口化 | 打开书只读 `body.meta.json`；阅读按页取文，编辑器仍整份解密 |
+| 编辑器只载入书末窗口 | 任意跨页编辑窗口 | 续写集中在书末，跳到更早章节再扩窗口至书末；阅读按页取文 |
 | 手写 gzip | Foundation Compression | 不兼容原版的 RFC1952 流 |
 | 对话列用 `VStack` | `LazyVStack` | 流式行上万字时估算行高会让 `scrollTo` 落到内容之外，出现整屏空白；列已按条数截断，不需要懒加载 |
 | 语义色加系统 tint | 品牌主色 | 品牌色和系统冷灰底冲突，也不响应辅助功能设置 |
@@ -138,4 +138,4 @@ gzip 是手写的 RFC1952 实现（`FrthinkGzip`）。Foundation 的 `COMPRESSIO
 
 ## 8. 开放问题
 
-- 50 万字以上的分页边界放在哪一层，`FileStore` 还是 `ProjectSession`。
+- 暂无未决架构问题（50 万字以上正文已按页落盘于 `FileStore`，窗口管理由 `ProjectSession` 承担）。

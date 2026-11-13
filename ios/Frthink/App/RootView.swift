@@ -9,7 +9,6 @@ struct RootView: View {
     /// 当前书稿 id 的 AppStorage 键。创作页离开时要靠它判断「是不是换了书」。
     static let activeProjectKey = "root.activeProjectID"
 
-    /// 从启动参数里读初始 Tab。
     static var launchDestination: AppDestination {
         AppDestination(rawValue: LaunchArguments.initialTab ?? "") ?? .compose
     }
@@ -24,8 +23,7 @@ struct RootView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
 
-    /// 启动参数 `-initialTab 世界` 可以直接落到某个 Tab。CI 的截图流水线靠它
-    /// 逐个 Tab 出图；正常启动没有这个参数，行为和以前一样。
+    /// 当前一级 Tab；可用启动参数 `-initialTab` 覆盖（供截图流水线使用）。
     @State private var destination: AppDestination = RootView.launchDestination
     @State private var activeProjectID: String? = RootView.launchProjectID
     @State private var session: ProjectSession?
@@ -200,8 +198,7 @@ struct RootView: View {
                     .glassStack()
             }
         }
-        // 「正在打开书稿…」只留各 Tab 里的占位（openingPlaceholder）：
-        // 之前这里还有一个全屏玻璃浮层，两处同时出现在屏幕上。
+        // 「正在打开书稿…」只留各 Tab 里的占位（openingPlaceholder），不在此处另加全屏浮层。
         .themeAnimation(Theme.motionLayout, value: store.toast)
     }
 
@@ -322,8 +319,7 @@ struct RootView: View {
                     .font(Font.subheadline)
             }
         }
-        // 右上角原来挂了一个「正在保存」的转圈：自动保存本来就该无感（§5.8），
-        // 它跟世界页的状态行、人物页的刷新行叠在一起，同一件事说三遍。
+        // 不在右上角放「正在保存」转圈：自动保存保持无感，避免与页面内状态行重复（§5.8）。
     }
 
     /// 阅读页多出来的翻译入口，对应原版阅读页的「翻译 / 停止翻译」。

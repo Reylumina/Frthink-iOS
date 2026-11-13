@@ -31,13 +31,7 @@ enum WriterTypography {
         ReaderStyle.bodyMaxWidth(size: size)
     }
 
-    /// 气泡里的段落间距（§2.3）。
-    ///
-    /// 原来正文用 `\n\n` 表示分段，空行按整行排版，段间实际有 37pt 左右，
-    /// 比阅读页的 12pt 松一倍。现在两处统一：气泡按段拆开、段间留这一个距离，
-    /// 流式气泡把同样的间距放进段落样式里，换气泡时高度不变。
-    /// 段距跟着字号走：行距是 0.6 倍字号，段距要比它明显大一截，
-    /// 否则段落和折行看起来一样（0.9 倍在默认字号下约 16pt）。
+    /// 气泡里的段落间距（§2.3），与阅读页统一由 `Theme.Layout` 换算。
     static func paragraphSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
         Theme.Layout.paragraphSpacing(fontSize: size, lineHeight: lineHeight)
     }

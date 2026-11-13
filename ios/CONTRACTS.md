@@ -82,7 +82,7 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
     var sourceText: String             // 原文（翻译源）
     var translations: [TranslationSegment]
     var isDirty: Bool
-    func scheduleSave()                // 防抖 1.2s 落盘
+    func scheduleSave()                // 防抖 2s 落盘
     func saveNow()
     func saveSource() / saveTranslations()
     func updateManuscript(_ text: String)
@@ -207,9 +207,9 @@ navigationDestination 都行，自己决定）。`onOpen` 由 Lead 的 RootView 
 本机没有 Xcode，**任何代码都没法在本地编译**。所以：
 
 - 只用确定的、稳定的 SwiftUI API。拿不准的写法换成更朴素的写法。
-- 不用 `#Preview` 之外的宏技巧；`@Observable` 已在 Core 里用，你会正常。
+- 不用 `#Preview` 之外的宏技巧；`@Observable` 已在 Core 里使用，可正常编译。
 - `@Environment(AppStore.self)` 取 store，注意 `@Bindable` 才能做双向绑定。
 - 写完自己通读一遍，检查：所有引用的类型是否真实存在、是否都在本文件里
   `import SwiftUI` 了、闭包捕获是否会有并发告警。
 
-CI 会在 GitHub 上编译（`.github/workflows/ios.yml`），报错会回来。
+CI 会在 GitHub 上编译（`.github/workflows/ios.yml`），报错会返回至工作流日志。

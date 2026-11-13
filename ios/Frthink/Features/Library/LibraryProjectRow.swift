@@ -1,6 +1,6 @@
 // 书架上的书稿行：书脊 + 书名 + 一行元数据，右侧只有一套「⋯」菜单。
 //
-// 简介不进书架：一行简介会把行撑成三行，把「最近编辑时间」挤出视线（§6）。
+// 简介不进书架：一行简介会把行撑成三行，把「最近编辑时间」挤出视线。
 // 简介在 ⋯ →「改简介」里编辑，列表只做索引。
 
 import SwiftUI
@@ -47,7 +47,6 @@ struct LibraryContinueRow: View {
     }
 }
 
-/// 全部书稿里的一行。
 struct LibraryProjectRow: View {
     let project: Project
     let branchCount: Int

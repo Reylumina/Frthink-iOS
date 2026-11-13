@@ -118,7 +118,7 @@ struct SettingsPromptPage: View {
 
 /// 三级页：世界建立要求（P18）正文。
 ///
-/// 每 600ms 合并落盘一次，离开页面强制保存；不再每敲一个字写整份 settings.json。
+/// 每 600ms 合并落盘一次，离开页面强制保存，避免逐字重写整份 settings.json。
 struct WorldBuildEditorPage: View {
     let store: AppStore
 

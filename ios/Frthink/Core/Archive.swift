@@ -270,13 +270,8 @@ enum FrthinkArchive {
         }
     }
 
-    /// 存档里的 `snapshot`。
-    ///
-    /// iOS 的正文/章节/对话/世界书都在这一个结构里。Android 的对应物是
-    /// `ProjectSnapshot`（56 字段，spec 03 §5.1），键名几乎全不同，只有正文
-    /// （`authoritativeBody`）和 `messages` 能勉强对上——跨端迁移就靠这两项。
-    /// 书项目快照。**字段名对齐 Android 真实的 `ProjectSnapshot`**（54 个键，
-    /// `schemaVersion = 20`），不是早期从 DEX 反推的那份猜测结构。
+    /// 存档里的书项目快照。字段名对齐 Android 真实的 `ProjectSnapshot`（54 个键，
+    /// `schemaVersion = 20`）。
     ///
     /// 真实样本（用户 2026-10-30 导出的全量备份）确认的布局：
     /// ```
@@ -2223,8 +2218,7 @@ enum FrthinkArchive {
 
     /// 把 `DecodingError` 翻成能上屏的一句话：缺哪个键、哪个键类型不对。
     ///
-    /// 导入失败最怕「备份内容损坏」四个字——用户没法据此行动。原版的
-    /// `corruptedDetail` 就是为这个准备的，之前定义了却没接上调用点。
+    /// 导入失败时避免只报「备份内容损坏」导致用户无法排查，供 `corruptedDetail` 拼接具体字段原因。
     static func decodeDetail(_ error: Error) -> String {
         guard let decoding = error as? DecodingError else {
             return error.localizedDescription

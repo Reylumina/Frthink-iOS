@@ -18,14 +18,14 @@ struct LibraryCoverImage: View {
 
     @State private var image: UIImage?
 
-    /// 书封高度；宽度按 3:4 推出，随 Dynamic Type 缩放（§5.1 固定尺寸控件）。
+    /// 书封高度；宽度按 3:4 推出，随 Dynamic Type 缩放。
     @ScaledMetric(relativeTo: .body) private var height: CGFloat = 70
 
     private var width: CGFloat {
         height * 3 / 4
     }
 
-    /// 封面形状：iOS 26 跟随所在行的容器同心，17–25 回落到 8pt 圆角（§3.3）。
+    /// 封面形状：iOS 26 跟随所在行的容器同心，17–25 回落到 8pt 圆角。
     private var shape: AnyShape {
         Theme.containerShape(minimum: Theme.Radius.small)
     }
@@ -62,7 +62,7 @@ struct LibraryCoverImage: View {
         Image(systemName: symbol)
             // 字形占宽度 46%：封面是缩略图，图标压过一半就压住了「书脊」的比例。
             .font(.system(size: width * 0.46, weight: .medium))
-            // 占位纸色在深浅两档都是压暗的，图标固定白色，是 §1.4 记下的例外。
+            // 占位纸色在深浅两档都是压暗的，图标固定白色。
             .foregroundStyle(Color.white)
             .accessibilityHidden(true)
     }

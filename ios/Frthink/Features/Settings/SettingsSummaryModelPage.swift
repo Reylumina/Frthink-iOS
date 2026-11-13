@@ -2,8 +2,7 @@ import SwiftUI
 
 /// 摘要任务单独指定模型；留空时跟随当前AI服务商。
 ///
-/// 原版设置里有 `summaryModel`，自动摘要和长期规则更新走这个模型，
-/// 不改写作/翻译用的主模型。
+/// 自动摘要和长期规则更新优先使用该模型，不影响写作/翻译的主模型。
 struct SettingsSummaryModelPage: View {
     let store: AppStore
     @State private var model = ""

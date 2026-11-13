@@ -14,15 +14,12 @@ struct ManuscriptScrollRequest: Equatable {
 
 /// 正文编辑器。
 ///
-/// 用 UITextView 而不是 SwiftUI 的 `TextEditor`，是为了拿到两件 TextEditor 给不了
-/// 的东西：「插入正文」要插在真实光标处，章节跳转要滚到某个 UTF-16 偏移。两件事
-/// 都是写作台的核心操作，没有它们这个页面只能算半个功能。
-///
-/// 文本仍然双向同步：主界面走 session.updateManuscript，窗口编辑页走
-/// session.updateEditorText，只写光标所在的那一段。
+/// 用 UITextView 而不是 SwiftUI 的 `TextEditor`，是为了拿到真实光标偏移（「插入正文」
+/// 的落点）和按 UTF-16 偏移滚动（章节跳转）。文本通过窗口编辑页的 `session.updateEditorText`
+/// 双向同步，只写光标所在的那一段。
 struct ManuscriptTextEditor: UIViewRepresentable {
 
-    /// 正文。setter 由外部接到 session.updateManuscript 或 session.updateEditorText。
+    /// 当前窗口的正文文本（由外部接到 `session.updateEditorText`）。
     @Binding var text: String
 
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），此时按末尾处理。
@@ -40,10 +37,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     /// 免掉每次重绘都拿 56 万字做一次 `String ==`、还顺手重置光标。
     var revision: Int = 0
 
-    /// 阅读模式传 false：不弹键盘、不触发编辑回调，但仍可滚点和选位置。
-    ///
-    /// 写作台主界面的正文是只读稿纸，编辑走全屏弹层。这样主界面永远只有一个
-    /// 可编辑输入（底部输入条），键盘不会在两个 first responder 之间打架。
+    /// 阅读模式传 false：不弹键盘、不触发编辑回调，但仍可滚动与选择插入位置。
     var isEditable: Bool = true
 
     /// 用户亲手点过正文/挪过光标时回调；用来区分「默认文末」和「明确插入点」。
@@ -127,7 +121,6 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         }
     }
 
-    /// 正文字体与设置一致：系统字体。
     private static func manuscriptFont(ofSize size: CGFloat) -> UIFont {
         UIFont.systemFont(ofSize: size, weight: .regular)
     }

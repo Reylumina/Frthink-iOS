@@ -1,15 +1,13 @@
 // 新建 / 重命名 / 改简介共用的输入弹窗。
 //
-// 这一页有草稿：关闭（取消或下滑）前必须确认放弃，不能静默丢掉已经输入的内容（§5.8）。
-// 单行字段只有填充底，没有描边和投影（§1.5）。
+// 这一页有草稿：关闭（取消或下滑）前必须确认放弃，不能静默丢掉已经输入的内容。
+// 单行字段只有填充底，没有描边和投影。
 
 import SwiftUI
 
 struct LibraryInputSheet: View {
-    /// 导航栏标题，例如「新建书项目」。
     let navTitle: String
     let fieldPlaceholder: String
-    /// 右上角提交按钮的文案，例如「创建」「保存」。
     let confirmLabel: String
     /// 简介是多行，书名是单行。
     let multiline: Bool

@@ -11,7 +11,7 @@ enum WorldDigest {
     /// 段间重叠，避免跨段的人名/因果被切断（Android 96 token）。
     static let overlapTokens = 96
 
-    /// 大书阈值：码点 ≥ 50 万时原版改成「整篇一次性分析」，一次只取上下文放得下的前缀。
+    /// 大书阈值：码点 ≥ 50 万时改为整篇前缀分析，一次只取上下文放得下的前缀。
     static let wholeTextCodePointThreshold = 500_000
 
     /// 一个正文分段：文本 + 在全文里的码点范围。
@@ -26,14 +26,14 @@ enum WorldDigest {
         let endCodePoint: Int
     }
 
-    /// 是否走大书模式。原版按 `codePointCount` 比较，不是 UTF-16 长度。
+    /// 是否走大书模式（按 `codePointCount` 比较，而非 UTF-16 长度）。
     static func usesWholeTextPass(_ text: String) -> Bool {
         text.unicodeScalars.count >= wholeTextCodePointThreshold
     }
 
-    /// 取模型上下文放得下的最长前缀（原版 `b3.d.J`）。
+    /// 取模型上下文放得下的最长前缀。
     ///
-    /// 原版先按 1.2 的安全系数估算 token，超出预算就停；这里用同一套权重与系数。
+    /// 按 1.2 的安全系数估算 token，超出预算即停。
     static func prefixChunk(of text: String, tokenBudget: Int) -> String {
         guard !text.isEmpty, tokenBudget > 0 else { return "" }
         // 估算函数会给每条内容加 6 token 固定开销，这里先扣掉，保证最终估算不超预算。
@@ -54,8 +54,8 @@ enum WorldDigest {
 
     /// 按 token 预算切段，段间保留 overlapTokens 回退。
     ///
-    /// 中文按 1 字 ≈ 1 token，英文/数字按 0.28；用和预算同一套权重，
-    /// 不再按“4000 字符”拍脑袋——那会让英文书超预算、古文又切太碎。
+    /// 中文按 1 字 ≈ 1 token，英文/数字按 0.28，与预算使用同一套权重，
+    /// 避免按固定字符数切分导致英文书超预算或古文过碎。
     static func chunks(
         of text: String,
         tokenBudget: Int,

@@ -1,9 +1,8 @@
 name: iOS Build
 run-name: "iOS Build #${{ github.run_number }}"
 
-# 在 GitHub 免费的 macOS 标准 runner 上把工程编译成未签名 IPA。
-# 公开仓库：标准 runner 不计费。私有仓库：走每月包含的额度，macOS 按倍率扣。
-# 注意：Larger runner（如 macos-15-xlarge）会额外计费，即使仓库是公开的。
+# 在 macOS 标准 runner 上编译并打包未签名 IPA。
+# 公开仓库使用标准 runner 不计费；Larger runner（如 macos-15-xlarge）会额外计费。
 
 on:
   workflow_dispatch:
@@ -34,8 +33,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
-      # 这一步的价值不只是测试：Windows 上没法编译 Swift，CI 是唯一的
-      # 编译验证。先模拟器编译（快、不需要签名），挂了就直接停。
+      # 本地无 Swift 编译环境，先走模拟器快速验证编译，失败即中止。
       - name: Compile for simulator
         run: |
           set -o pipefail

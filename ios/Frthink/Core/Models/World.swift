@@ -386,7 +386,7 @@ struct SummaryRevision: Codable, Hashable {
 
 /// 人物卡。
 ///
-/// 字段名严格照抄 Android 端 LLM 输出 schema：`name` / `identity` /
+/// 字段名严格对齐 Android 端 LLM 输出 schema：`name` / `identity` /
 /// `personality` / `voice` / `goals` / `boundaries` / `aliases`，外加两个
 /// 只在增量刷新时才出现的字符串字段 `personal_memory`、
 /// `relationship_attitudes`，以及自由字段 `custom_entries`。
@@ -407,7 +407,7 @@ struct CharacterCard: Identifiable, Codable, Hashable {
     /// 人物记忆条目。原版 `memories`；可能缺键，缺省按无记忆处理。
     var memories: [CharacterMemory]?
     var updatedAt: Date
-    /// 是否进入写作提示词。原版 nabled，历史数据缺失时按启用处理。
+    /// 是否进入写作提示词。原版 `enabled`，历史数据缺失时按启用处理。
     var enabled: Bool?
     /// 所属人物分组；nil/空串表示未分组。
     var groupId: String?

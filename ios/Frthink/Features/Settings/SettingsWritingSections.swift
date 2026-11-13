@@ -7,8 +7,7 @@ import SwiftUI
 
 /// 三级页：默认 temperature / 回复上限。
 ///
-/// 原版的「默认值」与「当前凭证的配置」是两层；这里保留两层，但把本页缩成
-/// 一件事：调默认值，需要时应用到当前AI服务商。
+/// 保留「全局默认值」与「当前凭证配置」两层：本页负责调整默认值，需要时再应用到当前AI服务商。
 struct SettingsModelResponsePage: View {
     let store: AppStore
 
@@ -98,7 +97,7 @@ struct SettingsModelResponsePage: View {
 
 /// 三级页：输入预算、单轮输出上限、由此算出的提示词预算。
 ///
-/// 原版是离散滑块；上下文窗口由模型决定，不在这里手调。
+/// 上下文窗口由模型决定，不在这里手调。
 struct SettingsContextBudgetPage: View {
     let store: AppStore
     @State private var inputBudget = 0
@@ -243,7 +242,7 @@ struct SettingsAppearanceSection: View {
             AppSectionHeader(title: "主题与正文")
         }
         .onAppear {
-            // 旧版本允许 12–30；统一到阅读页的 13–28，避免两处静默截断。
+            // 字号范围统一为阅读页的 13–28，避免两处静默截断。
             if store.settings.bodyFontSize != fontSize {
                 commitFontSize()
             }
@@ -290,7 +289,7 @@ struct SettingsHapticsSection: View {
 
 // MARK: - Token 滑块
 
-/// 离散档位滑块：原版是 -/+ 步进，从 4K 调到 32K 要点几十下。
+/// 离散档位滑块，方便在大范围（如 4K–32K）快速调节。
 struct TokenSliderRow: View {
     let title: String
     let values: [Int]

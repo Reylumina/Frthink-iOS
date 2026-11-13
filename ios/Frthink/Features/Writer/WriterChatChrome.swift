@@ -81,7 +81,7 @@ struct WriterSelectionBar: View {
 
 /// 跟随流式内容滚到底部。
 ///
-/// 单独成一个零尺寸视图挂在滚动区背景里：`displayTick` 每 60ms 变一次，
+/// 单独成一个零尺寸视图挂在滚动区背景里：`displayTick` 每次合帧才变一次，
 /// 读它的小视图只让这一层重算，不会把整列气泡和正文栏一起拉进高频更新
 /// （PERFORMANCE.md §2.1）。
 ///

@@ -41,7 +41,7 @@ struct UniversePane: View {
                 list
             }
         }
-        // 整页铺满：空态靠这一层居中，底板才不会只画出内容那一窄条（§1.5）。
+        // 整页铺满：空态靠这一层居中，底板才不会只画出内容那一窄条。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .groupedPageBackground()
         .settingsFormColumn()

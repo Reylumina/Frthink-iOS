@@ -1,13 +1,8 @@
 name: Cleanup Runs
 run-name: "Cleanup Runs #${{ github.run_number }}"
 
-# 定期清掉旧的 workflow run 与它们的 artifact。
-#
-# 为什么需要：这条仓库每改一次就至少跑一次 Self Check + UI Screenshots，
-# 一次截图任务要传 29 张 PNG。两个月下来 run 列表能到三位数，翻起来费劲，
-# artifact 也占存储配额。
-#
-# 保留最近 N 次已完成的运行（默认 30），更早的删掉；正在跑的不动。
+# 定期清理旧 workflow run 及其 artifact。
+# 仅保留最近 N 次已完成的运行（默认 30），运行中的任务不受影响。
 
 on:
   schedule:

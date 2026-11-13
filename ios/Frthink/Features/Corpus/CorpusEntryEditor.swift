@@ -15,10 +15,10 @@ struct CorpusEntryEditor: View {
     @State private var source: String
     @State private var confirmingDiscard = false
 
-    /// 原版提示词要求每条 2–3000 字；手填时给 UI 一个上限提示。
+    /// 提示词要求每条 2–3000 字；手填时给 UI 一个上限提示。
     static let maxTextLength = 3000
 
-    /// 分类建议。原版由模型自由分类，这里只给几个常用值减少手打。
+    /// 常用分类建议，减少手打（也可自由输入）。
     static let suggestedCategories = [
         "环境描写", "人物描写", "动作", "对白", "心理", "比喻", "叙事", "其他",
     ]
@@ -145,7 +145,7 @@ struct CorpusEntryEditor: View {
         }
     }
 
-    /// 建议分类用自适应网格换行，不再用会被裁掉一截的横向滚动。
+    /// 使用自适应网格换行，避免横向滚动被裁剪。
     private var suggestedCategoriesGrid: some View {
         LazyVGrid(
             columns: [GridItem(.adaptive(minimum: 92), spacing: Theme.Spacing.s)],

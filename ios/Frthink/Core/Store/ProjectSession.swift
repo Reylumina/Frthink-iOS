@@ -33,9 +33,7 @@ final class ProjectSession {
 
     private let store: FileStore
     private var saveTask: Task<Void, Never>?
-    /// 同一时间只允许一次编码/写盘。56 万字 payload 编一次要几十毫秒，
-    /// 旧实现每秒都可能再起一个 detached task，多个编码任务叠着跑会抢 CPU、
-    /// 抬内存峰值，表现就是滚动/输入偶发顿一下。
+    /// 同一时间只允许一次编码/写盘，避免多个编码任务并发抢占 CPU 与内存峰值导致输入或滚动卡顿。
     private enum SaveKind: Equatable {
         /// 只写正文页和 body.meta，payload.json 不动。
         case bodyOnly

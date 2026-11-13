@@ -1,7 +1,6 @@
 // 单张人物卡的编辑页：固定字段 + 自定义词条。
 //
-// 编辑期间只改局部草稿，点「完成」或离开页面时一次写回 session；打字不再逐键
-// 触发整份 payload 的变更与防抖保存。规则和事件卡已经用同样的写法。
+// 编辑期间只改局部草稿，点「完成」或离开页面时一次写回 session，避免逐键触发整份 payload 的变更与防抖保存。
 
 import SwiftUI
 import Foundation
@@ -254,10 +253,7 @@ struct WorldCharacterEditor: View {
         draft.name.isEmpty ? "人物卡" : draft.name
     }
 
-    /// 三路合并：只把用户动过的字段写到当前卡片上。
-    ///
-    /// 之前是整张草稿覆盖，刷新在打开编辑页之后并入的身份、性格、记忆会被
-    /// 打开时的旧快照抹掉，而断点已经推进、这一轮结果不会重来。
+    /// 三路合并：只把用户动过的字段写到当前卡片上，避免用打开时的旧快照覆盖刷新期间并入的新内容。
     private func commitDraft() {
         guard let index = session.payload.world.characters.firstIndex(where: {
             $0.id == cardID

@@ -75,10 +75,7 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 续写入口：放在输入框胶囊内部，作为行首附件。
-    ///
-    /// 原来它是字段左边一个独立的圆钮，和输入框之间隔着 8pt 空气，视觉上像掉在
-    /// 外面。放进同一颗胶囊后，输入条只剩「一块输入」和「一个发送」两种形状。
+    /// 续写入口：作为输入框胶囊的行首附件，与输入框共用同一表面。
     private var continuationButton: some View {
         Button {
             sendContinuation()
@@ -216,12 +213,10 @@ private struct WriterComposerShell<Content: View>: View {
     }
 }
 
-/// 输入框表面。iOS 26 自己画玻璃胶囊（可点的玻璃声明成 interactive）；
-/// 17–25 用实底输入框胶囊——那一档整条已经是 bar 材质，内层再叠会糊成一片。
+/// 输入框表面。iOS 26 用 interactive 玻璃胶囊；17–25 用实底胶囊，避免在 `.bar` 上再叠材质。
 private struct WriterComposerFieldSurface: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            // 可点的输入框声明成 interactive，点下去有系统的玻璃反馈。
             content.glassSurface(Capsule(), interactive: true)
         } else {
             content.background(Theme.field, in: Capsule())

@@ -486,9 +486,7 @@ struct WriterPane: View {
                     }
                 }
             }
-            // 首帧就落在底部：不再靠 onAppear 里抢在布局前的 scrollTo。
-            // 那一次只能按 LazyVStack 的估算行高算偏移，长对话里可能停在半空
-            // （历史「正文区空白」的复现路径之一）。
+            // 首帧用 defaultScrollAnchor 落在底部，避免布局前按估算行高定位；
             // 用户手动滚开后锚点撤掉，不会被内容变高拽回去（§5.9）；
             // 空对话不给锚点，空态按默认从顶部排。
             .defaultScrollAnchor(scrollAnchor)
@@ -522,13 +520,13 @@ struct WriterPane: View {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10).onChanged { value in
                     // 手指向下拖 = 回看更早的内容。生成中也让用户停在自己
-                    // 看的位置，不要每 60ms 被跟随器拽回底部。
+                    // 看的位置，不要被跟随器拽回底部。
                     if value.translation.height > 10, isAtBottom {
                         isAtBottom = false
                     }
                 }
             )
-            // 跟随器单独成视图：它只读 60ms 一次的 displayTick，
+            // 跟随器单独成视图：它只读合帧后的 displayTick，
             // 不会让整列气泡跟着高频重算（PERFORMANCE.md §2.1）。
             .background {
                 WriterStreamingFollower(

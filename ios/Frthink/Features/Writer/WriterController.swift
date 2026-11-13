@@ -33,13 +33,13 @@ final class WriterController {
     /// 落盘刷新的次数。
     private(set) var streamFlushTick = 0
 
-    /// 气泡显示刷新的次数（约 60ms 一次）。
+    /// 气泡显示刷新的次数（按 `displayInterval` 节流）。
     private(set) var displayTick = 0
 
     /// 本次请求的思考过程。
     private(set) var streamingReasoning: String?
     /// 已收到的思考字符数。流式期间只靠它判断要不要刷新思考区，
-    /// 不必每 60ms 比较一次长字符串。
+    /// 不必每次刷新都比较长字符串。
     private(set) var streamingReasoningCharacterCount = 0
 
     /// 自动摘要进行中，避免并发重复请求。
@@ -91,12 +91,7 @@ final class WriterController {
     /// 落盘间隔：只为防崩溃丢字，不驱动界面。
     private let flushInterval: Duration = .seconds(3)
 
-    /// 界面刷新间隔：默认 33ms（约 30 帧/秒），低电量/机身过热时自动降频。
-    ///
-    /// 60ms 时一个字块一次跳三四个字，看起来是一跳一跳的；33ms 接近一次刷新
-    /// 补两三个字，观感接近逐字。设备状态差时少做无谓的排版——社区实践
-    /// （Tanay Shah《Why Your iOS Streaming Chat Is Cooking the GPU》）与 Apple 的
-    /// 省电/热管理建议一致。
+    /// 界面刷新间隔：默认 33ms（约 30 帧/秒），低电量或机身过热时自动降频以省电控温。
     private var displayInterval: Duration {
         let info = ProcessInfo.processInfo
         if info.isLowPowerModeEnabled { return .milliseconds(100) }
@@ -792,7 +787,7 @@ final class WriterController {
         }
     }
 
-    /// 安排一次批量落盘。已有任务在等就不重复排，保证最多 1/1.2s 一次。
+    /// 安排一次批量落盘。已有任务在等就不重复排，按 `flushInterval` 节流。
     private func scheduleStreamingFlush(session: ProjectSession, messageID: String) {
         guard flushTask == nil else { return }
         let interval = flushInterval
@@ -804,7 +799,7 @@ final class WriterController {
         }
     }
 
-    /// 安排一次气泡刷新。按设备状态合并到 60–160ms 一次。
+    /// 安排一次气泡刷新。按设备状态合并到 `displayInterval` 一次。
     ///
     /// 思考过程也在这里上屏：DeepSeek 开启思考时，正文可能几十秒为空，
     /// 只在 3 秒落盘时更新思考区会让界面看起来卡住。
@@ -843,11 +838,8 @@ final class WriterController {
         displayTick &+= 1
     }
 
-    /// 把缓冲里的增量写进 session。这个操作会让写作页重算一次，所以降频。
+    /// 把缓冲里的增量并回 session 并安排一次生成检查点（按 `flushInterval` 降频）。
     private func flushStreaming(session: ProjectSession, messageID: String) {
-        // 生成期间**不**把增量写进 session：appendDelta 不会落盘，却会让
-        // `payload` 变化、整个写作台（正文 + 15 条气泡）重算。写回只在
-        // finish(...) 里做一次，既少整页刷新，也少一次 JSON 编码前的状态抖动。
         if !reasoningBuffer.isEmpty,
            streamingReasoningCharacterCount != reasoningBufferCharacterCount {
             streamingReasoning = reasoningBuffer
@@ -858,10 +850,7 @@ final class WriterController {
         checkpoint(session: session)
     }
 
-    /// 页面离开时做一次安全检查点。
-    ///
-    /// 生成期间不写 session 是为了少整页刷新；但切 Tab/退到后台时把已收到的
-    /// 文本并回会话并落盘，避免视图销毁后这段时间的输出全丢。
+    /// 把已收到的增量并回会话并安排一次检查点（定时落盘及切 Tab / 退后台时调用）。
     func checkpoint(session: ProjectSession) {
         guard isGenerating, let messageID = streamingMessageID else { return }
         persistPendingDelta(session: session, messageID: messageID)
@@ -869,8 +858,7 @@ final class WriterController {
         session.scheduleGenerationCheckpoint()
     }
 
-    /// 把最后一段增量并回会话。只在生成结束/停止时调用，随后 finishAssistantMessage
-    /// 会安排一次落盘。
+    /// 把待落盘的增量并回会话。
     private func persistPendingDelta(session: ProjectSession, messageID: String) {
         guard !pendingDelta.isEmpty else { return }
         session.appendDelta(pendingDelta, to: messageID)
@@ -929,8 +917,7 @@ final class WriterController {
             streamingReasoning = reasoningBuffer
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
-        // 生成期间没有写 session，结束前必须把最后一段增量并回去。
-        // 消息可能已经被撤回/删除：此时不能再写回内容，否则删掉的回复会复活。
+        // 结束前把最后一段增量并回会话；消息若已被撤回/删除则跳过，避免复活。
         if session.payload.messages.contains(where: { $0.id == messageID }) {
             persistPendingDelta(session: session, messageID: messageID)
             flushStreaming(session: session, messageID: messageID)

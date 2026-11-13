@@ -1,8 +1,7 @@
 name: Stream Check
 
-# 用 DEBUG 的本地 URLProtocol 伪装 SSE，走真实的 OpenAICompatibleClient 与
-# WriterController；同一台模拟器连续跑三次，截图 + 完成标记都通过才算数。
-# 这不是真实网络生成，但能覆盖流式解析、增量排版、结束态和首屏空白。
+# 以 DEBUG 本地 mock SSE 驱动真实 OpenAICompatibleClient 与 WriterController，
+# 连续运行三次并校验完成标记与截图，覆盖流式解析、增量排版与结束态。
 
 on:
   workflow_dispatch:
@@ -23,35 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Boot simulator
-        run: |
-          set -euo pipefail
-          DEVICE="$(xcrun simctl list devices available -j \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print([x["udid"] for xs in d.values() for x in xs if "iPhone" in x["name"]][0])')"
-          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE" || true
-          xcrun simctl bootstatus "$DEVICE" -b
-
-      - name: Build for simulator
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project ios/Frthink.xcodeproj \
-            -scheme Frthink \
-            -configuration Debug \
-            -destination "id=$DEVICE" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            build
+      - name: Boot simulator and build
+        id: sim
+        uses: ./.github/actions/sim-build
 
       - name: Install
-        run: |
-          set -euo pipefail
-          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
-          xcrun simctl install "$DEVICE" "$APP"
+        run: xcrun simctl install "$DEVICE" "${{ steps.sim.outputs.app-path }}"
 
       - name: Install image checker
         run: python3 -m pip install --quiet --break-system-packages pillow
@@ -75,7 +51,7 @@ jobs:
               -seedDemo -initialTab 创作 -mockStream -mockAutoSend \
               > "logs/stream-$i.log" 2>&1 &
             LAUNCH_PID=$!
-            # 启动慢时 14 秒不够；最多等 30 秒，完成标记到了再截图。
+            # 最多等待 30 秒，收到完成标记后再截图。
             for _ in $(seq 1 30); do
               if grep -q "MOCK STREAM DONE" "logs/stream-$i.log"; then break; fi
               sleep 1

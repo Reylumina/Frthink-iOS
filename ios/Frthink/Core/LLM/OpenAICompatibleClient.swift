@@ -12,8 +12,7 @@ final class OpenAICompatibleClient: LLMClient {
 
     /// 全应用共享一条 URLSession。
     ///
-    /// 之前每个 client（每次发送/续写/重测）都新建一条 session：连接池、TLS
-    /// 会话缓存都用不上，旧 session 还持有连接。共享一条之后长连接可以复用。
+    /// 复用连接池与 TLS 会话缓存，避免每次请求新建 session 持有多余连接。
     ///
     /// - `ephemeral` + `urlCache = nil`：LLM 响应不该进 URL 缓存，SSE 更不该。
     /// - `waitsForConnectivity = false`：交互式请求断网就立刻报错，不挂 3 分钟。
@@ -166,21 +165,8 @@ final class OpenAICompatibleClient: LLMClient {
                                     ?? chunk.stop_reason
                             }
                             let delta = choice.delta
-                            let content = delta?.content
-                                ?? delta?.text
-                                ?? delta?.output_text
-                                ?? chunk.content
-                                ?? chunk.text
-                            let reasoning = delta?.reasoning_content
-                                ?? delta?.reasoning
-                                ?? delta?.analysis
-                                ?? delta?.thinking
-                                ?? delta?.thought
-                                ?? chunk.reasoning_content
-                                ?? chunk.reasoning
-                                ?? chunk.analysis
-                                ?? chunk.thinking
-                                ?? chunk.thought
+                            let content = delta?.contentText ?? chunk.contentText
+                            let reasoning = delta?.reasoningText ?? chunk.reasoningText
 
                             if let reasoning, !reasoning.isEmpty {
                                 emittedAnything = true
@@ -192,15 +178,10 @@ final class OpenAICompatibleClient: LLMClient {
                             }
                         } else {
                             if finishReason == nil { finishReason = chunk.stop_reason }
-                            if let content = chunk.content ?? chunk.text, !content.isEmpty {
+                            if let content = chunk.contentText, !content.isEmpty {
                                 emittedAnything = true
                                 continuation.yield(.delta(content))
-                            } else if let reasoning = chunk.reasoning_content
-                                ?? chunk.reasoning
-                                ?? chunk.analysis
-                                ?? chunk.thinking
-                                ?? chunk.thought,
-                                !reasoning.isEmpty {
+                            } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
                                 emittedAnything = true
                                 continuation.yield(.reasoning(reasoning))
                             }
@@ -406,6 +387,16 @@ final class OpenAICompatibleClient: LLMClient {
                 let thinking: String?
                 let thought: String?
                 let stop_reason: String?
+
+                var contentText: String? {
+                    content ?? text ?? output_text
+                }
+
+                var reasoningText: String? {
+                    [reasoning_content, reasoning, analysis, thinking, thought]
+                        .compactMap { $0 }
+                        .first
+                }
             }
             let delta: Delta?
             let finish_reason: String?
@@ -420,6 +411,16 @@ final class OpenAICompatibleClient: LLMClient {
         let thought: String?
         let stop_reason: String?
         let error: StreamError?
+
+        var contentText: String? {
+            content ?? text
+        }
+
+        var reasoningText: String? {
+            [reasoning_content, reasoning, analysis, thinking, thought]
+                .compactMap { $0 }
+                .first
+        }
     }
 
     /// 200 响应里也可能以 `{"error":{...}}` 返回限流、过滤等错误。

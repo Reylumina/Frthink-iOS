@@ -1,4 +1,4 @@
-// 本文件负责：码字机的对话气泡 —— 用户/助手/系统三种样式、版本切换与操作条，
+// 本文件负责：码字机的对话气泡 —— 用户/助手/系统三种样式与版本切换，
 // 以及流式生成中的气泡（只订阅控制器里的实时文本）。
 
 import SwiftUI
@@ -18,15 +18,12 @@ struct WriterMessageActions {
     var beginSelection: () -> Void = {}
 }
 
-/// 一条已完成的码字机消息。
-///
-/// 助手气泡底部是四个图标动作（插入、追加、复制、重新生成），回退与删版本收进
-/// 省略号菜单；版本切换条只在有多版本时出现。
+/// 一条已完成的码字机消息。版本切换条只在有多版本时出现。
 struct WriterMessageBubble: View {
     let message: ChatMessage
-    /// 有任何一条消息正在生成时，操作条禁用，避免并发改同一份对话。
+    /// 生成中传 true，避免并发修改同一份对话。
     let isBusy: Bool
-    /// 多选态：整条气泡可点选，操作条隐藏。
+    /// 多选态：整条气泡可点选。
     let isSelecting: Bool
     let isSelected: Bool
     /// 上次生成被系统中断；状态属于这条消息，不再由外层挂 overlay。
@@ -47,7 +44,7 @@ struct WriterMessageBubble: View {
         WriterTypography.fontSize(store.settings.bodyFontSize, dynamicTypeSize: dynamicTypeSize)
     }
 
-    /// 行高固定 1.6；流式气泡用同一个值，生成结束换气泡不会变高。
+    /// 与流式气泡共用同一套行距，生成结束换气泡不会变高。
     private var bodyLineSpacing: CGFloat {
         WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight)
     }
@@ -151,11 +148,8 @@ struct WriterMessageBubble: View {
         }
     }
 
-    /// 已完成的回复：只有出现 `**`/`__` 时才解析行内 Markdown，
-    /// 长对话里的普通正文保持纯文本，不每帧跑解析。
-    ///
-    /// 分段按段排版，段间留 `WriterTypography.paragraphSpacing`：整段当成一个
-    /// Text 时，模型输出里的空行会按整行高度排版，段间比阅读页松一倍。
+    /// 已完成的回复：分段按段排版，段间留 `WriterTypography.paragraphSpacing`。
+    /// 整段当成一个视图时，模型输出里的空行会按整行高度排版，段间比阅读页松一倍。
     private var content: some View {
         let paragraphs = WriterTypography.paragraphs(message.content)
         return Group {
@@ -348,7 +342,7 @@ struct WriterStreamingBubble: View {
                 .font(Theme.reply)
                 .foregroundStyle(.tertiary)
         } else {
-            // 生成中用 UITextView 增量排版；字号/行距/宽度与完成态 `Text` 同一套换算。
+            // 生成中用 UITextView 增量排版；字号/行距/宽度与完成态气泡同一套换算。
             StreamingTextView(
                 text: controller.streamingText,
                 fontSize: bodyFontSize,

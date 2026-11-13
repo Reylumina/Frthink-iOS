@@ -4,7 +4,7 @@ import Foundation
 
 /// 世界书合并。
 ///
-/// 合并语义对齐 APK 的 WorldSummary 合并：旧内容只读，新内容永远追加；
+/// 合并语义：旧内容只读，新内容永远追加；
 /// 文本字段按标点切句去重，事件按 title 去重，人物按本名或别称匹配。
 enum WorldMerge {
 

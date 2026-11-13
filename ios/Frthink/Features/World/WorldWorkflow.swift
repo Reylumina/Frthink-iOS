@@ -73,9 +73,7 @@ enum WorldWorkflow {
         }
 
         let context = try WorldRequestContext.make(store: store)
-        // APK 的「刷新人物卡」走增量契约：`L1/C0592r0.java:35` 传
-        // `(false, true)`，`L1/W2.java:318-320` 的第 5 参即 P24 增量开关。
-        // 非增量的 `M1/D1.java:60` 是「世界建立」入口，不能拿来当刷新默认。
+        // 「刷新人物卡」固定走增量模式（P24 开关），不走非增量的「世界建立」入口。
         let incremental = true
 
         let sourceHash = await Task.detached(priority: .userInitiated) {
@@ -96,9 +94,8 @@ enum WorldWorkflow {
             )
         }
 
-        // 分段续抽：原版 `characterAnalysisCheckpoint` 记录每一段是否做完，
-        // 正文没变时只补没做完的段，不整本重抽。
-        // 原版：min(4000, 输入预算 × 0.2) token。输入预算过小时保底 256。
+        // 分段续抽：`characterAnalysisCheckpoint` 记录已完成段，正文未变时仅补未完成段。
+        // 单段预算：min(4000, 输入预算 × 0.2) token，输入预算过小时保底 256。
         let chunkBudget = min(
             WorldDigest.tokenChunkCap,
             max(256, store.settings.inputBudgetTokens / 5)
@@ -274,8 +271,8 @@ enum WorldWorkflow {
 
     /// 大书模式：一次只分析上下文放得下的前缀，落盘后等下一次点击继续。
     ///
-    /// 阈值与提示词对齐 v0.8.213 的 `W2.B`：正文 ≥ 50 万码点时不切小段，
-    /// 而是把能放下的正文整段送进去，再用「已分析正文前 N 字」告诉用户还剩多少。
+    /// 正文 ≥ 50 万码点时不切小段，而是将上下文放得下的前缀整段送入，
+    /// 并用「已分析正文前 N 字」提示剩余量。
     private static func refreshWholeText(
         session: ProjectSession,
         store: AppStore,

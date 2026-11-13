@@ -4,9 +4,8 @@
 // 长文编辑不再打包在 sheet 里。更新动作跟着正文分栏走，用户不用先点进
 // 编辑器再找按钮。
 //
-// 剧情梗概不在这一栏：APK 的写作提示词直接渲染「事件」分栏里的
-// `plotEvents`（`L1/W2.java:480-484`）；数据模型里的 `plotOutline`
-// 字符串是死字段，不再单独暴露一个编辑入口，避免两处都能改。
+// 剧情梗概不在这一栏：写作提示词直接使用「事件」分栏的 `plotEvents`；
+// 数据模型中的 `plotOutline` 为废弃字段，不暴露编辑入口，避免两处都能改。
 
 import SwiftUI
 import Foundation
@@ -127,7 +126,7 @@ struct WorldRulesSection: View {
             editing = kind
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                // §2.4：二级页的列表行也用 Label，不加有色方块。
+                // 二级页的列表行使用 Label，不加有色方块。
                 SettingsLabelRow(
                     title: kind.title,
                     detail: kind.valueLabel(in: session.payload.world)

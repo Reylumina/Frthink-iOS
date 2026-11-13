@@ -19,8 +19,7 @@ struct WorldRequestContext {
 
     /// 世界任务统一的请求参数：输出预算至少 4096，截断按 `failOnLength` 处理。
     ///
-    /// 去重这类自己发请求的步骤也走这里，避免各写一个 `maxTokens`（曾经是 2048，
-    /// 大候选批的 JSON 会在输出上限处被截断）。
+    /// 去重等独立请求也走这里，避免各自写较小的 `maxTokens` 导致大候选批的 JSON 被截断。
     static func request(
         provider: ProviderSetting,
         messages: [LLMMessage],

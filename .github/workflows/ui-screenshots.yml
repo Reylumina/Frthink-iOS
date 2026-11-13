@@ -1,10 +1,7 @@
 name: UI Screenshots
 run-name: "UI Screenshots #${{ github.run_number }}"
 
-# 在 macOS runner 的模拟器里跑起来，逐 Tab 截图，作为 artifact 上传。
-#
-# 为什么需要这个：工程在 Windows 上只能编译，看不到界面。这个流水线是唯一
-# 能让 UI 被真实渲染、被眼睛看到的通道。
+# 在 macOS 模拟器上运行应用并逐页截图，作为 artifact 上传供界面评审。
 
 on:
   workflow_dispatch:
@@ -31,50 +28,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: maxim-lobanov/setup-xcode@v1
+      - name: Boot simulator and build
+        id: sim
+        uses: ./.github/actions/sim-build
         with:
-          xcode-version: latest-stable
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          xcrun simctl list devices available | head -30
-
-      - name: Boot simulator
-        run: |
-          set -euo pipefail
-          DEVICE="$(xcrun simctl list devices available -j \
-            | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print([x["udid"] for xs in d.values() for x in xs if "iPhone" in x["name"]][0])')"
-          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
-          xcrun simctl boot "$DEVICE" || true
-          xcrun simctl bootstatus "$DEVICE" -b
-
-      - name: Build for simulator
-        run: |
-          set -o pipefail
-          # 模拟器构建必须 ad-hoc 签名：无签名的 app 没有 application-identifier，
-          # 访问 Keychain 会返回 -34018，自检的落盘加密和 API Key 都会失败。
-          xcodebuild \
-            -project ios/Frthink.xcodeproj \
-            -scheme Frthink \
-            -configuration Debug \
-            -destination "id=$DEVICE" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            build
+          show-devices: "true"
 
       - name: Verify ProMotion Info.plist key
         run: |
           set -euo pipefail
-          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
+          APP="${{ steps.sim.outputs.app-path }}"
           VALUE="$(/usr/bin/plutil -extract CADisableMinimumFrameDurationOnPhone raw -o - "$APP/Info.plist")"
           echo "CADisableMinimumFrameDurationOnPhone=$VALUE"
           test "$VALUE" = "true"
 
       - name: Install
-        run: |
-          set -euo pipefail
-          APP="$(find "$RUNNER_TEMP/DerivedData/Build/Products/Debug-iphonesimulator" -name "Frthink.app" -maxdepth 1)"
-          xcrun simctl install "$DEVICE" "$APP"
+        run: xcrun simctl install "$DEVICE" "${{ steps.sim.outputs.app-path }}"
 
       - name: Run self check (pure logic, no network)
         run: |
@@ -175,5 +144,4 @@ jobs:
           path: ${{ runner.temp }}/DerivedData/Logs/Build
           if-no-files-found: ignore
           retention-days: 7
-
 
