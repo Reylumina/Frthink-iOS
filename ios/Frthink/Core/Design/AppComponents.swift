@@ -218,6 +218,8 @@ struct ToolbarCircleIcon: View {
             .font(.system(size: size * 0.46, weight: .semibold))
             .frame(width: size, height: size)
             .overlay(Circle().strokeBorder(Theme.separator, lineWidth: 0.5))
+            // 圆形只是外观，热区补到 44pt（§5.1）。
+            .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
             .contentShape(Circle())
     }
 }
@@ -252,6 +254,14 @@ struct AppSettingsRow: View {
     var detail: String? = nil
 
     var body: some View {
+        // 无障碍字号下横排放不下时改竖排：图标在上，标题与值各占一行（§5.5）。
+        ViewThatFits(in: .horizontal) {
+            horizontal
+            vertical
+        }
+    }
+
+    private var horizontal: some View {
         HStack(spacing: Theme.Spacing.m) {
             if let symbol {
                 IconTile(symbol: symbol, tint: symbolTint, filled: symbolFilled)
@@ -271,6 +281,27 @@ struct AppSettingsRow: View {
         .contentShape(Rectangle())
         .frame(minHeight: Theme.Layout.rowContentHeight)
     }
+
+    private var vertical: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.m) {
+                if let symbol {
+                    IconTile(symbol: symbol, tint: symbolTint, filled: symbolFilled)
+                }
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+            }
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.label)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: Theme.Layout.rowContentHeight)
+    }
 }
 
 /// 两端对齐的只读数值行。数字用等宽，避免刷新时抖动。
@@ -280,13 +311,16 @@ struct AppValueRow: View {
     var symbol: String? = nil
     var tone: AppTone = .neutral
 
+    /// 图标列宽随字号缩放，和无障碍字号下的文字列对齐。
+    @ScaledMetric(relativeTo: .footnote) private var iconColumn: CGFloat = 20
+
     var body: some View {
         HStack(spacing: Theme.Spacing.s) {
             if let symbol {
                 Image(systemName: symbol)
                     .font(.footnote)
                     .foregroundStyle(tone.color)
-                    .frame(width: 20)
+                    .frame(width: iconColumn)
             }
             Text(title)
                 .font(.body)
@@ -393,7 +427,7 @@ private struct FieldChrome: ViewModifier {
                         lineWidth: 1
                     )
             )
-            .animation(Theme.motionSelection, value: focused)
+            .themeAnimation(Theme.motionSelection, value: focused)
     }
 }
 
@@ -889,6 +923,8 @@ struct FloatingGlassButton: View {
                 Image(systemName: symbol)
                     .font(Font.subheadline.weight(.semibold))
                     .frame(width: size, height: size)
+                    // 圆形按钮看起来是 36pt，热区补到 44pt（§5.1）。
+                    .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                     .contentShape(Rectangle())
             }
         }

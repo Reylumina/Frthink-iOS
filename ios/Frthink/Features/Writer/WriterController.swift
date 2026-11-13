@@ -74,6 +74,8 @@ final class WriterController {
     private var task: Task<Void, Never>?
     /// 还没写进 session 的增量。攒着，按 `flushInterval` 批量落。
     private var pendingDelta = ""
+    /// 自动摘要的后台任务；停止或切书时要能取消。
+    private var summaryTask: Task<Void, Never>?
     private var reasoningBuffer = ""
     private var reasoningBufferCharacterCount = 0
     private var flushTask: Task<Void, Never>?
@@ -246,6 +248,7 @@ final class WriterController {
             // 否则会和气泡里的同一句话重复。
             return
         }
+        summaryTask?.cancel()
         guard isGenerating else { return }
         stopRequested = true
         task?.cancel()
@@ -1023,8 +1026,13 @@ final class WriterController {
         let ids = pendingMessages.map(\.id)
 
         autoSummarizing = true
-        Task { @MainActor in
-            defer { autoSummarizing = false }
+        // 挂句柄：停止生成、切书时能取消，不然它会继续对已被驱逐的会话写盘。
+        summaryTask?.cancel()
+        summaryTask = Task { @MainActor in
+            defer {
+                autoSummarizing = false
+                summaryTask = nil
+            }
             do {
                 _ = try await WorldRulesWorkflow.updateLongTermRules(
                     session: session,

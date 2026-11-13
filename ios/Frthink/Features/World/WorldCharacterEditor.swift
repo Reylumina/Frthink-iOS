@@ -271,11 +271,30 @@ struct WorldCharacterEditor: View {
         if draft.customEntries != openedCard.customEntries {
             merged.customEntries = draft.customEntries
         }
+        // 新建后没填任何内容就退出：把这张空卡删掉，书架/列表里不留空条目。
+        if Self.isBlank(merged) {
+            session.payload.world.characters.remove(at: index)
+            session.scheduleSave()
+            return
+        }
         guard merged != session.payload.world.characters[index] else { return }
         merged.updatedAt = Date()
         session.payload.world.characters[index] = merged
         draft = merged
         session.scheduleSave()
+    }
+
+    /// 整张卡只有空白内容。
+    private static func isBlank(_ card: CharacterCard) -> Bool {
+        let texts = [card.name, card.identity, card.personality, card.voice,
+                     card.goals, card.boundaries, card.personalMemory,
+                     card.relationshipAttitudes]
+        return texts.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            && card.aliases.isEmpty
+            && card.customEntries.allSatisfy {
+                $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && $0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
     }
 
     // MARK: - 操作

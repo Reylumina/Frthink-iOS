@@ -84,7 +84,9 @@ struct LibraryCoverImage: View {
             return
         }
 
-        let key = "\(raw.hashValue)-\(raw.count)"
+        // key 用长度 + 前 64 个字符：主线程上对整段 base64 求哈希，
+        // 导入大封面后每次滚动书架都要 O(payload) 算一遍。
+        let key = "\(raw.count)-\(raw.prefix(64))"
         if let cached = CoverThumbnailCache.shared.image(for: key) {
             image = cached
             return

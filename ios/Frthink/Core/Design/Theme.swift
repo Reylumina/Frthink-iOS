@@ -26,7 +26,7 @@ enum Theme {
     ///
     /// 用 tint 压 16% 而不是固定灰：深浅两档自动翻转，和 accent 是一对。
     /// 16% 是量出来的——12% 压在深色卡面上几乎看不见。
-    static let accentSoft = Theme.accent.opacity(0.16)
+    static let accentSoft = Theme.accent.opacity(Theme.tintedFillOpacity)
 
     /// 次级表面。
     static let surfaceSecondary = Color(uiColor: .secondarySystemBackground)
@@ -56,7 +56,9 @@ enum Theme {
     /// 有色淡底的统一透明度：胶囊、选中态、图标底。
     ///
     /// 用户气泡不在此列，它用实底表达角色（见 `Theme.Bubble`）。
-    static let tintedFillOpacity: Double = 0.12
+    /// 有色淡底的统一透明度：强调色淡底、状态胶囊、图标方块共用这一个值。
+    /// 16% 是量出来的——12% 压在深色卡面上几乎看不见。
+    static let tintedFillOpacity: Double = 0.16
 
     /// 用户气泡：系统灰实底 + 正文色文字。
     ///

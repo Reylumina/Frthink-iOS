@@ -179,9 +179,10 @@ struct WriterMessageBubble: View {
     @ViewBuilder
     private func paragraph(_ text: String) -> some View {
         if let level = MarkdownInline.headingLevel(text) {
+            // 不加额外上间距：段间距已经由 VStack 给出，流式态用同一个段间距，
+            // 换气泡时高度才不会跳。
             MarkdownInline.text(MarkdownInline.strippingHeadingMarker(text))
                 .font(.system(size: headingSize(level), weight: .semibold))
-                .padding(.top, Theme.Spacing.s)
         } else {
             MarkdownInline.text(text)
         }

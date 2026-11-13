@@ -63,7 +63,10 @@ struct StreamingTextView: UIViewRepresentable {
             let suffix = String(rendered.dropFirst(coordinator.appliedText.count))
             // 新增的这几个字里出现标题标记或加粗标记时，整段重排：按后缀单独排
             // 会把「## 第三章」当正文，也接不上跨后缀的 ** 配对。
-            let needsFullRender = suffix.contains("#") || suffix.contains("**")
+            // 标题跨批到达时也要整段重排：上一批刚写了个 "#"，这一批把标题文字补上，
+            // 按后缀追加的话那一行永远按正文排。
+            let tailInHeading = Self.endsInsideHeading(rendered)
+            let needsFullRender = tailInHeading || suffix.contains("#") || suffix.contains("**")
             if !suffix.isEmpty, !needsFullRender {
                 // 后缀按原样追加：不能再走 attributed()，它会把整段拆开并 trim，
                 // 落在段末的那个换行会被吃掉，下一批字就粘在上一段行尾。
@@ -168,6 +171,12 @@ struct StreamingTextView: UIViewRepresentable {
         return result
     }
 
+    /// 全文最后一个段落是不是从 "#" 开头的标题（含没写完的标题）。
+    private static func endsInsideHeading(_ text: String) -> Bool {
+        let tail = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
+        return tail.trimmingCharacters(in: .whitespaces).hasPrefix("#")
+    }
+
     /// 增量片段：原样保留换行和空白，只套正文字体与段落样式。
     private static func fragment(
         _ text: String,
@@ -211,6 +220,10 @@ struct StreamingTextView: UIViewRepresentable {
         }
         if !buffer.isEmpty {
             runs.append((buffer, isBold))
+        }
+        // 奇数个标记：最后一个没有配对，按普通文本渲染，别把标记吞掉当加粗。
+        if isBold {
+            runs.append(("**", false))
         }
         return runs
     }
