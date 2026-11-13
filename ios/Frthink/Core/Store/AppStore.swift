@@ -79,10 +79,19 @@ final class AppStore {
     /// `flushDirtySessions()` 是异步的：不申请额度的话，`scenePhase` 的 onChange
     /// 立刻返回，进程可能在写盘途中被挂起，最后一段输入仍会丢。
     func flushDirtySessionsInBackground() async {
-        let identifier = UIApplication.shared.beginBackgroundTask(withName: "flush-sessions")
+        var identifier: UIBackgroundTaskIdentifier = .invalid
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "flush-sessions") {
+            let expired = identifier
+            identifier = .invalid
+            if expired != .invalid {
+                UIApplication.shared.endBackgroundTask(expired)
+            }
+        }
         defer {
-            if identifier != .invalid {
-                UIApplication.shared.endBackgroundTask(identifier)
+            let remaining = identifier
+            identifier = .invalid
+            if remaining != .invalid {
+                UIApplication.shared.endBackgroundTask(remaining)
             }
         }
         await flushDirtySessions()
@@ -251,33 +260,35 @@ final class AppStore {
         }
     }
 
-    func touch(_ project: Project) {
+    private func updateProject(_ project: Project, mutate: (inout Project) -> Void) {
         guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
         var p = projects[idx]
-        p.updatedAt = Date()
-        p.revision += 1
-        projects[idx] = p
-        persistProject(p)
-    }
-
-    func rename(_ project: Project, to title: String) {
-        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
-        var p = projects[idx]
-        p.title = title
-        p.updatedAt = Date()
-        p.revision += 1
+        mutate(&p)
         projects[idx] = p
         persistProject(p)
         sessions[p.id]?.project = p
     }
 
+    func touch(_ project: Project) {
+        updateProject(project) {
+            $0.updatedAt = Date()
+            $0.revision += 1
+        }
+    }
+
+    func rename(_ project: Project, to title: String) {
+        updateProject(project) {
+            $0.title = title
+            $0.updatedAt = Date()
+            $0.revision += 1
+        }
+    }
+
     func setSynopsis(_ project: Project, to text: String) {
-        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
-        var p = projects[idx]
-        p.synopsis = text
-        p.updatedAt = Date()
-        projects[idx] = p
-        persistProject(p)
+        updateProject(project) {
+            $0.synopsis = text
+            $0.updatedAt = Date()
+        }
     }
 
     /// 轻提示，带一个可选的动作（例如「撤销」）。
@@ -299,11 +310,7 @@ final class AppStore {
     }
 
     func restore(_ project: Project) {
-        guard let idx = projects.firstIndex(where: { $0.id == project.id }) else { return }
-        var p = projects[idx]
-        p.trashedAt = nil
-        projects[idx] = p
-        persistProject(p)
+        updateProject(project) { $0.trashedAt = nil }
     }
 
     func deleteForever(_ project: Project) {
@@ -402,7 +409,10 @@ final class AppStore {
 
     func setAPIKey(_ key: String, for providerID: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        Keychain.set(trimmed, for: Keychain.account(for: providerID))
+        guard Keychain.set(trimmed, for: Keychain.account(for: providerID)) else {
+            errorMessage = "保存 API Key 失败，请检查系统钥匙串权限"
+            return
+        }
         apiKeyCache[providerID] = trimmed
         apiKeyRevision += 1
     }

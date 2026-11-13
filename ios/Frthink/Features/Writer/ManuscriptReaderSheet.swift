@@ -298,6 +298,12 @@ struct ManuscriptReaderSheet: View {
     }
 
     private func jump(to chapter: Chapter) {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
         selection = NSRange(location: 0, length: 0)
         session.reloadEditorWindow(containing: chapter.location)
         cursor = chapter.location
@@ -310,6 +316,12 @@ struct ManuscriptReaderSheet: View {
     /// 窗口只覆盖书末；向前扩一页，保持编辑器内存有界。
     private func loadEarlier() {
         guard session.isWindowEditing, session.editorWindowStart > 0 else { return }
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
         let target = max(0, session.editorWindowStart - 1)
         session.reloadEditorWindow(containing: target)
         cursor = target

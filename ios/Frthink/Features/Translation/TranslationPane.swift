@@ -304,24 +304,44 @@ struct TranslationPane: View {
             store.errorMessage = "导入失败：\(error.localizedDescription)"
         case .success(let urls):
             guard let url = urls.first else { return }
+            Task {
+                do {
+                    let text = try await Self.readTextFile(url)
+                    session.sourceText = text
+                    session.saveSource()
+                    rebuildPlan()
+                    store.toast = "已导入原文，共 \(plan.count) 段"
+                } catch {
+                    store.errorMessage = "读取失败：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private static let maxImportBytes = 50 * SecurityScopedFileReader.bytesPerMiB
+
+    private static func readTextFile(_ url: URL) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
             let accessed = url.startAccessingSecurityScopedResource()
             defer {
                 if accessed { url.stopAccessingSecurityScopedResource() }
             }
-            do {
-                let data = try Data(contentsOf: url)
-                guard let text = String(data: data, encoding: .utf8) else {
-                    store.errorMessage = "读取失败：文件不是 UTF-8 编码的纯文本。"
-                    return
-                }
-                session.sourceText = text
-                session.saveSource()
-                rebuildPlan()
-                store.toast = "已导入原文，共 \(plan.count) 段"
-            } catch {
-                store.errorMessage = "读取失败：\(error.localizedDescription)"
+            let data = try SecurityScopedFileReader.read(url, maxBytes: maxImportBytes) { _ in
+                NSError(
+                    domain: "Frthink.TranslationImport",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "原文文件过大（超过 50 MB）"]
+                )
             }
-        }
+            guard let text = String(data: data, encoding: .utf8) else {
+                throw NSError(
+                    domain: "Frthink.TranslationImport",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "文件不是 UTF-8 编码的纯文本。"]
+                )
+            }
+            return text
+        }.value
     }
 
     // MARK: - 跑批

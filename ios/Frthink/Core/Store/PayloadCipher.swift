@@ -62,20 +62,27 @@ enum PayloadCipher {
         defer { lock.unlock() }
         if let cachedKey { return cachedKey }
 
-        if let stored = Keychain.payloadKey(), stored.count == 32 {
+        switch Keychain.readPayloadKey() {
+        case .found(let stored):
+            guard stored.count == SymmetricKeySize.bits256.byteCount else {
+                throw PayloadCipherError.keyUnavailable
+            }
             let key = SymmetricKey(data: stored)
             cachedKey = key
             return key
-        }
-
-        let key = SymmetricKey(size: .bits256)
-        let raw = key.withUnsafeBytes { Data($0) }
-        Keychain.setPayloadKey(raw)
-        guard Keychain.payloadKey() == raw else {
+        case .notFound:
+            let key = SymmetricKey(size: .bits256)
+            let raw = key.withUnsafeBytes { Data($0) }
+            let status = Keychain.setPayloadKey(raw)
+            guard status == errSecSuccess, Keychain.payloadKey() == raw else {
+                throw PayloadCipherError.keyUnavailable
+            }
+            cachedKey = key
+            return key
+        case .failed:
+            // 锁屏或受限状态下读不到 Keychain 时绝不覆盖现有主密钥。
             throw PayloadCipherError.keyUnavailable
         }
-        cachedKey = key
-        return key
     }
 }
 

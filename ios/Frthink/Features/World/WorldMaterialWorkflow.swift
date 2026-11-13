@@ -187,6 +187,14 @@ enum WorldMaterialWorkflow {
                     incoming: note
                 )
             }
+            // 每块立即推进进度：中断或失败后下次从已消费位置继续，不重复跑前面几块。
+            session.payload.world.materialSourceProgress[key] = Self.materialProgress(
+                manuscript: manuscript,
+                offset: offset,
+                consumed: consumed,
+                prompt: PromptLibrary.segmentStyleNotesInstruction
+                    + PromptLibrary.styleNotesMergeInstruction
+            )
             session.scheduleSave()
         }
 

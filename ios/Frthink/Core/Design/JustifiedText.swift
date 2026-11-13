@@ -30,11 +30,18 @@ struct JustifiedText: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         let next = styled(attributed)
-        guard uiView.attributedText.string != next.string
-            || uiView.attributedText.length != next.length
-        else { return }
+        guard !uiView.attributedText.isEqual(to: next) else { return }
         uiView.attributedText = next
         uiView.invalidateIntrinsicContentSize()
+    }
+
+    private static let fallbackProposalWidth: CGFloat = 320
+
+    static func resolvedProposalWidth(_ proposal: ProposedViewSize) -> CGFloat {
+        if let proposed = proposal.width, proposed.isFinite, proposed > 0 {
+            return proposed
+        }
+        return fallbackProposalWidth
     }
 
     func sizeThatFits(
@@ -42,7 +49,7 @@ struct JustifiedText: UIViewRepresentable {
         uiView: UITextView,
         context: Context
     ) -> CGSize? {
-        let width = proposal.width ?? 320
+        let width = Self.resolvedProposalWidth(proposal)
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )

@@ -470,7 +470,23 @@ struct ProviderEditorView: View {
     // MARK: - 保存
 
     @MainActor
-    private func commit() {
+    @discardableResult
+    private func commit() -> Bool {
+        var normalized = draft
+        normalized.baseURL = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized.model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        normalized.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: normalized.baseURL),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              !(url.host?.isEmpty ?? true)
+        else {
+            statusText = "Base URL 格式无效，请填写 http:// 或 https:// 开头的地址"
+            statusKind = .failure
+            return false
+        }
+        draft = normalized
+
         var settings = store.settings
         if let index = settings.providers.firstIndex(where: { $0.id == draft.id }) {
             settings.providers[index] = draft
@@ -486,20 +502,24 @@ struct ProviderEditorView: View {
             keyRevision += 1
         }
         store.saveSettings()
+        return true
     }
 
     @MainActor
     private func save() {
-        commit()
+        guard commit() else { return }
+        original = draft
         onSaved()
         dismiss()
     }
 
     @MainActor
     private func activate() {
-        commit()
+        guard commit() else { return }
         store.settings.activeProviderID = draft.id
         store.saveSettings()
+        original = draft
+        onSaved()
         statusText = "已设为当前AI服务商"
         statusKind = .success
     }

@@ -79,6 +79,13 @@ struct StreamingTextView: UIViewRepresentable {
             while common < maxCommon, oldNS.character(at: common) == newNS.character(at: common) {
                 common += 1
             }
+            // 退回到上一个换行符之后：换行可能刚把前一段从左对齐切到两端对齐，
+            // 同时也能避开 UTF-16 代理对边界。
+            if common > 0 {
+                let searchRange = NSRange(location: 0, length: common)
+                let prevNewline = oldNS.range(of: "\n", options: .backwards, range: searchRange)
+                common = prevNewline.location == NSNotFound ? 0 : prevNewline.location + 1
+            }
             let replaceRange = NSRange(location: common, length: oldNS.length - common)
             let replacement = newAttributed.attributedSubstring(
                 from: NSRange(location: common, length: newNS.length - common)
@@ -100,7 +107,7 @@ struct StreamingTextView: UIViewRepresentable {
         uiView: UITextView,
         context: Context
     ) -> CGSize? {
-        let width = proposal.width ?? 320
+        let width = JustifiedText.resolvedProposalWidth(proposal)
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )

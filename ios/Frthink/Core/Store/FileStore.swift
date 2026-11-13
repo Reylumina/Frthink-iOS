@@ -155,18 +155,39 @@ struct FileStore {
 
     // MARK: - 加密读写
 
-    /// 读一个加密文件；没有魔数的旧明文按原样返回并顺手加密写回。
-    ///
-    /// 返回 nil 表示文件不存在或密文损坏，调用方按空值处理。
-    private func readEncrypted(_ url: URL) -> Data? {
-        guard let fileData = try? Data(contentsOf: url) else { return nil }
+    private enum EncryptedReadResult {
+        case missing
+        case loaded(Data)
+        case unreadable
+    }
+
+    private func readEncryptedResult(_ url: URL) -> EncryptedReadResult {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return .missing
+        }
+        guard let fileData = try? Data(contentsOf: url) else {
+            return .unreadable
+        }
         if PayloadCipher.isEncrypted(fileData) {
-            return try? PayloadCipher.open(fileData)
+            guard let plain = try? PayloadCipher.open(fileData) else {
+                return .unreadable
+            }
+            return .loaded(plain)
         }
         if let sealed = try? PayloadCipher.seal(fileData) {
             try? write(sealed, to: url)
         }
-        return fileData
+        return .loaded(fileData)
+    }
+
+    /// 读一个加密文件；没有魔数的旧明文按原样返回并顺手加密写回。
+    ///
+    /// 返回 nil 表示文件不存在或密文损坏，调用方按空值处理。
+    private func readEncrypted(_ url: URL) -> Data? {
+        if case .loaded(let data) = readEncryptedResult(url) {
+            return data
+        }
+        return nil
     }
 
     private func writeEncrypted(_ data: Data, to url: URL) throws {
@@ -387,20 +408,60 @@ struct FileStore {
         return String(data: data, encoding: .utf8)
     }
 
+    enum BodyLoadResult {
+        case loaded(BodyDocument)
+        case missing
+        case corrupted
+    }
+
+    /// 区分「正文尚未创建」与「页文件或元信息损坏/无法解密」，避免用空串覆写原稿。
+    func loadBodyResult(_ projectID: String) -> BodyLoadResult {
+        switch readEncryptedResult(file("body.meta.json", in: projectID)) {
+        case .unreadable:
+            return .corrupted
+        case .loaded(let metaPlain):
+            guard let meta = try? decoder.decode(BodyMeta.self, from: metaPlain) else {
+                return .corrupted
+            }
+            if let count = meta.pageCount, count > 0 {
+                var text = ""
+                text.reserveCapacity(meta.utf16Length)
+                for index in 0..<count {
+                    switch readEncryptedResult(bodyPageURL(projectID, index: index)) {
+                    case .loaded(let data):
+                        guard let page = String(data: data, encoding: .utf8) else {
+                            return .corrupted
+                        }
+                        text += page
+                    case .missing, .unreadable:
+                        return .corrupted
+                    }
+                }
+                return .loaded(BodyDocument(text: text, chapters: meta.chapters))
+            }
+        case .missing:
+            break
+        }
+
+        switch readEncryptedResult(file("body.json", in: projectID)) {
+        case .missing:
+            return .missing
+        case .unreadable:
+            return .corrupted
+        case .loaded(let plain):
+            guard let doc = try? decoder.decode(BodyDocument.self, from: plain) else {
+                return .corrupted
+            }
+            return .loaded(doc)
+        }
+    }
+
     /// 编辑器/导出用：把所有页拼回完整正文。打开书不要调用。
     func loadBody(_ projectID: String) -> BodyDocument? {
-        if let meta = loadBodyMeta(projectID), let count = meta.pageCount, count > 0 {
-            var text = ""
-            text.reserveCapacity(meta.utf16Length)
-            for index in 0..<count {
-                guard let page = loadBodyPage(projectID, index: index) else {
-                    return loadLegacyBody(projectID)
-                }
-                text += page
-            }
-            return BodyDocument(text: text, chapters: meta.chapters)
+        if case .loaded(let doc) = loadBodyResult(projectID) {
+            return doc
         }
-        return loadLegacyBody(projectID)
+        return nil
     }
 
     func saveBody(
@@ -619,5 +680,47 @@ enum ContentHash {
     static func of(_ text: String) -> String {
         let digest = SHA256.hash(data: Data(text.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// 协调读取文件选择器提供的安全作用域 URL，读取前校验体积上限。
+enum SecurityScopedFileReader {
+    static let bytesPerMiB = 1_048_576
+
+    static func read(
+        _ url: URL,
+        maxBytes: Int,
+        tooLargeError: (Int) -> Error
+    ) throws -> Data {
+        var coordinationError: NSError?
+        var readResult: Result<Data, Error>?
+        NSFileCoordinator().coordinate(
+            readingItemAt: url,
+            options: [],
+            error: &coordinationError
+        ) { readableURL in
+            readResult = Result {
+                try readBounded(readableURL, maxBytes: maxBytes, tooLargeError: tooLargeError)
+            }
+        }
+        if let readResult {
+            return try readResult.get()
+        }
+        if let coordinationError {
+            throw coordinationError
+        }
+        return try readBounded(url, maxBytes: maxBytes, tooLargeError: tooLargeError)
+    }
+
+    private static func readBounded(
+        _ url: URL,
+        maxBytes: Int,
+        tooLargeError: (Int) -> Error
+    ) throws -> Data {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           size > maxBytes {
+            throw tooLargeError(size)
+        }
+        return try Data(contentsOf: url)
     }
 }

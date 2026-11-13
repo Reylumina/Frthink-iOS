@@ -78,13 +78,14 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         context.coordinator.appliedRevision = revision
         // 委托最后挂：上面这些初始设置不该回调进 SwiftUI 的状态。
         view.delegate = context.coordinator
-        context.coordinator.parent.onUndoManagerReady?(view.undoManager)
+        context.coordinator.reportUndoManagerIfNeeded(view.undoManager)
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         // 视图重建后委托手里还握着旧的 Binding，每次都换新。
         context.coordinator.parent = self
+        context.coordinator.reportUndoManagerIfNeeded(uiView.undoManager)
 
         if uiView.isEditable != isEditable {
             uiView.isEditable = isEditable
@@ -94,7 +95,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
                 // 从阅读切到编辑时直接弹键盘，少一次“再点一下正文”的动作。
                 // 放到下一轮 runloop，等 isEditable 生效后再成为 first responder。
                 DispatchQueue.main.async {
-                    guard uiView.isEditable else { return }
+                    guard uiView.isEditable, uiView.window != nil else { return }
                     uiView.becomeFirstResponder()
                 }
             }
@@ -149,10 +150,17 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         private var pendingCursor: Task<Void, Never>?
         /// 是否有还没提交给 session 的输入。没有就不必重复提交同一份文本。
         private var hasPendingText = false
+        private weak var lastReportedUndoManager: UndoManager?
 
         init(_ parent: ManuscriptTextEditor) {
             self.parent = parent
             super.init()
+        }
+
+        func reportUndoManagerIfNeeded(_ manager: UndoManager?) {
+            guard let manager, manager !== lastReportedUndoManager else { return }
+            lastReportedUndoManager = manager
+            parent.onUndoManagerReady?(manager)
         }
 
         /// 外部替换文字前取消挂起的提交，免得把旧文字又写回去。

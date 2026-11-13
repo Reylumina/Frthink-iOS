@@ -43,13 +43,14 @@ struct ArchiveImportFlowView: View {
             isPresented: Binding(
                 get: { controller.pendingProjectImport != nil },
                 set: { if !$0 { controller.clearPendingProjectImport() } }
-            )
-        ) {
+            ),
+            presenting: controller.pendingProjectImport
+        ) { pending in
             Button("取消", role: .cancel) { cancel() }
             Button("覆盖并导入", role: .destructive) {
-                controller.confirmProjectOverride()
+                controller.confirmProjectOverride(pending)
             }
-        } message: {
+        } message: { _ in
             Text(overrideMessage)
         }
         .alert(
@@ -57,13 +58,14 @@ struct ArchiveImportFlowView: View {
             isPresented: Binding(
                 get: { controller.pendingFullRestore != nil },
                 set: { if !$0 { controller.clearPendingFullRestore() } }
-            )
-        ) {
+            ),
+            presenting: controller.pendingFullRestore
+        ) { backup in
             Button("取消", role: .cancel) { cancel() }
             Button("恢复", role: .destructive) {
-                controller.confirmFullRestore()
+                controller.confirmFullRestore(backup)
             }
-        } message: {
+        } message: { _ in
             Text(fullRestoreMessage)
         }
     }

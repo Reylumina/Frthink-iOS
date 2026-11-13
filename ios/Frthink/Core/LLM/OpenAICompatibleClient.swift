@@ -172,6 +172,10 @@ final class OpenAICompatibleClient: LLMClient {
                                 ?? chunk.content
                                 ?? chunk.text
                             let reasoning = delta?.reasoning_content
+                                ?? delta?.reasoning
+                                ?? delta?.analysis
+                                ?? delta?.thinking
+                                ?? delta?.thought
                                 ?? chunk.reasoning_content
                                 ?? chunk.reasoning
                                 ?? chunk.analysis
@@ -224,6 +228,8 @@ final class OpenAICompatibleClient: LLMClient {
                     continuation.yield(.finished(reason: finishReason))
                     continuation.finish()
                 } catch is CancellationError {
+                    continuation.finish(throwing: LLMError.cancelled)
+                } catch let urlError as URLError where urlError.code == .cancelled {
                     continuation.finish(throwing: LLMError.cancelled)
                 } catch {
                     continuation.finish(throwing: error)
@@ -353,9 +359,18 @@ final class OpenAICompatibleClient: LLMClient {
             throw LLMError.emptyResponse(detail: Self.clip(raw))
         }
         // 正文或思考，有一样就算这条链路是通的。
-        let text = choice.message?.content ?? ""
+        let message = choice.message
+        let text = message?.content
+            ?? message?.text
+            ?? message?.output_text
+            ?? ""
         if !text.isEmpty { return text }
-        let reasoning = choice.message?.reasoning_content ?? ""
+        let reasoning = message?.reasoning_content
+            ?? message?.reasoning
+            ?? message?.analysis
+            ?? message?.thinking
+            ?? message?.thought
+            ?? ""
         if !reasoning.isEmpty { return reasoning }
         throw LLMError.emptyResponse(detail: Self.clip(raw))
     }
@@ -386,6 +401,10 @@ final class OpenAICompatibleClient: LLMClient {
                 let text: String?
                 let output_text: String?
                 let reasoning_content: String?
+                let reasoning: String?
+                let analysis: String?
+                let thinking: String?
+                let thought: String?
                 let stop_reason: String?
             }
             let delta: Delta?

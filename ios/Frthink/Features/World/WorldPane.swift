@@ -67,6 +67,7 @@ struct WorldPane: View {
 
     /// 状态行最小高度，跟随 Dynamic Type。
     @ScaledMetric(relativeTo: .footnote) private var statusSlotHeight: CGFloat = 36
+    @ScaledMetric(relativeTo: .footnote) private var statusIconWidth: CGFloat = 16
 
     init(session: ProjectSession) {
         self.session = session
@@ -160,7 +161,7 @@ struct WorldPane: View {
         } else if busy != nil || statusMessage != nil || lastRawResponse != nil {
             HStack(spacing: Theme.Spacing.s) {
                 statusIcon
-                    .frame(width: 16)
+                    .frame(width: statusIconWidth)
 
                 if busy == nil, statusMessage == nil, lastRawResponse != nil {
                     Button {

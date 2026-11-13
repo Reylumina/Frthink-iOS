@@ -16,6 +16,7 @@ struct SettingsLongTermRulesPage: View {
     @State private var updatedAt: Int64 = 0
     @State private var revisionCount = 0
     @State private var pendingRestore = false
+    @State private var reloadGeneration = 0
 
     var body: some View {
         Form {
@@ -76,7 +77,8 @@ struct SettingsLongTermRulesPage: View {
             }
             await reloadRules()
         }
-        .onChange(of: selectedProjectID) { _, _ in
+        .onChange(of: selectedProjectID) { oldValue, newValue in
+            guard oldValue != nil, oldValue != newValue else { return }
             Task { await reloadRules() }
         }
         .confirmationDialog(
@@ -104,6 +106,8 @@ struct SettingsLongTermRulesPage: View {
     /// 走会话读，刚改完还在防抖窗口里时也能看到最新内容。
     @MainActor
     private func reloadRules() async {
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
         guard let project = selectedProject else {
             session = nil
             rules = ""
@@ -112,6 +116,7 @@ struct SettingsLongTermRulesPage: View {
             return
         }
         let loaded = await store.openSessionAsync(for: project)
+        guard generation == reloadGeneration else { return }
         session = loaded
         let world = loaded.payload.world
         rules = world.longTermRules.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -195,8 +200,8 @@ struct LongTermRulesEditorPage: View {
                 }
             }
             .onDisappear {
-                // 只有「保存」没有「取消」：左滑返回时自动存下非空改动。
-                guard !saved, !trimmedText.isEmpty, trimmedText != initialText else { return }
+                // 只有「保存」没有「取消」：左滑返回时自动存下改动（包括清空）。
+                guard !saved, trimmedText != initialText else { return }
                 onSave(trimmedText)
             }
     }

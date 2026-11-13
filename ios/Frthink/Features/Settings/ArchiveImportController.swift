@@ -195,16 +195,16 @@ final class ArchiveImportController {
 
     // MARK: - 确认
 
-    func confirmProjectOverride() {
-        guard let pending = pendingProjectImport else { return }
+    func confirmProjectOverride(_ overridePending: PendingProjectImport? = nil) {
+        guard let pending = overridePending ?? pendingProjectImport else { return }
         pendingProjectImport = nil
         runConfirmTask { controller in
             try await controller.restore(pending.projects)
         }
     }
 
-    func confirmFullRestore() {
-        guard let backup = pendingFullRestore else { return }
+    func confirmFullRestore(_ overrideBackup: FrthinkArchive.DecodedFullBackup? = nil) {
+        guard let backup = overrideBackup ?? pendingFullRestore else { return }
         pendingFullRestore = nil
         runConfirmTask { controller in
             try await controller.restore(backup.projects)
@@ -405,28 +405,17 @@ final class ArchiveImportController {
 /// 写入」的状态协调给读取方，直接 `Data(contentsOf:)` 在这些文件上可能永久等待。
 /// 不支持协调的提供方退回直接读取。
 private enum ArchiveFileReader {
+    private static let maxArchiveBytes = 200 * SecurityScopedFileReader.bytesPerMiB
+
     static func read(_ url: URL) throws -> Data {
-        var coordinationError: NSError?
-        var readResult: Result<Data, Error>?
-        NSFileCoordinator().coordinate(
-            readingItemAt: url,
-            options: [],
-            error: &coordinationError
-        ) { readableURL in
-            readResult = Result { try Data(contentsOf: readableURL) }
-        }
-        if let readResult {
-            return try readResult.get()
-        }
-        if coordinationError == nil {
-            return try Data(contentsOf: url)
-        }
         do {
-            return try Data(contentsOf: url)
+            return try SecurityScopedFileReader.read(url, maxBytes: maxArchiveBytes) { _ in
+                FrthinkArchiveError.importUnreadable("存档文件过大（超过 200 MB），无法导入")
+            }
+        } catch let error as FrthinkArchiveError {
+            throw error
         } catch {
-            throw FrthinkArchiveError.importUnreadable(
-                "无法读取文件：\(coordinationError?.localizedDescription ?? error.localizedDescription)"
-            )
+            throw FrthinkArchiveError.importUnreadable("无法读取文件：\(error.localizedDescription)")
         }
     }
 }

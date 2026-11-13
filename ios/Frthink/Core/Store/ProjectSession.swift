@@ -61,6 +61,8 @@ final class ProjectSession {
     private var chapterScanTask: Task<Void, Never>?
     /// 章节扫描的代号。后发起的扫描结果才允许写回，避免慢任务覆盖新书。
     private var chapterScanGeneration = 0
+    /// 保存代号：replaceLoadedState 递增后，旧后台保存任务不得回写当前会话状态。
+    @ObservationIgnored private var saveGeneration = 0
     /// 防抖窗口。正文是边打边存的，2 秒足够合并连续输入，也给背景编码留出空档。
     private let debounceInterval: Duration = .seconds(2)
     /// 正文密文是否已解密进内存。打开书时只读 body.meta，编辑/阅读/请求时才置 true。
@@ -157,6 +159,7 @@ final class ProjectSession {
             return
         }
         window.text = text
+        window.totalLength = window.start + (text as NSString).length
         editorWindow = window
         bodyDirty = true
         manuscriptCharacterCount = window.prefixCharacterCount + text.count
@@ -176,17 +179,22 @@ final class ProjectSession {
         let pageSize = meta.pageSize ?? FileStore.bodyPageSize
         let targetPage = min(max(0, offset / pageSize), pageCount - 1)
         guard targetPage < current.startPage else { return }
-        var text = ""
-        for index in targetPage..<pageCount {
+        // 只从磁盘补读前面新增的页，保留当前窗口里尚未落盘的编辑内容。
+        var earlierText = ""
+        for index in targetPage..<current.startPage {
             guard let page = store.loadBodyPage(project.id, index: index) else { return }
-            text += page
+            earlierText += page
         }
+        let combined = earlierText + current.text
+        let earlierUTF16 = (earlierText as NSString).length
+        let newStart = max(0, current.start - earlierUTF16)
+        let newTotalLength = newStart + (combined as NSString).length
         editorWindow = EditorWindowState(
             startPage: targetPage,
-            start: targetPage * pageSize,
-            text: text,
-            prefixCharacterCount: max(0, meta.characterCount - text.count),
-            totalLength: meta.utf16Length
+            start: newStart,
+            text: combined,
+            prefixCharacterCount: max(0, current.prefixCharacterCount - earlierText.count),
+            totalLength: newTotalLength
         )
         // 窗口文本换了，编辑器要重灌一次。
         manuscriptRevision += 1
@@ -300,7 +308,17 @@ final class ProjectSession {
             return
         }
         guard !bodyLoaded else { return }
-        let text = store.loadBody(project.id)?.text ?? payload.manuscript
+        let text: String
+        switch store.loadBodyResult(project.id) {
+        case .loaded(let doc):
+            text = doc.text
+        case .missing:
+            text = payload.manuscript
+        case .corrupted:
+            isReadOnly = true
+            onSaveError?("「\(project.title)」的正文无法解密或页文件缺失，已按只读打开，当前修改不会写回磁盘。")
+            return
+        }
         payload.manuscript = text
         bodyLoaded = true
         manuscriptCharacterCount = text.count
@@ -466,6 +484,8 @@ final class ProjectSession {
         let bodySnapshot: String? = (kind == .payloadOnly || windowSnapshot != nil)
             ? nil
             : ((bodyLoaded || bodyDirty) ? payload.manuscript : nil)
+        let hadBodyDirty = bodyDirty
+        let generation = saveGeneration
         if kind != .payloadOnly {
             bodyDirty = false
             if let windowSnapshot {
@@ -541,7 +561,7 @@ final class ProjectSession {
                 }
             }
             await MainActor.run {
-                guard let self else { return }
+                guard let self, self.saveGeneration == generation else { return }
                 if savedBody { self.lastSavedManuscript = bodySnapshot }
                 if let savedMeta {
                     self.bodyBlocks = savedMeta.blocks
@@ -553,6 +573,7 @@ final class ProjectSession {
                 self.resumeSaveWaiters()
                 if let firstError {
                     // 保持 dirty，但不再自动重试：磁盘满时每 2 秒重试只会更糟。
+                    if hadBodyDirty { self.bodyDirty = true }
                     self.isDirty = true
                     self.queuedSaveKind = nil
                     self.onSaveError?("保存失败：\(firstError.localizedDescription)")
@@ -894,6 +915,7 @@ final class ProjectSession {
         chapterScanTask?.cancel()
         chapterScanTask = nil
         chapterScanGeneration &+= 1
+        saveGeneration &+= 1
         saveInFlight = false
         savesQuiesced = false
         resumeSaveWaiters()

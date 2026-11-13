@@ -8,19 +8,13 @@ import Security
 enum Keychain {
     private static let service = "com.frthink.app.apikey"
 
-    static func set(_ value: String, for account: String) {
-        let data = Data(value.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(query as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = query
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+    @discardableResult
+    static func set(_ value: String, for account: String) -> Bool {
+        guard !value.isEmpty else {
+            let status = delete(service: service, account: account)
+            return status == errSecSuccess || status == errSecItemNotFound
+        }
+        return upsert(service: service, account: account, data: Data(value.utf8)) == errSecSuccess
     }
 
     static func get(_ account: String) -> String? {
@@ -60,22 +54,51 @@ enum Keychain {
     private static let payloadService = "com.frthink.app.payload"
     private static let payloadAccount = "master"
 
-    static func setPayloadKey(_ value: Data) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: payloadService,
-            kSecAttrAccount as String: payloadAccount,
-        ]
-        SecItemDelete(query as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = query
-        add[kSecValueData as String] = value
-        // 后台保存可能在锁屏后发生；AfterFirstUnlock 是能后台写盘的最低档。
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+    enum PayloadKeyStatus {
+        case found(Data)
+        case notFound
+        case failed(OSStatus)
     }
 
-    static func payloadKey() -> Data? {
+    @discardableResult
+    static func setPayloadKey(_ value: Data) -> OSStatus {
+        guard !value.isEmpty else {
+            return delete(service: payloadService, account: payloadAccount)
+        }
+        return upsert(service: payloadService, account: payloadAccount, data: value)
+    }
+
+    private static func upsert(service: String, account: String, data: Data) -> OSStatus {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        // 后台保存可能在锁屏后发生；AfterFirstUnlock 是能后台写盘的最低档。
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecItemNotFound {
+            var add = query
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            return SecItemAdd(add as CFDictionary, nil)
+        }
+        return updateStatus
+    }
+
+    private static func delete(service: String, account: String) -> OSStatus {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        return SecItemDelete(query as CFDictionary)
+    }
+
+    static func readPayloadKey() -> PayloadKeyStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: payloadService,
@@ -85,9 +108,19 @@ enum Keychain {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data
-        else { return nil }
-        return data
+        if status == errSecSuccess, let data = item as? Data {
+            return .found(data)
+        }
+        if status == errSecItemNotFound {
+            return .notFound
+        }
+        return .failed(status)
+    }
+
+    static func payloadKey() -> Data? {
+        if case .found(let data) = readPayloadKey() {
+            return data
+        }
+        return nil
     }
 }

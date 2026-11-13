@@ -58,15 +58,18 @@ final class WriterBodyUndoAction {
         undoManager.setActionName(actionName)
     }
 
-    /// 页面上的「撤销」按钮：走系统栈，和 ⌘Z 同一条路径，撤销/重做一致。
+    /// 页面上的「撤销」按钮：栈顶正好是这次插入时走系统栈，否则只撤回这次插入。
     func undoViaButton() {
-        // 先确认这次插入还是栈顶的回执：已经撤过/正文被整段替换时不再动系统栈，
-        // 否则会把别的动作（例如编辑器的逐字撤销）当成这次插入撤掉。
         guard session.payload.bodyAppendReceipts.last?.id == receipt.id else {
             store.toast = "没有可撤销的插入"
             return
         }
-        undoManager.undo()
+        if undoManager.canUndo, undoManager.undoActionName == actionName {
+            undoManager.undo()
+        } else {
+            undoManager.removeAllActions(withTarget: self)
+            removeInsertion()
+        }
     }
 
     /// 撤销：删掉这次插入，并把重做登记进同一个撤销栈。

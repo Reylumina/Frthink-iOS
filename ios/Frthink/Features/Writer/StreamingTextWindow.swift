@@ -24,16 +24,32 @@ struct StreamingTextWindow {
         }
         // 文本被替换成更短内容时，旧 baseOffset 可能已经越过新结尾。
         if count <= baseOffset {
-            baseOffset = count - maxCharacters
-            return ("…\n" + String(fullText.suffix(maxCharacters)), true)
+            baseOffset = alignedOffset(in: fullText, target: count - maxCharacters)
+            return ("…\n" + String(fullText.dropFirst(baseOffset)), true)
         }
 
         if baseOffset == 0 || count - baseOffset > maxCharacters + trimStep {
-            baseOffset = count - maxCharacters
-            return ("…\n" + String(fullText.suffix(maxCharacters)), true)
+            baseOffset = alignedOffset(in: fullText, target: count - maxCharacters)
+            return ("…\n" + String(fullText.dropFirst(baseOffset)), true)
         }
 
         let suffix = String(fullText.suffix(count - baseOffset))
         return ("…\n" + suffix, false)
+    }
+
+    private static let maxAlignmentLookahead = 500
+
+    /// 尽量对齐到段落边界，避免把行内 `**` / `*` 截成单边标记。
+    private func alignedOffset(in text: String, target: Int) -> Int {
+        let clamped = max(0, min(target, text.count))
+        let start = text.index(text.startIndex, offsetBy: clamped)
+        if let newline = text[start...].firstIndex(of: "\n") {
+            let next = text.index(after: newline)
+            let offset = text.distance(from: text.startIndex, to: next)
+            if offset - clamped <= Self.maxAlignmentLookahead {
+                return offset
+            }
+        }
+        return clamped
     }
 }
