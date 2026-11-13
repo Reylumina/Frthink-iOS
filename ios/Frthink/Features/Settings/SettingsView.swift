@@ -62,7 +62,7 @@ struct SettingsView: View {
                         AppSettingsRow(
                             title: "存档与备份",
                             symbol: "externaldrive",
-                            symbolTint: .teal,
+                            symbolTint: .indigo,
                             symbolFilled: true,
                             detail: "\(store.projects.count) 本"
                         )

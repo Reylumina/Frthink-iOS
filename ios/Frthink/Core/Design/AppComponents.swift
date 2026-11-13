@@ -136,28 +136,29 @@ enum AppTone {
 
 /// 设置行 / 分类入口左侧的图标印章。
 ///
-/// 固定 28pt 是控件尺寸（不是文字），不参与 Dynamic Type；符号本身用 SF Symbol，
-/// 随无障碍设置缩放。
+/// 尺寸走 `@ScaledMetric`（基准 30pt）：系统设置的方块在无障碍字号下也会跟着放大。
+/// 圆角、字形比例对着系统设置量的：22.6% 圆角、50% 字形、medium 字重。
 struct IconTile: View {
     let symbol: String
     var tint: Color = Theme.accent
-    /// 显式尺寸（可选，用于特殊场合）。不传就按 32pt 基准跟随 Dynamic Type 缩放。
+    /// 显式尺寸（可选，用于特殊场合）。不传就按 30pt 基准跟随 Dynamic Type 缩放。
     var size: CGFloat? = nil
     /// 实底 + 白色符号（一级分类用，和 Apple 设置同一个做法）；默认是淡底 + tint 符号。
     var filled: Bool = false
 
-    @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = 32
+    /// 基准 30pt、圆角 22.6%、字形 50%、medium：对着系统设置的方块量的。
+    @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = 30
 
     private var effectiveSize: CGFloat { size ?? baseSize }
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: effectiveSize * 0.46, weight: .semibold))
+            .font(.system(size: effectiveSize * 0.5, weight: .medium))
             .foregroundStyle(filled ? Color.white : tint)
             .frame(width: effectiveSize, height: effectiveSize)
             .background(
                 filled ? tint : tint.opacity(Theme.tintedFillOpacity),
-                in: RoundedRectangle(cornerRadius: effectiveSize * 0.3, style: .continuous)
+                in: RoundedRectangle(cornerRadius: effectiveSize * 0.226, style: .continuous)
             )
             .accessibilityHidden(true)
     }

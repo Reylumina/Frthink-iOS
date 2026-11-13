@@ -92,36 +92,42 @@ struct WorldSettingSection: View {
                 "人物卡",
                 value: "\(session.payload.world.characters.count) 张",
                 symbol: "person.2",
+                tint: .blue,
                 tab: .characters
             )
             materialRow(
                 "世界书",
                 value: "\(session.payload.world.worldbookEntries.count) 条",
                 symbol: "books.vertical",
+                tint: .indigo,
                 tab: .worldbook
             )
             materialRow(
                 "事件卡",
                 value: "\(session.payload.world.events.count) 张",
                 symbol: "list.bullet.rectangle",
+                tint: .orange,
                 tab: .events
             )
             materialRow(
                 "文风笔记",
                 value: "\(WorldRuleTextKind.lineCount(of: session.payload.world.styleNotes)) 行",
                 symbol: "text.magnifyingglass",
+                tint: .purple,
                 tab: .rules
             )
             materialRow(
                 "仿写模板",
                 value: styleTemplateValue,
                 symbol: "doc.text",
+                tint: .pink,
                 tab: .rules
             )
             materialRow(
                 "长期写作规则",
                 value: WorldRuleTextKind.longTermRules.valueLabel(in: session.payload.world),
                 symbol: "list.bullet",
+                tint: .teal,
                 tab: .rules
             )
         }
@@ -137,14 +143,15 @@ struct WorldSettingSection: View {
         _ title: String,
         value: String,
         symbol: String,
+        tint: Color,
         tab: WorldTab
     ) -> some View {
         Button {
             onOpenTab(tab)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                // §2.4：列表行用 Label 对齐图标列，不加有色方块。
-                SettingsLabelRow(title: title, symbol: symbol, detail: value)
+                // §2.4：行首用系统设置那种实底方块，每类资料固定一个色相。
+                SettingsLabelRow(title: title, symbol: symbol, symbolTint: tint, detail: value)
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
             }

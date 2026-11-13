@@ -4,14 +4,16 @@ import UniformTypeIdentifiers
 
 // MARK: - 行
 
-/// 二级、三级页的导航行：系统 `Label` + 行尾的值（DESIGN §2.4、§5.1）。
+/// 二级、三级页的导航行：有色方块图标 + 标题 + 行尾的值（DESIGN §2.4、§5.1）。
 ///
-/// 系统缺的只是「列表行内图标与值两端对齐」这一种排版：`AppSettingsRow` 自带
-/// 有色方块图标，只适合一级分类列表；二级以下改用 `Label`，让 `List` 对齐图标列，
-/// 行尾值仍走 `.body` 次要色。
+/// 行首图标和一级分类一样走 `IconTile`（实底圆角方块 + 白符号），和系统设置
+/// 同一套语法；行尾值走 `.body` 次要色。
 struct SettingsLabelRow: View {
     let title: String
     var symbol: String? = nil
+    /// 行首方块的颜色；同一类资料用同一个色相。默认中性灰，和系统设置里
+    /// 「没有专属色相」的行一致。
+    var symbolTint: Color = .gray
     var detail: String? = nil
 
     var body: some View {
@@ -51,13 +53,11 @@ struct SettingsLabelRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
     private var label: some View {
-        if let symbol {
-            Label(title, systemImage: symbol)
-                .font(Theme.label)
-                .foregroundStyle(.primary)
-        } else {
+        HStack(spacing: Theme.Spacing.m) {
+            if let symbol {
+                IconTile(symbol: symbol, tint: symbolTint, filled: true)
+            }
             Text(title)
                 .font(Theme.label)
                 .foregroundStyle(.primary)

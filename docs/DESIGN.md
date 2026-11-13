@@ -158,7 +158,7 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 - 图标尺寸靠 `.font` 或 `.imageScale` 控制，跟随相邻文字，不用 `.frame` 定尺寸。确实需要固定的控件尺寸时用 `@ScaledMetric`。
 - 字重跟随相邻文字，不单独指定。
 - 默认单色渲染。状态图标可以用 `.symbolRenderingMode(.hierarchical)`。实心变体（`.fill`）只表示「选中 / 当前」或本身就是实心语义的符号（`lock.fill`、`xmark.circle.fill`、`checkmark.circle.fill` 这类），不拿实心做装饰；标签栏由系统处理。
-- 列表行的图标用 `Label(title, systemImage:)`，让 `List` 对齐图标列，不加有色方块底。有色方块（`IconTile`）只用在设置一级分类列表，一屏不超过 6 个；一级分类用实底 + 白色符号（`filled: true`），颜色取 `Theme.Identity`，与其他页面共用同一套图标风格。
+- 列表行的图标一律用 `IconTile`（实底圆角方块 + 白色符号），和系统设置同一种语法：基准 30pt、圆角 22.6%、字形占 50%、medium 字重，尺寸走 `@ScaledMetric`。颜色取系统动态色（`.blue`、`.indigo`、`.orange`、`.purple`、`.pink`、`.teal`、`.gray`），同一类资料固定一个色相；没有专属含义的行用中性灰。AI 服务商图标用品牌标，不套方块。
 - 只有图标的按钮必须设 `accessibilityLabel`。
 - 符号动效（`symbolEffect`）只表达状态，例如生成中用 `.pulse`，不做装饰。
 
