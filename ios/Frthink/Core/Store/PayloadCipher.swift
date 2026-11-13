@@ -64,7 +64,7 @@ enum PayloadCipher {
 
         switch Keychain.readPayloadKey() {
         case .found(let stored):
-            guard stored.count == SymmetricKeySize.bits256.byteCount else {
+            guard stored.count == SymmetricKeySize.bits256.bitCount / 8 else {
                 throw PayloadCipherError.keyUnavailable
             }
             let key = SymmetricKey(data: stored)
