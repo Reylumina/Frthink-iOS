@@ -61,66 +61,6 @@ struct CircleIconButton: View {
     }
 }
 
-// MARK: - 确认弹层
-
-extension View {
-    /// 删除确认弹层（§5.8、§8.2）。只放标题与「删除 / 取消」，不加说明文案。
-    func deleteConfirmationDialog(
-        _ title: String,
-        isPresented: Binding<Bool>,
-        actionTitle: String = "删除",
-        onConfirm: @escaping () -> Void
-    ) -> some View {
-        confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
-            Button(actionTitle, role: .destructive, action: onConfirm)
-            Button("取消", role: .cancel) {}
-        }
-    }
-
-    /// 按待删条目绑定的删除确认弹层（§5.8、§8.2）。
-    func deleteConfirmationDialog<Item>(
-        _ title: @escaping (Item) -> String,
-        item: Binding<Item?>,
-        actionTitle: String = "删除",
-        onConfirm: @escaping (Item) -> Void
-    ) -> some View {
-        confirmationDialog(
-            item.wrappedValue.map(title) ?? "",
-            isPresented: Binding(
-                get: { item.wrappedValue != nil },
-                set: { if !$0 { item.wrappedValue = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(actionTitle, role: .destructive) {
-                guard let target = item.wrappedValue else { return }
-                item.wrappedValue = nil
-                onConfirm(target)
-            }
-            Button("取消", role: .cancel) {
-                item.wrappedValue = nil
-            }
-        }
-    }
-
-    /// 表单未保存退出前的放弃确认。
-    func discardChangesDialog(
-        isPresented: Binding<Bool>,
-        hasChanges: Bool,
-        onDiscard: @escaping () -> Void
-    ) -> some View {
-        interactiveDismissDisabled(hasChanges)
-            .confirmationDialog(
-                "放弃未保存的修改？",
-                isPresented: isPresented,
-                titleVisibility: .visible
-            ) {
-                Button("放弃修改", role: .destructive, action: onDiscard)
-                Button("继续编辑", role: .cancel) {}
-            }
-    }
-}
-
 /// 行内搜索框：36pt 胶囊 + 放大镜 + 清除键（§5.1）。
 ///
 /// 清除键跟胶囊同高，不参与行高：写成 44pt 会让输入文字后整条长高 8pt。

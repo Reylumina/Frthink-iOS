@@ -119,7 +119,7 @@ struct ManuscriptReaderSheet: View {
         }
     }
 
-    private func undoMenu(_ undoState: WriterTextUndoState) -> some View {
+    private func undoMenu(_ undoState: WriterUndoState) -> some View {
         Menu {
             Button {
                 undoState.undo()
