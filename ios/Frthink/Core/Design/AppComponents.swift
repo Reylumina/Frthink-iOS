@@ -141,7 +141,8 @@ enum AppTone {
 struct IconTile: View {
     let symbol: String
     var tint: Color = Theme.accent
-    var size: CGFloat = 28
+    /// 32pt 是这一行里最显眼的元素：28 在一屏六个分类时偏小，读起来像装饰。
+    var size: CGFloat = 32
 
     var body: some View {
         Image(systemName: symbol)

@@ -8,11 +8,14 @@ enum Theme {
 
     // MARK: - 颜色
 
-    /// 系统强调色，全应用唯一的全局 tint。
+    /// 全局 tint。取资产目录里的 AccentColor（墨青），不是系统蓝。
     static let accent = Color.accentColor
 
-    /// 选中态淡底。
-    static let accentSoft = Color(uiColor: .quaternarySystemFill)
+    /// 强调色淡底：选中胶囊、圆钮、图标印章的底色。
+    ///
+    /// 用 tint 压到 12% 而不是中性灰：整屏只有这一个彩色，压在谁底下一看就知道
+    /// 是「可点的主路径」。深浅色由语义色自动派生。
+    static let accentSoft = Theme.accent.opacity(Theme.tintedFillOpacity)
 
     /// 次级表面。
     static let surfaceSecondary = Color(uiColor: .secondarySystemBackground)

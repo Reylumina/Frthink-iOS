@@ -40,7 +40,6 @@ struct WriterComposerBar: View {
             // 三件控件同一条中轴：输入框随行数长高时，两侧按钮跟着居中，
             // 不再按底边对齐：底对齐时圆钮会被玻璃内边距顶高一截。
             HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                continuationButton
                 inputField
                 if controller.isGenerating {
                     // 生成中主操作变成停止（§5.7）。
@@ -85,7 +84,10 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 辅助按钮：续写。图标按输入条的行内高度画，热区仍是 44pt（§5.1）。
+    /// 续写入口：放在输入框胶囊内部，作为行首附件。
+    ///
+    /// 原来它是字段左边一个独立的圆钮，和输入框之间隔着 8pt 空气，视觉上像掉在
+    /// 外面。放进同一颗胶囊后，输入条只剩「一块输入」和「一个发送」两种形状。
     private var continuationButton: some View {
         Button {
             sendContinuation()
@@ -93,8 +95,7 @@ struct WriterComposerBar: View {
             Image(systemName: "wand.and.stars")
                 .font(Font.subheadline.weight(.medium))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                .frame(width: controlSize, height: controlSize)
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
+                .frame(width: controlSize * 0.82, height: controlSize * 0.82)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -103,14 +104,18 @@ struct WriterComposerBar: View {
     }
 
     private var inputField: some View {
-        TextField(inputPlaceholder, text: $model.text, axis: .vertical)
-            .font(Font.body)
-            .lineLimit(1...5)
-            .focused($focused)
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.s)
-            .frame(minHeight: controlSize)
-            .modifier(WriterComposerFieldSurface())
+        HStack(alignment: .center, spacing: Theme.Spacing.xs) {
+            continuationButton
+            TextField(inputPlaceholder, text: $model.text, axis: .vertical)
+                .font(Font.body)
+                .lineLimit(1...5)
+                .focused($focused)
+        }
+        .padding(.leading, Theme.Spacing.s)
+        .padding(.trailing, Theme.Spacing.m)
+        .padding(.vertical, Theme.Spacing.s)
+        .frame(minHeight: controlSize)
+        .modifier(WriterComposerFieldSurface())
     }
 
     /// 草稿只在收键盘/离开页面时落盘。

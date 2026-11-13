@@ -29,7 +29,7 @@ Frthink 应该看起来像 iOS 自带的写作应用：安静、现代、正文�
 
 ### 1.1 语义色
 
-只用语义色。系统强调色 `Color.accentColor`（目前是系统蓝，没有自定义资产）是唯一的全局 tint。
+只用语义色，全局只有一个 tint：`Color.accentColor` 读资产目录的 `AccentColor`（墨青，浅色 #14665F / 深色 #4FC7BC）。系统蓝不再出现——它太饱和，和灰底气泡放在一起会压掉内容。新增颜色一律先改资产目录，不在代码里写色值。
 
 | 用途 | token | 说明 |
 |---|---|---|
@@ -38,7 +38,7 @@ Frthink 应该看起来像 iOS 自带的写作应用：安静、现代、正文�
 | 表单卡片 | `Theme.groupedCard` = `.secondarySystemGroupedBackground` | 由 `Form` / `List` 自动给出，不手画 |
 | 内容页上的表面（卡片、用户气泡以外的容器） | `Theme.card` = `.secondarySystemBackground` | |
 | 输入框、可点的次级容器 | `Theme.field` = `.tertiarySystemFill` | 比卡片深一档，用来区分可点和只读 |
-| 选中态底 | `Theme.accentSoft` = `.quaternarySystemFill` | 前景用 tint |
+| 选中态底 | `Theme.accentSoft` = `accent` 压 12% | 前景用 tint；圆钮、图标印章共用 |
 | 文字 | `.primary`、`.secondary`、`.tertiary` | `.tertiary` 只用于占位符和不可用状态 |
 | 分隔线 | `.separator` | 一般由 `List` 给出 |
 
