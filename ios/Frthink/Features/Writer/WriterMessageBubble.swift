@@ -220,9 +220,7 @@ struct WriterMessageBubble: View {
                         Label("多选", systemImage: "checklist")
                     }
                 } label: {
-                    Image(systemName: "ellipsis")
-                        .font(Font.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    IconTile(symbol: "ellipsis", tint: .gray, filled: true)
                         .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                         .contentShape(Rectangle())
                 }
@@ -244,9 +242,7 @@ struct WriterMessageBubble: View {
         _ action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(Font.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+            IconTile(symbol: symbol, tint: .gray, filled: true)
                 .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
         }

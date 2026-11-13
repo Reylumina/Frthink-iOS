@@ -313,8 +313,8 @@ struct RootView: View {
             } label: {
                 // 这里只放「去书架」这个动作。书名已经在 navigationTitle 上，
                 // 在同一个导航栏里再写一遍等于白占一行。
-                ToolbarCircleIcon(symbol: "books.vertical")
-                    .accessibilityLabel("书架")
+                Label("书架", systemImage: "books.vertical")
+                    .font(Font.subheadline)
             }
         }
         // 右上角原来挂了一个「正在保存」的转圈：自动保存本来就该无感（§5.8），
@@ -327,7 +327,7 @@ struct RootView: View {
             Button {
                 translationVisible = true
             } label: {
-                ToolbarCircleIcon(symbol: "translate")
+                Image(systemName: "translate")
             }
             .disabled(session == nil)
         }

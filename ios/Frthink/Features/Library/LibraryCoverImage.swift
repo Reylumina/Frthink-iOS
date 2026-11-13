@@ -60,8 +60,8 @@ struct LibraryCoverImage: View {
     /// 书本/文稿符号里按书 id 稳定取一枚，同一本书永远同一个标记。
     private var placeholderMark: some View {
         Image(systemName: symbol)
-            // 字形占宽度 62%：50% 时封面上留白太多，图标显得畏缩。
-            .font(.system(size: width * 0.62, weight: .medium))
+            // 字形占宽度 46%：封面是缩略图，图标压过一半就压住了「书脊」的比例。
+            .font(.system(size: width * 0.46, weight: .medium))
             // 占位纸色在深浅两档都是压暗的，图标固定白色，是 §1.4 记下的例外。
             .foregroundStyle(Color.white)
             .accessibilityHidden(true)
@@ -151,20 +151,20 @@ private final class CoverThumbnailCache {
 /// 和纸色一样按书 id 稳定取，同一本书不会每次打开换一个图标。
 /// 纸色在 Theme.Identity，和一级分类图标共用一套。
 private enum ShelfCoverSymbols {
-    /// 只用一眼能读出「书 / 文稿」的简单线稿：不带字、不带嵌套小图。
+    /// 只收纯形状的容器类符号：不带字、不带横线、不带嵌套小图。
     ///
-    /// 之前用 character.book.closed 这类带字的符号，缩到 26pt 就糊成一团。
+    /// 带「字」或文字行的符号缩到 30pt 就糊成一团，一眼看不出是图标。
     private static let symbols: [String] = [
         "book.closed",
         "book.pages",
         "books.vertical",
-        "doc.text",
-        "doc.plaintext",
-        "newspaper",
-        "note.text",
-        "text.book.closed",
-        "doc.richtext",
         "book",
+        "doc",
+        "square.stack",
+        "rectangle.stack",
+        "folder",
+        "archivebox",
+        "tray",
     ]
 
     static func symbol(for seed: String) -> String {

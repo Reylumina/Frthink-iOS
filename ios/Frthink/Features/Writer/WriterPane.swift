@@ -225,7 +225,7 @@ struct WriterPane: View {
                 Button {
                     openSheet(.manuscript)
                 } label: {
-                    ToolbarCircleIcon(symbol: "doc.text")
+                    Image(systemName: "doc.text")
                 }
                 .disabled(controller.isBusy)
                 .accessibilityLabel("正文")
@@ -233,7 +233,7 @@ struct WriterPane: View {
                 Menu {
                     writerMenu
                 } label: {
-                    ToolbarCircleIcon(symbol: "ellipsis")
+                    Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("更多写作操作")
             }
