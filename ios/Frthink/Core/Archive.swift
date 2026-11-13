@@ -1432,14 +1432,14 @@ enum FrthinkArchive {
                 .first { $0.id == settings.translationProviderID }?
                 .resolvedModel ?? ""
             dict["baseUrl"] = provider?.baseURLForDisplay ?? ""
-            dict["apiKey"] = provider?.apiKey ?? ""
+            dict["apiKey"] = ""
             dict["temperature"] = provider?.temperature ?? 0.2
             dict["maxTokens"] = provider?.maxTokens ?? 4_096
             dict["useStream"] = true
             dict["owner"] = settings.ownerID
             dict["corpusEnabled"] = settings.corpusEnabled
             dict["writingFontSize"] = Int(settings.bodyFontSize)
-            dict["readingFontSize"] = Int(settings.readerFontSize)
+            dict["readingFontSize"] = Int(settings.bodyFontSize)
             dict["skills"] = settings.skills.map {
                 [
                     "id": $0.id,
