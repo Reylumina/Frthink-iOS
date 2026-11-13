@@ -70,7 +70,8 @@ struct StreamingTextView: UIViewRepresentable {
         )
         let oldString = uiView.attributedText?.string ?? "" as String
         let newString = newAttributed.string
-        if oldString != newString {
+        let changed = oldString != newString
+        if changed {
             let oldNS = oldString as NSString
             let newNS = newString as NSString
             let maxCommon = min(oldNS.length, newNS.length)
@@ -87,8 +88,11 @@ struct StreamingTextView: UIViewRepresentable {
             uiView.textStorage.endEditing()
         }
         coordinator.appliedText = rendered
-        // 先让下一次测量拿到新高度，再由 SwiftUI 收这一帧。
-        uiView.invalidateIntrinsicContentSize()
+        // 只有真的变了才重新测量：每帧都 invalidate 会让 SwiftUI 反复比对高度，
+        // 表现为整块文字轻微抖动。
+        if changed {
+            uiView.invalidateIntrinsicContentSize()
+        }
     }
 
     func sizeThatFits(
@@ -156,10 +160,10 @@ struct StreamingTextView: UIViewRepresentable {
                     attributes: heading
                 ))
             } else {
-                for (run, isBold) in Self.inlineRuns(paragraphText) {
+                for (run, style) in Self.inlineRuns(paragraphText) {
                     var attributes = body
-                    if isBold {
-                        attributes[.font] = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+                    if style != .normal {
+                        attributes[.font] = Self.font(size: fontSize, style: style)
                     }
                     result.append(NSAttributedString(string: run, attributes: attributes))
                 }
@@ -168,38 +172,54 @@ struct StreamingTextView: UIViewRepresentable {
         return result
     }
 
-    /// 把一段按 `**` 切成普通/加粗两种 run，标记本身不显示。
+    /// 段内的行内样式。
+    private enum RunStyle { case normal, bold, italic }
+
+    /// 把一段按 `**` 和 `*` 切成带样式的 run，标记本身不显示。
     ///
-    /// 生成中就按这个排版，用户不用等到结束才看到加粗。
-    private static func inlineRuns(_ text: String) -> [(String, Bool)] {
-        guard text.contains("**") else { return [(text, false)] }
-        var runs: [(String, Bool)] = []
+    /// 生成中就按这个排版：`**` 与 `*` 都会在到达时立刻变成字形，不会先露出字面量
+    /// 再突然变形——那正是流式看起来「一跳一跳」的来源。
+    private static func inlineRuns(_ text: String) -> [(String, RunStyle)] {
+        guard text.contains("*") else { return [(text, .normal)] }
+        var runs: [(String, RunStyle)] = []
         var buffer = ""
         var isBold = false
+        var isItalic = false
+
+        func flush() {
+            guard !buffer.isEmpty else { return }
+            let style: RunStyle = isBold ? .bold : (isItalic ? .italic : .normal)
+            runs.append((buffer, style))
+            buffer = ""
+        }
+
         var index = text.startIndex
         while index < text.endIndex {
             if text[index...].hasPrefix("**") {
-                if !buffer.isEmpty {
-                    runs.append((buffer, isBold))
-                    buffer = ""
-                }
+                flush()
                 isBold.toggle()
                 index = text.index(index, offsetBy: 2)
+            } else if text[index] == "*" {
+                flush()
+                isItalic.toggle()
+                index = text.index(after: index)
             } else {
                 buffer.append(text[index])
                 index = text.index(after: index)
             }
         }
-        if !buffer.isEmpty {
-            runs.append((buffer, isBold))
-        }
-        // 奇数个标记：最后一个没有配对，按普通文本渲染，别把标记吞掉当加粗。
-        if isBold {
-            runs.append(("**", false))
-        }
+        flush()
         return runs
     }
 
+    /// 行内样式对应的字体。
+    private static func font(size: CGFloat, style: RunStyle) -> UIFont {
+        let base = UIFont.systemFont(ofSize: size, weight: .regular)
+        guard let descriptor = base.fontDescriptor.withSymbolicTraits(
+            style == .bold ? .traitBold : (style == .italic ? .traitItalic : [])
+        ) else { return UIFont.systemFont(ofSize: size, weight: .bold) }
+        return UIFont(descriptor: descriptor, size: size)
+    }
     /// 标题相对正文的缩放，和完成态气泡保持同一组数字。
     private static func headingScale(_ level: Int) -> CGFloat {
         switch level {

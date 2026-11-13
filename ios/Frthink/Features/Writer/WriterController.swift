@@ -91,21 +91,22 @@ final class WriterController {
     /// 落盘间隔：只为防崩溃丢字，不驱动界面。
     private let flushInterval: Duration = .seconds(3)
 
-    /// 界面刷新间隔：默认 60ms（约 16 帧/秒），低电量/机身过热时自动降频。
+    /// 界面刷新间隔：默认 33ms（约 30 帧/秒），低电量/机身过热时自动降频。
     ///
-    /// 社区实践（Tanay Shah《Why Your iOS Streaming Chat Is Cooking the GPU》）
-    /// 与 Apple 的省电/热管理建议一致：设备状态差时少做无谓的排版，
-    /// 把 GPU/CPU 留给真正的前台交互。
+    /// 60ms 时一个字块一次跳三四个字，看起来是一跳一跳的；33ms 接近一次刷新
+    /// 补两三个字，观感接近逐字。设备状态差时少做无谓的排版——社区实践
+    /// （Tanay Shah《Why Your iOS Streaming Chat Is Cooking the GPU》）与 Apple 的
+    /// 省电/热管理建议一致。
     private var displayInterval: Duration {
         let info = ProcessInfo.processInfo
         if info.isLowPowerModeEnabled { return .milliseconds(100) }
         switch info.thermalState {
         case .serious, .critical:
-            return .milliseconds(90)
+            return .milliseconds(80)
         case .fair:
-            return .milliseconds(70)
+            return .milliseconds(50)
         default:
-            return .milliseconds(60)
+            return .milliseconds(33)
         }
     }
 
