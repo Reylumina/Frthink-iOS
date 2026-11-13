@@ -21,7 +21,7 @@ struct LibraryContinueRow: View {
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text(project.shelfTitle)
-                        .font(Theme.bookTitle)
+                        .font(Theme.labelEmphasis)
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -70,7 +70,7 @@ struct LibraryProjectRow: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.s) {
                         Text(project.shelfTitle)
-                            .font(Theme.bookTitle)
+                            .font(Theme.label.weight(.semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 

@@ -783,7 +783,7 @@ struct WriterPane: View {
     private var titleLabel: some View {
         VStack(spacing: 1) {
             Text(session.project.title)
-                .font(Theme.bookTitle)
+                .font(Font.headline)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Text(modelLabel)

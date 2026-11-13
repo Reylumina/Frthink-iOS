@@ -75,12 +75,7 @@ enum Theme {
     /// 标题。
     static let heading = Font.title3.weight(.semibold)
 
-    /// 书名的衬线字体。
-    ///
-    /// 用系统自带的宋体（Songti SC），不是 `.serif`：iOS 的 serif 设计只在拉丁
-    /// 字符上映射到 New York，中文仍走 PingFang，看上去还是黑体。宋体在 iOS 上
-    /// 是预装字体，不需要打包；缺字体时 SwiftUI 会退回系统字体，不会崩。
-    static let bookTitle = Font.custom("Songti SC", size: 17, relativeTo: .headline)
+
 
     /// 界面文字。无衬线、系统字号。
     static let label = Font.body
