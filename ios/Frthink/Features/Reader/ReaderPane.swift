@@ -291,7 +291,9 @@ struct ReaderPane: View {
 
     private var readingSurface: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            // 段距压到 8pt：和创作页气泡同一量级，正文读起来是连续的一段文字，
+            // 不是一堆被拉开的独立段落。
+            LazyVStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 if document.blocks.isEmpty {
                     if isLoadingDocument {
                         loadingState

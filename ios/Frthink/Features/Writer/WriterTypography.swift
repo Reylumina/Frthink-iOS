@@ -36,7 +36,10 @@ enum WriterTypography {
     /// 段距跟着字号走：行距是 0.6 倍字号，段距要比它明显大一截，
     /// 否则段落和折行看起来一样（0.9 倍在默认字号下约 16pt）。
     static func paragraphSpacing(size: CGFloat) -> CGFloat {
-        max(Theme.Spacing.l, size * 0.9)
+        // 0.45 倍字号（默认字号约 8pt）：正文是小说，段与段靠行距和留白分开就够，
+        // 0.9 倍已经接近一整行的间距，一屏能读的字被压掉一成多，读起来断断续续。
+        // 流式期间段距另算 0（内容还在长，段距会把已上屏的字反复往下推）。
+        max(Theme.Spacing.s, size * 0.45)
     }
 
     /// 把正文拆成段落：按行拆、丢掉空行、去掉首尾空白。
