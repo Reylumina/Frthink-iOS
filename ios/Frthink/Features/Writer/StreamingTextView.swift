@@ -61,12 +61,21 @@ struct StreamingTextView: UIViewRepresentable {
 
         if !result.reset, rendered.hasPrefix(coordinator.appliedText) {
             let suffix = String(rendered.dropFirst(coordinator.appliedText.count))
-            if !suffix.isEmpty {
+            // 新增的这几个字里出现标题标记或加粗标记时，整段重排：按后缀单独排
+            // 会把「## 第三章」当正文，也接不上跨后缀的 ** 配对。
+            let needsFullRender = suffix.contains("#") || suffix.contains("**")
+            if !suffix.isEmpty, !needsFullRender {
                 uiView.textStorage.append(Self.attributed(
                     suffix,
                     fontSize: fontSize,
                     lineSpacing: lineSpacing
                 ))
+            } else if needsFullRender {
+                uiView.attributedText = Self.attributed(
+                    rendered,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing
+                )
             }
         } else {
             uiView.attributedText = Self.attributed(
@@ -119,14 +128,78 @@ struct StreamingTextView: UIViewRepresentable {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
         paragraph.paragraphSpacing = WriterTypography.paragraphSpacing(size: fontSize)
-        let normalized = WriterTypography.paragraphs(text).joined(separator: "\n")
-        return NSAttributedString(
-            string: normalized,
-            attributes: [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: paragraph,
-            ]
-        )
+
+        let body: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: paragraph,
+        ]
+
+        // 逐段排版：一到三级标题按字号和字重区分，行首的 # 去掉。
+        // 和完成态气泡用同一组缩放（1.45 / 1.26 / 1.12），换气泡时高度不跳。
+        let paragraphs = WriterTypography.paragraphs(text)
+        let result = NSMutableAttributedString()
+        for (index, paragraphText) in paragraphs.enumerated() {
+            if index > 0 {
+                result.append(NSAttributedString(string: "\n", attributes: body))
+            }
+            if let level = MarkdownInline.headingLevel(paragraphText) {
+                var heading = body
+                heading[.font] = UIFont.systemFont(
+                    ofSize: fontSize * Self.headingScale(level),
+                    weight: .semibold
+                )
+                result.append(NSAttributedString(
+                    string: MarkdownInline.strippingHeadingMarker(paragraphText),
+                    attributes: heading
+                ))
+            } else {
+                for (run, isBold) in Self.inlineRuns(paragraphText) {
+                    var attributes = body
+                    if isBold {
+                        attributes[.font] = UIFont.systemFont(ofSize: fontSize, weight: .bold)
+                    }
+                    result.append(NSAttributedString(string: run, attributes: attributes))
+                }
+            }
+        }
+        return result
+    }
+
+    /// 把一段按 `**` 切成普通/加粗两种 run，标记本身不显示。
+    ///
+    /// 生成中就按这个排版，用户不用等到结束才看到加粗。
+    private static func inlineRuns(_ text: String) -> [(String, Bool)] {
+        guard text.contains("**") else { return [(text, false)] }
+        var runs: [(String, Bool)] = []
+        var buffer = ""
+        var isBold = false
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index...].hasPrefix("**") {
+                if !buffer.isEmpty {
+                    runs.append((buffer, isBold))
+                    buffer = ""
+                }
+                isBold.toggle()
+                index = text.index(index, offsetBy: 2)
+            } else {
+                buffer.append(text[index])
+                index = text.index(after: index)
+            }
+        }
+        if !buffer.isEmpty {
+            runs.append((buffer, isBold))
+        }
+        return runs
+    }
+
+    /// 标题相对正文的缩放，和完成态气泡保持同一组数字。
+    private static func headingScale(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 1.45
+        case 2: return 1.26
+        default: return 1.12
+        }
     }
 }
