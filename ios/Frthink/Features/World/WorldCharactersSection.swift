@@ -151,7 +151,7 @@ struct WorldCharactersSection: View {
                     .font(Font.footnote)
             }
             .foregroundStyle(isActionDisabled ? Color.secondary : Theme.accent)
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Rectangle())
         }
         .disabled(isActionDisabled)
@@ -186,7 +186,7 @@ struct WorldCharactersSection: View {
             }
             .font(Font.footnote)
             .foregroundStyle(.secondary)
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Rectangle())
         }
         .accessibilityLabel("分组筛选")

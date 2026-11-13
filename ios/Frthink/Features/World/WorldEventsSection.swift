@@ -68,7 +68,7 @@ struct WorldEventsSection: View {
             .frame(minHeight: controlSize)
             .background(Theme.field, in: Capsule())
             // 可见高度 36pt，热区补到 44pt（§5.1）。
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

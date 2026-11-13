@@ -61,7 +61,7 @@ struct SettingsConnectionPage: View {
                 )
             }
             .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
 
             Button {
                 testActiveConnection()
@@ -76,7 +76,7 @@ struct SettingsConnectionPage: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
             .disabled(isTesting || store.settings.activeProvider == nil)
 
@@ -306,7 +306,7 @@ struct TranslationProviderPicker: View {
                 }
             }
             .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
         }
         .buttonStyle(.plain)
     }
@@ -363,7 +363,7 @@ private struct ConnectionProviderRow: View {
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
         }
         .buttonStyle(.plain)
         .swipeActions(edge: .leading) {

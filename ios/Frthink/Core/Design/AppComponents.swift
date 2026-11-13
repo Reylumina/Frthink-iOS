@@ -294,7 +294,7 @@ struct AppValueRow: View {
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
-        .frame(minHeight: Theme.Layout.hitTarget)
+        .frame(minHeight: Theme.Layout.rowContentHeight)
     }
 }
 

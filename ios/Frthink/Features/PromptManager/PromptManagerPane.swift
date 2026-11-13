@@ -158,7 +158,7 @@ struct PromptManagerPane: View {
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
         }
-        .frame(minHeight: Theme.Layout.hitTarget)
+        .frame(minHeight: Theme.Layout.rowContentHeight)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 pendingDelete = skill
@@ -298,7 +298,7 @@ struct PromptManagerPane: View {
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
         }
     }
 

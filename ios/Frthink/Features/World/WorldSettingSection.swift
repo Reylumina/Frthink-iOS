@@ -65,7 +65,7 @@ struct WorldSettingSection: View {
                             )
                         }
                     }
-                    .frame(minHeight: Theme.Layout.hitTarget)
+                    .frame(minHeight: Theme.Layout.rowContentHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

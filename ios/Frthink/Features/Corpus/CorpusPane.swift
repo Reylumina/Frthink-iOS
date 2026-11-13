@@ -398,7 +398,7 @@ private struct CorpusFilterMenuRow: View {
                     .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
         }
     }
 }

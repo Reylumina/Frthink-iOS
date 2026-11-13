@@ -129,7 +129,7 @@ struct UniversePane: View {
                 }
             }
         }
-        .frame(minHeight: Theme.Layout.hitTarget)
+        .frame(minHeight: Theme.Layout.rowContentHeight)
         .themeAnimation(Theme.motionSelection, value: entry.enabled)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {

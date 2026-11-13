@@ -30,7 +30,7 @@ struct SettingsStorageSection: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
             .disabled(!measured && bytes == 0)
         } header: {
@@ -105,7 +105,7 @@ struct SettingsTokenUsageSection: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-                .frame(minHeight: Theme.Layout.hitTarget)
+                .frame(minHeight: Theme.Layout.rowContentHeight)
             }
         } header: {
             AppSectionHeader(title: "Token 用量")

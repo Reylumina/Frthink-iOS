@@ -263,7 +263,7 @@ HStack {
 - 不给文字写死 `.frame(width:height:)`，Dynamic Type 放大时会裁字。图标、封面、控件可以有固定尺寸，但要用 `@ScaledMetric`。
 - 可点目标的热区至少 44×44pt。图标按钮看起来可以小，热区用 `.frame(minWidth: 44, minHeight: 44)` 加 `.contentShape(Rectangle())` 扩大，不能只放大图标。
 - 同一行里的控件可见高度统一成 `Theme.Layout.controlHeight`（36pt）：搜索框、次要操作胶囊、圆形图标按钮。圆形按钮按 36pt 画圆，外面再包一层 44pt 的透明框，所以行高是 44、视觉是 36，三者对齐。
-- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。带图标印章的行用 `Theme.Layout.rowContentHeight`（28pt），实测（1206×2622 模拟器截图）从 198px/行收到 143px/行，即 66pt → 47.7pt，整行可点，热区够。行内边距仍交给系统（§3.1）。
+- 列表行不设 44pt 的**内容**最小高度：行高 = 行内容 + 系统内边距。iOS 26 的系统内边距是 22–30pt，行内容写成 44 会让行高变成 66–74pt，设置页六行就多占一屏。列表行内容一律用 `Theme.Layout.rowContentHeight`（28pt）——包括只读数值行、开关行、章节行、语料行；44pt 是行总高，由系统内边距补足，不要在行内写 `hitTarget`（28pt），实测（1206×2622 模拟器截图）从 198px/行收到 143px/行，即 66pt → 47.7pt，整行可点，热区够。行内边距仍交给系统（§3.1）。
 - `controlHeight`、`inlineControl` 这些控件尺寸是基准值，视图里用 `@ScaledMetric(relativeTo: .body)` 读，随字号一起放大（§2.4）。
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
