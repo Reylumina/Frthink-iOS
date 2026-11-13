@@ -7,8 +7,8 @@
 import SwiftUI
 
 enum WriterTypography {
-    /// 正文行高倍数。§2.3：流式气泡、正文编辑器、阅读页统一 1.6。
-    static let lineHeight: Double = 1.6
+    /// 正文行高倍数。§2.3：流式气泡、正文编辑器、阅读页统一 1.5。
+    static let lineHeight: Double = 1.5
 
     /// 用户气泡最多占对话列宽的 80%（§5.3）。
     static let userBubbleWidthRatio: CGFloat = 0.8
@@ -20,7 +20,7 @@ enum WriterTypography {
 
     /// 行距换算与阅读页共用 `ReaderStyle`，不另写数值。
     ///
-    /// `lineHeight` 默认取阅读页那档 1.6；调用方传用户调过的值，创作页就和
+    /// `lineHeight` 默认取阅读页那档 1.5；调用方传用户调过的值，创作页就和
     /// 阅读页完全同节奏。
     static func lineSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
         ReaderStyle.lineSpacing(size: size, lineHeight: lineHeight)

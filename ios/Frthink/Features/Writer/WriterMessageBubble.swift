@@ -40,7 +40,7 @@ struct WriterMessageBubble: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，创作页跟着用同一个值。
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.6
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
 
     /// 与流式视图、正文编辑器同一套字号。
     private var bodyFontSize: CGFloat {
@@ -267,7 +267,7 @@ struct WriterStreamingBubble: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，流式气泡跟着用同一个值。
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.6
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
     @State private var reasoningExpanded = false
 
     private var bodyFontSize: CGFloat {

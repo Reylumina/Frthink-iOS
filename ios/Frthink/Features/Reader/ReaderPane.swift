@@ -16,7 +16,7 @@ struct ReaderPane: View {
     private let session: ProjectSession
 
     @AppStorage(ReaderStorageKey.fontSize) private var fontSize: Double = 18
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.6
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
     @AppStorage(ReaderStorageKey.darkPage) private var darkPage = false
     @AppStorage(ReaderStorageKey.mode) private var modeRaw = ReaderMode.source.rawValue
     @AppStorage private var bookmarkOffset: Int

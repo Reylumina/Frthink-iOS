@@ -166,7 +166,7 @@ struct ReaderDisplaySettingsSheet: View {
 
     private func restoreDefaults() {
         fontSize = 18
-        lineHeight = 1.6
+        lineHeight = 1.5
         darkPage = false
     }
 }
