@@ -11,11 +11,17 @@ enum Theme {
     /// 全局 tint。取资产目录里的 AccentColor（墨青），不是系统蓝。
     static let accent = Color.accentColor
 
+    /// 压在强调色实底上的字形：发送键图标、码字机圆标。
+    ///
+    /// 浅色档 accent 是深墨青，白字 6.8:1；深色档 accent 是浅墨青，白字只有
+    /// 2:1，所以资产里深色档换成近黑。语义就是「强调色上的前景色」。
+    static let onAccent = Color(uiColor: UIColor(named: "OnAccent") ?? .label)
+
     /// 强调色淡底：选中胶囊、圆钮、图标印章的底色。
     ///
-    /// 用 tint 压到 12% 而不是中性灰：整屏只有这一个彩色，压在谁底下一看就知道
-    /// 是「可点的主路径」。深浅色由语义色自动派生。
-    static let accentSoft = Theme.accent.opacity(Theme.tintedFillOpacity)
+    /// 用 tint 压深而不是中性灰：整屏只有这一个彩色，压在谁底下一看就知道
+    /// 是「可点的主路径」。透明度取 16% 而不是 12%：12% 压在深色卡面上几乎看不见。
+    static let accentSoft = Theme.accent.opacity(0.16)
 
     /// 次级表面。
     static let surfaceSecondary = Color(uiColor: .secondarySystemBackground)

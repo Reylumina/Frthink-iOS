@@ -297,8 +297,8 @@ struct WriterAssistantBadge: View {
         HStack(spacing: Theme.Spacing.s) {
             Image(systemName: "sparkles")
                 .font(Theme.badge)
-                // 强调色圆底上的图标固定白色，和气泡文字色无关。
-                .foregroundStyle(Color.white)
+                // 强调色圆底上的图标用 onAccent（深色档 accent 是浅墨青，白字不够）。
+                .foregroundStyle(Theme.onAccent)
                 .frame(width: markDiameter, height: markDiameter)
                 .background(Theme.accent, in: Circle())
             Text("码字机")

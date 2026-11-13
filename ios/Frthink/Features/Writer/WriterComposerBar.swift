@@ -95,13 +95,21 @@ struct WriterComposerBar: View {
             Image(systemName: "wand.and.stars")
                 .font(Font.subheadline.weight(.medium))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                .frame(width: controlSize * 0.82, height: controlSize * 0.82)
+                .frame(width: glyph, height: glyph)
+                // 可视尺寸 28pt，热区补回 44pt；负内边距把多出来的占位让回去，
+                // 胶囊不会因此被撑高（§5.1）。
+                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
                 .contentShape(Rectangle())
+                .padding(.horizontal, -(Theme.Layout.hitTarget - glyph) / 2)
+                .padding(.vertical, -(Theme.Layout.hitTarget - glyph) / 2)
         }
         .buttonStyle(.plain)
         .disabled(controller.isGenerating || controller.isPreparing)
         .accessibilityLabel("续写")
     }
+
+    /// 续写图标的可视边长。
+    private var glyph: CGFloat { controlSize * 0.82 }
 
     private var inputField: some View {
         HStack(alignment: .center, spacing: Theme.Spacing.xs) {
@@ -238,7 +246,7 @@ private struct WriterComposerPrimaryButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(Font.subheadline.weight(.semibold))
-                .foregroundStyle(isEnabled ? Color.white : Color.secondary)
+                .foregroundStyle(isEnabled ? Theme.onAccent : Color.secondary)
                 .frame(width: size, height: size)
                 .background(Circle().fill(isEnabled ? Theme.accent : Theme.field))
                 .frame(

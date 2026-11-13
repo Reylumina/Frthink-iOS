@@ -61,7 +61,8 @@ struct LibraryCoverImage: View {
     private var placeholderMark: some View {
         Text(initialMark)
             .font(.system(size: height * 0.36, weight: .medium, design: .serif))
-            .foregroundStyle(Color.white.opacity(0.92))
+            // 占位纸色在深浅两档都是压暗的，字色固定白色，是 §1.4 记下的例外。
+            .foregroundStyle(Color.white)
             .minimumScaleFactor(0.6)
             .accessibilityHidden(true)
     }

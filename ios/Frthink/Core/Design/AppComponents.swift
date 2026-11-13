@@ -141,17 +141,21 @@ enum AppTone {
 struct IconTile: View {
     let symbol: String
     var tint: Color = Theme.accent
-    /// 32pt 是这一行里最显眼的元素：28 在一屏六个分类时偏小，读起来像装饰。
-    var size: CGFloat = 32
+    /// 显式尺寸（可选，用于特殊场合）。不传就按 32pt 基准跟随 Dynamic Type 缩放。
+    var size: CGFloat? = nil
+
+    @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = 32
+
+    private var effectiveSize: CGFloat { size ?? baseSize }
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.46, weight: .semibold))
+            .font(.system(size: effectiveSize * 0.46, weight: .semibold))
             .foregroundStyle(tint)
-            .frame(width: size, height: size)
+            .frame(width: effectiveSize, height: effectiveSize)
             .background(
                 tint.opacity(Theme.tintedFillOpacity),
-                in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+                in: RoundedRectangle(cornerRadius: effectiveSize * 0.3, style: .continuous)
             )
             .accessibilityHidden(true)
     }
