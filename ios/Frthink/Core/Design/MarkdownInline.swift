@@ -48,6 +48,46 @@ enum MarkdownInline {
         return String(trimmed.dropFirst(level)).trimmingCharacters(in: .whitespaces)
     }
 
+    /// 行内样式。
+    enum InlineStyle { case normal, bold, italic }
+
+    /// 把一段按 `**` 和 `*` 切成带样式的 run，标记本身不显示。
+    ///
+    /// 流式气泡和完成态气泡共用这一份解析：两边各写一套时，生成结束换气泡那一刻
+    /// 会出现「多一个星号 / 少一层加粗」的跳变。
+    static func runs(_ raw: String) -> [(String, InlineStyle)] {
+        guard raw.contains("*") else { return [(raw, .normal)] }
+        var runs: [(String, InlineStyle)] = []
+        var buffer = ""
+        var isBold = false
+        var isItalic = false
+
+        func flush() {
+            guard !buffer.isEmpty else { return }
+            let style: InlineStyle = isBold ? .bold : (isItalic ? .italic : .normal)
+            runs.append((buffer, style))
+            buffer = ""
+        }
+
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            if raw[index...].hasPrefix("**") {
+                flush()
+                isBold.toggle()
+                index = raw.index(index, offsetBy: 2)
+            } else if raw[index] == "*" {
+                flush()
+                isItalic.toggle()
+                index = raw.index(after: index)
+            } else {
+                buffer.append(raw[index])
+                index = raw.index(after: index)
+            }
+        }
+        flush()
+        return runs
+    }
+
     static func text(_ raw: String) -> Text {
         if let attributed = attributed(raw) {
             return Text(attributed)

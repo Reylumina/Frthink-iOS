@@ -163,15 +163,10 @@ struct WriterMessageBubble: View {
                 Text("（空回复）")
                     .foregroundStyle(.tertiary)
             } else {
-                VStack(
-                    alignment: .leading,
-                    spacing: WriterTypography.paragraphSpacing(
-                        size: bodyFontSize,
-                        lineHeight: lineHeight
-                    )
-                ) {
+                // 段与段之间用 TextKit 的段后间距，VStack 不再额外留白。
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(paragraphs.indices, id: \.self) { index in
-                        paragraph(paragraphs[index])
+                        paragraph(paragraphs[index], isLast: index == paragraphs.count - 1)
                     }
                 }
             }
@@ -183,17 +178,50 @@ struct WriterMessageBubble: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 一段正文：一到三级标题按字号和字重区分，其余走行内 Markdown。
-    @ViewBuilder
-    private func paragraph(_ text: String) -> some View {
-        if let level = MarkdownInline.headingLevel(text) {
-            // 不加额外上间距：段间距已经由 VStack 给出，流式态用同一个段间距，
-            // 换气泡时高度才不会跳。
-            MarkdownInline.text(MarkdownInline.strippingHeadingMarker(text))
-                .font(.system(size: headingSize(level), weight: .semibold))
-        } else {
-            MarkdownInline.text(text)
+    /// 一段正文：两端对齐，一到三级标题按字号和字重区分。
+    ///
+    /// 排版走 `JustifiedText`（TextKit）：SwiftUI 的 Text 没有两端对齐，
+    /// 而中文长行左对齐时右边参差很明显。
+    private func paragraph(_ text: String, isLast: Bool) -> some View {
+        let level = MarkdownInline.headingLevel(text)
+        let plain = level == nil ? text : MarkdownInline.strippingHeadingMarker(text)
+        let size = level.map(headingSize) ?? bodyFontSize
+        let weight: UIFont.Weight = level == nil ? .regular : .semibold
+        return JustifiedText(
+            attributed: attributed(plain, size: size, weight: weight),
+            lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight),
+            paragraphSpacing: isLast
+                ? 0
+                : WriterTypography.paragraphSpacing(size: bodyFontSize, lineHeight: lineHeight)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 段内排版：加粗/斜体按 run 换字体，颜色交给系统语义色。
+    private func attributed(
+        _ text: String,
+        size: CGFloat,
+        weight: UIFont.Weight
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for (run, style) in MarkdownInline.runs(text) {
+            let font: UIFont
+            switch style {
+            case .normal:
+                font = .systemFont(ofSize: size, weight: weight)
+            case .bold:
+                font = .systemFont(ofSize: size, weight: weight == .semibold ? .bold : .bold)
+            case .italic:
+                let base = UIFont.systemFont(ofSize: size, weight: weight)
+                font = base.fontDescriptor.withSymbolicTraits(.traitItalic)
+                    .map { UIFont(descriptor: $0, size: size) } ?? base
+            }
+            result.append(NSAttributedString(
+                string: run,
+                attributes: [.font: font, .foregroundColor: UIColor.label]
+            ))
         }
+        return result
     }
 
     /// 标题字号按正文字号派生：一/二/三级分别 1.45 / 1.26 / 1.12 倍。

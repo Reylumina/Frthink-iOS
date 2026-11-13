@@ -132,24 +132,29 @@ struct StreamingTextView: UIViewRepresentable {
         fontSize: CGFloat,
         lineSpacing: CGFloat
     ) -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = lineSpacing
-        // 和阅读页、完成态气泡同一个段距：流式期间也保持同一节奏。
-        // 段距按额外行距推：调用方传进来的 lineSpacing 就是字号 × (行高 − 1)。
-        paragraph.paragraphSpacing = lineSpacing * 1.4
-
-        let body: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-            .foregroundColor: UIColor.label,
-            .paragraphStyle: paragraph,
-        ]
-
         let paragraphs = WriterTypography.paragraphs(text)
         let result = NSMutableAttributedString()
+
         for (index, paragraphText) in paragraphs.enumerated() {
+            // 最后一段还在变长：先左对齐，落定后再两端对齐。否则每帧都在给
+            // 不断变长的行重新分配字距，观感是行内轻微抖动。
+            let isLast = index == paragraphs.count - 1
+            let style = paragraphStyle(justified: !isLast, lineSpacing: lineSpacing)
+            let body: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: style,
+            ]
+
             if index > 0 {
-                result.append(NSAttributedString(string: "\n", attributes: body))
+                var separator = body
+                separator[.paragraphStyle] = paragraphStyle(
+                    justified: !isLast,
+                    lineSpacing: lineSpacing
+                )
+                result.append(NSAttributedString(string: "\n", attributes: separator))
             }
+
             if let level = MarkdownInline.headingLevel(paragraphText) {
                 var heading = body
                 heading[.font] = UIFont.systemFont(
@@ -161,7 +166,7 @@ struct StreamingTextView: UIViewRepresentable {
                     attributes: heading
                 ))
             } else {
-                for (run, style) in Self.inlineRuns(paragraphText) {
+                for (run, style) in MarkdownInline.runs(paragraphText) {
                     var attributes = body
                     if style != .normal {
                         attributes[.font] = Self.font(size: fontSize, style: style)
@@ -172,54 +177,31 @@ struct StreamingTextView: UIViewRepresentable {
         }
         return result
     }
-    /// 段内的行内样式。
-    private enum RunStyle { case normal, bold, italic }
 
-    /// 把一段按 `**` 和 `*` 切成带样式的 run，标记本身不显示。
-    ///
-    /// 生成中就按这个排版：`**` 与 `*` 都会在到达时立刻变成字形，不会先露出字面量
-    /// 再突然变形——那正是流式看起来「一跳一跳」的来源。
-    private static func inlineRuns(_ text: String) -> [(String, RunStyle)] {
-        guard text.contains("*") else { return [(text, .normal)] }
-        var runs: [(String, RunStyle)] = []
-        var buffer = ""
-        var isBold = false
-        var isItalic = false
-
-        func flush() {
-            guard !buffer.isEmpty else { return }
-            let style: RunStyle = isBold ? .bold : (isItalic ? .italic : .normal)
-            runs.append((buffer, style))
-            buffer = ""
-        }
-
-        var index = text.startIndex
-        while index < text.endIndex {
-            if text[index...].hasPrefix("**") {
-                flush()
-                isBold.toggle()
-                index = text.index(index, offsetBy: 2)
-            } else if text[index] == "*" {
-                flush()
-                isItalic.toggle()
-                index = text.index(after: index)
-            } else {
-                buffer.append(text[index])
-                index = text.index(after: index)
-            }
-        }
-        flush()
-        return runs
+    /// 段落样式：对齐、断行策略、行距、段距。
+    private static func paragraphStyle(
+        justified: Bool,
+        lineSpacing: CGFloat
+    ) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.alignment = justified ? .justified : .natural
+        // pushOut 让断行把整词推出去，而不是靠断词凑长度。
+        style.lineBreakStrategy = .pushOut
+        style.hyphenationFactor = 0.85
+        style.lineSpacing = lineSpacing
+        style.paragraphSpacing = lineSpacing * 1.4
+        return style
     }
 
     /// 行内样式对应的字体。
-    private static func font(size: CGFloat, style: RunStyle) -> UIFont {
+    private static func font(size: CGFloat, style: MarkdownInline.InlineStyle) -> UIFont {
         let base = UIFont.systemFont(ofSize: size, weight: .regular)
         guard let descriptor = base.fontDescriptor.withSymbolicTraits(
             style == .bold ? .traitBold : (style == .italic ? .traitItalic : [])
         ) else { return UIFont.systemFont(ofSize: size, weight: .bold) }
         return UIFont(descriptor: descriptor, size: size)
     }
+
     /// 标题相对正文的缩放，和完成态气泡保持同一组数字。
     private static func headingScale(_ level: Int) -> CGFloat {
         switch level {
