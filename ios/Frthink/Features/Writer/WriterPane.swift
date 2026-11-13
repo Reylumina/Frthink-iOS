@@ -37,6 +37,9 @@ struct WriterPane: View {
     @State private var bottomBarHeight: CGFloat = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
+    /// 对话内容高度与视口高度：内容不满一屏时从顶部排，不把几条消息压在底部。
+    @State private var contentHeight: CGFloat = .greatestFiniteMagnitude
+    @State private var viewportHeight: CGFloat = 0
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
     @State private var cursorOffset = -1
     /// 用户是否亲手在正文里放过插入点；false 时插到末尾，避免旧偏移插到开头。
@@ -411,6 +414,12 @@ struct WriterPane: View {
         Set(windowedMessages.map(\.id))
     }
 
+    /// 首帧锚点：内容比视口短时从顶部排（不把内容压在底部），长了才锚底。
+    private var scrollAnchor: UnitPoint? {
+        guard contentHeight >= viewportHeight else { return nil }
+        return isAtBottom && !session.payload.messages.isEmpty ? .bottom : nil
+    }
+
     private var chatList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -445,15 +454,25 @@ struct WriterPane: View {
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.vertical, Theme.Spacing.m)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .task(id: proxy.size.height) { contentHeight = proxy.size.height }
+                    }
+                }
             }
             // 首帧就落在底部：不再靠 onAppear 里抢在布局前的 scrollTo。
             // 那一次只能按 LazyVStack 的估算行高算偏移，长对话里可能停在半空
             // （历史「正文区空白」的复现路径之一）。
             // 用户手动滚开后锚点撤掉，不会被内容变高拽回去（§5.9）；
             // 空对话不给锚点，空态按默认从顶部排。
-            .defaultScrollAnchor(
-                isAtBottom && !session.payload.messages.isEmpty ? UnitPoint.bottom : nil
-            )
+            .defaultScrollAnchor(scrollAnchor)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .task(id: proxy.size.height) { viewportHeight = proxy.size.height }
+                }
+            }
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
             // iOS 26 的滚动边缘柔化；更早的系统由 Theme 回落成无操作（§5.2）。
