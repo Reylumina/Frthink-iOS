@@ -105,13 +105,11 @@ struct WorldRulesSection: View {
             Section {
                 updateRow(
                     title: "从正文提炼文风笔记",
-                    symbol: "text.magnifyingglass",
                     kind: .extractingStyleNotes,
                     action: onExtractStyleNotes
                 )
                 updateRow(
                     title: "用最近对话更新长期规则",
-                    symbol: "arrow.triangle.2.circlepath",
                     kind: .updatingRules,
                     action: onUpdateRules
                 )
@@ -153,25 +151,27 @@ struct WorldRulesSection: View {
     }
 
     /// 模型更新入口放在列表上，点正文行只负责编辑，两个动作不互相打岔。
+    /// 动作行不配图标：这里是一句命令，标题已经把动作说清楚了，再加一个小符号
+    /// 只会让人猜它和上面那些「资源行」有什么区别。
     private func updateRow(
         title: String,
-        symbol: String,
         kind: WorldBusy,
         action: @escaping () -> Void
     ) -> some View {
         let running = busy == kind
         return Button(action: action) {
             HStack(spacing: Theme.Spacing.m) {
-                Image(systemName: symbol)
-                    .font(Font.footnote)
-                    .foregroundStyle(running ? Color.secondary : Theme.accent)
-                    .frame(width: 20)
                 Text(title)
                     .font(Font.body)
                     .foregroundStyle(.primary)
                 Spacer(minLength: Theme.Spacing.s)
+                if running {
+                    Text("进行中")
+                        .font(Font.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .frame(minHeight: Theme.Layout.hitTarget)
+            .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
