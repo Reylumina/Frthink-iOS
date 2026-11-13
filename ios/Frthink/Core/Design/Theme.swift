@@ -178,6 +178,9 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
+        /// 图标方块的基准边长（§2.4）：和系统设置一致，30pt。
+        static let iconTileSize: CGFloat = 30
+
         /// 阅读页页脚进度条的高度（§2.3）：两像素，够看见又不抢正文。
         static let progressBarHeight: CGFloat = 2
 

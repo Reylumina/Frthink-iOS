@@ -48,11 +48,11 @@ struct WorldSettingSection: View {
                 } label: {
                     HStack(spacing: Theme.Spacing.m) {
                         if isBusy {
-                            ProgressView().controlSize(.mini)
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: Theme.Layout.iconTileSize, height: Theme.Layout.iconTileSize)
                         } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(Theme.label)
-                                .foregroundStyle(Theme.accent)
+                            IconTile(symbol: "arrow.triangle.2.circlepath", tint: .green, filled: true)
                         }
                         Text("刷新人物卡")
                             .font(Theme.label)
