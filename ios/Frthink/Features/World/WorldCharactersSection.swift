@@ -28,6 +28,7 @@ struct WorldCharactersSection: View {
     @State private var pendingDeleteIDs: Set<String> = []
     @State private var groupFilter = "__all__"
     @State private var showGroupEditor = false
+    @State private var showingRefreshOptions = false
 
     private struct Route: Identifiable {
         let id: String
@@ -53,6 +54,15 @@ struct WorldCharactersSection: View {
             NavigationStack {
                 WorldGroupEditor(session: session)
             }
+        }
+        .confirmationDialog(
+            "刷新人物卡",
+            isPresented: $showingRefreshOptions,
+            titleVisibility: .visible
+        ) {
+            Button("刷新人物卡") { onRefresh?() }
+            Button("从头整理（重新分析全部正文）") { onRefreshFull?() }
+            Button("取消", role: .cancel) {}
         }
         .onAppear {
             #if DEBUG
@@ -97,7 +107,7 @@ struct WorldCharactersSection: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if onRefresh != nil {
-                    refreshMenu
+                    refreshButton
                 }
                 groupMenu
             }
@@ -126,22 +136,13 @@ struct WorldCharactersSection: View {
         .accessibilityValue(sortMode.displayName)
     }
 
-    /// 从正文整理人物卡：常规刷新与从头整理两种，和概览里是同一组动作。
-    private var refreshMenu: some View {
-        Menu {
-            Button {
-                onRefresh?()
-            } label: {
-                Label("刷新人物卡", systemImage: "arrow.triangle.2.circlepath")
-            }
-            Button {
-                onRefreshFull?()
-            } label: {
-                Label(
-                    "从头整理（重新分析全部正文）",
-                    systemImage: "arrow.counterclockwise"
-                )
-            }
+    /// 从正文整理人物卡：常规刷新与从头整理。
+    ///
+    /// 用按钮 + 底部动作表，不用 Menu：Menu 的浮层贴在标签上方，标签靠近屏幕顶部时
+    /// 会被排到屏幕上半部分，圆角样式也随锚点变；动作表固定在底部、统一圆角。
+    private var refreshButton: some View {
+        Button {
+            showingRefreshOptions = true
         } label: {
             // 进度由世界页的状态行统一报，这一行只留入口。
             HStack(spacing: Theme.Spacing.xs) {
@@ -157,7 +158,6 @@ struct WorldCharactersSection: View {
         .disabled(isActionDisabled)
         .accessibilityLabel("刷新人物卡")
     }
-
     private var groupMenu: some View {
         Menu {
             Button("全部人物") { groupFilter = "__all__" }

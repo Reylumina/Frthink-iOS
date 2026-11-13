@@ -69,7 +69,7 @@ struct LibraryBranchesSheet: View {
                 LibraryCoverImage(
                     payload: branch.coverImagePayload,
                     title: branch.title,
-                    seed: branch.id
+                    seed: branch.coverSeed
                 )
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {

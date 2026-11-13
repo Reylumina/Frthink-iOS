@@ -16,7 +16,7 @@ struct LibraryContinueRow: View {
                 LibraryCoverImage(
                     payload: project.coverImagePayload,
                     title: project.title,
-                    seed: project.id
+                    seed: project.coverSeed
                 )
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -64,7 +64,7 @@ struct LibraryProjectRow: View {
                 LibraryCoverImage(
                     payload: project.coverImagePayload,
                     title: project.title,
-                    seed: project.id
+                    seed: project.coverSeed
                 )
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {

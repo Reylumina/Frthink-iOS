@@ -28,6 +28,10 @@ struct Project: Identifiable, Codable, Hashable {
 
     var isTrashed: Bool { trashedAt != nil }
 
+    /// 封面身份种子：同一根的分支沿用母本的种子，书架上一本和它的平行稿
+    /// 拿到同一组纸色与图标；没有分支归属时用它自己的 id。
+    var coverSeed: String { branchRootId.isEmpty ? id : branchRootId }
+
     init(
         id: String = UUID().uuidString,
         title: String,

@@ -382,6 +382,16 @@ struct WriterPane: View {
         } label: {
             Label("正文发送范围…", systemImage: "text.alignleft")
         }
+        // 多选入口从这里进：气泡的长按菜单只放单条操作，免得每条消息都挂一个
+        // 需要先理解再点两下的模式开关。
+        Button {
+            if let last = windowedMessages.last {
+                beginSelection(last.id)
+            }
+        } label: {
+            Label("多选消息", systemImage: "checklist")
+        }
+        .disabled(controller.isBusy || session.payload.messages.isEmpty)
 
         Divider()
 
@@ -778,7 +788,7 @@ struct WriterPane: View {
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
         if message.role == .user {
-            row.contextMenu {
+            menuAnchor(row) {
                 Button {
                     copyToClipboard(message.content)
                 } label: {
@@ -794,14 +804,8 @@ struct WriterPane: View {
                         session.restore(removed, at: index)
                     }
                 } label: {
-                    Label("撤回（连同之后的对话）", systemImage: "arrow.uturn.backward")
+                    Label("撤回", systemImage: "arrow.uturn.backward")
                 }
-                Button {
-                    beginSelection(message.id)
-                } label: {
-                    Label("多选", systemImage: "checklist")
-                }
-                .disabled(controller.isBusy)
                 Button(role: .destructive) {
                     messageAction = .deleteMessage(message)
                 } label: {
@@ -810,7 +814,7 @@ struct WriterPane: View {
                 .disabled(controller.isBusy)
             }
         } else {
-            row.contextMenu {
+            menuAnchor(row) {
                 Button {
                     copyToClipboard(message.content)
                 } label: {
@@ -855,12 +859,26 @@ struct WriterPane: View {
                     )
                 }
                 .disabled(controller.isBusy)
-                Button {
-                    beginSelection(message.id)
-                } label: {
-                    Label("多选", systemImage: "checklist")
-                }
-                .disabled(controller.isBusy)
+            }
+        }
+    }
+
+    /// 长按菜单挂在透明的命中层上。
+    ///
+    /// 直接挂在气泡上时，系统会把整条气泡提起来缩成一张预览图——文字一多就像
+    /// 消息被压成缩略图。挂到透明层后长按仍然在原位置触发，屏幕内容不动。
+    @ViewBuilder
+    private func menuAnchor<Row: View, Menu: View>(
+        _ row: Row,
+        @ViewBuilder menu: @escaping () -> Menu
+    ) -> some View {
+        if selectionMode {
+            row
+        } else {
+            row.overlay {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .contextMenu(menuItems: menu)
             }
         }
     }

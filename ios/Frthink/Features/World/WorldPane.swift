@@ -108,11 +108,6 @@ struct WorldPane: View {
             case .setting:
                 WorldSettingSection(
                     session: session,
-                    isBusy: isWorldRefreshing,
-                    isActionDisabled: busy != nil,
-                    onRefresh: { startWorldRefresh(forceFull: false) },
-                    onRefreshFull: { startWorldRefresh(forceFull: true) },
-                    onStop: { worldTask?.cancel() },
                     onOpenTab: { newTab in
                         withAnimation(.snappy(duration: 0.2)) { tab = newTab }
                     }
