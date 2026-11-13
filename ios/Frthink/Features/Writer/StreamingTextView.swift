@@ -123,9 +123,10 @@ struct StreamingTextView: UIViewRepresentable {
         "\(fontSize)-\(lineSpacing)"
     }
 
-    /// 与完成态气泡同一套段落度量：WriterTypography.paragraphs 拆段、
-    /// paragraphSpacing 留白。段落之间用单换行，不再让空行占一整行行高；
-    /// 两处用同一份换算，生成结束换成正式气泡时整段高度不变，视口不会跳。
+    /// 流式期间的排版：Markdown 照常渲染（标题、加粗、斜体），但不留段间距。
+    ///
+    /// 段距要留在生成结束由正式气泡一次给：中途每多一段就把下面所有内容往下推，
+    /// 屏幕上已有的字不断重排，观感就是「一跳一跳」。分割线按正文处理。
     private static func attributed(
         _ text: String,
         fontSize: CGFloat,
@@ -133,7 +134,7 @@ struct StreamingTextView: UIViewRepresentable {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
-        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing(size: fontSize)
+        paragraph.paragraphSpacing = 0
 
         let body: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
@@ -141,8 +142,6 @@ struct StreamingTextView: UIViewRepresentable {
             .paragraphStyle: paragraph,
         ]
 
-        // 逐段排版：一到三级标题按字号和字重区分，行首的 # 去掉。
-        // 和完成态气泡用同一组缩放（1.45 / 1.26 / 1.12），换气泡时高度不跳。
         let paragraphs = WriterTypography.paragraphs(text)
         let result = NSMutableAttributedString()
         for (index, paragraphText) in paragraphs.enumerated() {
@@ -171,7 +170,6 @@ struct StreamingTextView: UIViewRepresentable {
         }
         return result
     }
-
     /// 段内的行内样式。
     private enum RunStyle { case normal, bold, italic }
 
