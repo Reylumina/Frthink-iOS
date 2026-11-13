@@ -82,7 +82,8 @@ struct WorldEventEditor: View {
                 AppTextField(
                     title: "标题",
                     text: $draft.title,
-                    placeholder: "事件标题"
+                    placeholder: "事件标题",
+                    flat: true
                 )
                 WorldTagsField(
                     title: "人物",
@@ -100,7 +101,8 @@ struct WorldEventEditor: View {
                     title: "场景",
                     text: $draft.scene,
                     placeholder: "地点、时间与在场状态",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
             }
 
@@ -109,19 +111,22 @@ struct WorldEventEditor: View {
                     title: "起因",
                     text: $draft.cause,
                     placeholder: "这件事为什么发生",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "经过",
                     text: $draft.development,
                     placeholder: "动作与变化，合并同一事件，不写流水账",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "结果",
                     text: $draft.consequence,
                     placeholder: "造成了什么变化，留下什么后果",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
             } header: {
                 AppSectionHeader(title: "过程")

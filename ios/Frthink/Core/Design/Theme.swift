@@ -190,6 +190,10 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
+        /// 正文段落间距（§2.3）：12pt。阅读页、完成态气泡、流式气泡共用，
+        /// 不随字号缩放——三处段落节奏一致，换页面不会觉得段落忽然变松。
+        static let paragraphSpacing: CGFloat = Spacing.m
+
         /// 图标方块的基准边长（§2.4）：28pt，全应用只有一个值——分类图标、
         /// 行首图标、AI 服务商品牌标都用它。
         static let iconTileSize: CGFloat = 28

@@ -373,7 +373,8 @@ private struct UniverseEntryFields: View {
             AppTextField(
                 title: "标题",
                 text: $title,
-                placeholder: "通用叙事视角约定"
+                placeholder: "通用叙事视角约定",
+                flat: true
             )
         }
 
@@ -383,7 +384,8 @@ private struct UniverseEntryFields: View {
                 text: $bodyText,
                 placeholder: "内容",
                 minLines: 6,
-                maxLines: 12
+                maxLines: 12,
+                flat: true
             )
         }
     }

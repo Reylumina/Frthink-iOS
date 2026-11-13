@@ -73,7 +73,8 @@ struct WorldCharacterEditor: View {
                 AppTextField(
                     title: "姓名",
                     text: $draft.name,
-                    placeholder: "人物本名"
+                    placeholder: "人物本名",
+                    flat: true
                 )
                 WorldTagsField(
                     title: "别称",
@@ -83,7 +84,8 @@ struct WorldCharacterEditor: View {
                 AppTextField(
                     title: "身份",
                     text: $draft.identity,
-                    placeholder: "身份、职业、阵营"
+                    placeholder: "身份、职业、阵营",
+                    flat: true
                 )
                 Toggle("参与写作提示词", isOn: Binding(
                     get: { draft.enabled ?? true },
@@ -109,25 +111,29 @@ struct WorldCharacterEditor: View {
                     title: "性格",
                     text: $draft.personality,
                     placeholder: "稳定的性格与价值观",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "语气",
                     text: $draft.voice,
                     placeholder: "措辞、语气与对不同对象的说话方式",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "目标",
                     text: $draft.goals,
                     placeholder: "目标与具体动机",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "底线",
                     text: $draft.boundaries,
                     placeholder: "不会做的事、不能触碰的边界",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
             } header: {
                 AppSectionHeader(title: "说话与行为")
@@ -138,13 +144,15 @@ struct WorldCharacterEditor: View {
                     title: "人物记忆",
                     text: $draft.personalMemory,
                     placeholder: "角色亲历或明确知晓、对其行为有持续影响的经历",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
                 AppTextArea(
                     title: "关系态度",
                     text: $draft.relationshipAttitudes,
                     placeholder: "按对象分别记录印象、态度、信任与变化",
-                    minLines: 3
+                    minLines: 3,
+                    flat: true
                 )
             } header: {
                 AppSectionHeader(title: "记忆与关系")
@@ -208,13 +216,15 @@ struct WorldCharacterEditor: View {
                 AppTextField(
                     title: "标题",
                     text: $title,
-                    placeholder: "例如：武器、口癖"
+                    placeholder: "例如：武器、口癖",
+                    flat: true
                 )
                 AppTextArea(
                     title: "内容",
                     text: $content,
                     minLines: 3,
-                    showsCount: false
+                    showsCount: false,
+                    flat: true
                 )
                 Button(role: .destructive) {
                     onDelete()

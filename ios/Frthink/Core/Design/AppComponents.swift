@@ -445,21 +445,41 @@ private struct FieldChrome: ViewModifier {
     let focused: Bool
     var horizontal: CGFloat = Theme.Spacing.m
     var vertical: CGFloat = Theme.Spacing.s
+    /// 表单行内的字段：不自己画圆角矩形。
+    ///
+    /// 卡片本身已经是一个大圆角，里面再套一个圆角输入框就成了「圆角套圆角」，
+    /// 内外半径也对不上（同心圆角要求内 = 外 − 内边距）。表单里把圆角交给卡片，
+    /// 字段只保留内边距与聚焦描边。
+    var flat: Bool = false
 
     func body(content: Content) -> some View {
-        content
-            .padding(.horizontal, horizontal)
-            .padding(.vertical, vertical)
-            .background(Theme.field)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                    .strokeBorder(
-                        focused ? Theme.accent.opacity(0.45) : Color.clear,
-                        lineWidth: 1
-                    )
-            )
-            .themeAnimation(Theme.motionSelection, value: focused)
+        if flat {
+            content
+                .padding(.horizontal, horizontal)
+                .padding(.vertical, vertical)
+                .overlay(
+                    Rectangle()
+                        .strokeBorder(
+                            focused ? Theme.accent.opacity(0.45) : Color.clear,
+                            lineWidth: 1
+                        )
+                )
+                .themeAnimation(Theme.motionSelection, value: focused)
+        } else {
+            content
+                .padding(.horizontal, horizontal)
+                .padding(.vertical, vertical)
+                .background(Theme.field)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                        .strokeBorder(
+                            focused ? Theme.accent.opacity(0.45) : Color.clear,
+                            lineWidth: 1
+                        )
+                )
+                .themeAnimation(Theme.motionSelection, value: focused)
+        }
     }
 }
 
@@ -508,6 +528,8 @@ struct AppTextField: View {
     var hint: String? = nil
     var showsCount = false
     var maxLength: Int? = nil
+    /// 表单行内使用：不在卡片里再套一层圆角（见 FieldChrome.flat）。
+    var flat: Bool = false
 
     @FocusState private var focused: Bool
 
@@ -532,7 +554,7 @@ struct AppTextField: View {
                 .autocorrectionDisabled(disablesAutocorrection)
                 .focused($focused)
                 .accessibilityLabel(title)
-                .modifier(FieldChrome(focused: focused))
+                .modifier(FieldChrome(focused: focused, flat: flat))
                 .onChange(of: text) { _, newValue in
                     guard let maxLength, newValue.count > maxLength else { return }
                     text = String(newValue.prefix(maxLength))
@@ -553,6 +575,8 @@ struct AppTextArea: View {
     var showsCount = false
     var maxLength: Int? = nil
     var hint: String? = nil
+    /// 表单行内使用：不在卡片里再套一层圆角（见 FieldChrome.flat）。
+    var flat: Bool = false
 
     @FocusState private var focused: Bool
 
@@ -575,7 +599,7 @@ struct AppTextArea: View {
                 .lineLimit(minLines...maxLines)
                 .focused($focused)
                 .accessibilityLabel(title)
-                .modifier(FieldChrome(focused: focused))
+                .modifier(FieldChrome(focused: focused, flat: flat))
                 .onChange(of: text) { _, newValue in
                     guard let maxLength, newValue.count > maxLength else { return }
                     text = String(newValue.prefix(maxLength))

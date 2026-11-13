@@ -44,7 +44,8 @@ struct WorldbookEntryEditor: View {
                 AppTextField(
                     title: "词条名",
                     text: $title,
-                    placeholder: "例如：雾港城的潮汐规则"
+                    placeholder: "例如：雾港城的潮汐规则",
+                    flat: true
                 )
 
                 AppTextEditor(

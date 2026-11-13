@@ -291,7 +291,7 @@ struct ReaderPane: View {
 
     private var readingSurface: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            LazyVStack(alignment: .leading, spacing: Theme.Layout.paragraphSpacing) {
                 if document.blocks.isEmpty {
                     if isLoadingDocument {
                         loadingState
