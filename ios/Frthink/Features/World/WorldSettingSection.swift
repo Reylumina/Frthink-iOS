@@ -150,8 +150,14 @@ struct WorldSettingSection: View {
             onOpenTab(tab)
         } label: {
             HStack(spacing: Theme.Spacing.s) {
-                // §2.4：行首用系统设置那种实底方块，每类资料固定一个色相。
-                SettingsLabelRow(title: title, symbol: symbol, symbolTint: tint, detail: value)
+                // §2.4：这一屏是分类入口，用带实底方块的设置行（和设置一级列表同款）。
+                AppSettingsRow(
+                    title: title,
+                    symbol: symbol,
+                    symbolTint: tint,
+                    symbolFilled: true,
+                    detail: value
+                )
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
             }

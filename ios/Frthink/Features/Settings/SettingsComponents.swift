@@ -4,17 +4,20 @@ import UniformTypeIdentifiers
 
 // MARK: - 行
 
-/// 二级、三级页的导航行：有色方块图标 + 标题 + 行尾的值（DESIGN §2.4、§5.1）。
+/// 二级、三级页的导航行：实底方块图标 + 标题 + 行尾的值（DESIGN §2.4、§5.1）。
 ///
-/// 行首图标和一级分类一样走 `IconTile`（实底圆角方块 + 白符号），和系统设置
-/// 同一套语法；行尾值走 `.body` 次要色。
+/// 方块颜色按标题稳定取：同一行每次进来都是同一个色相，不同行自动分开。
+/// 调用方可以显式传 `symbolTint` 覆盖。
 struct SettingsLabelRow: View {
     let title: String
     var symbol: String? = nil
-    /// 行首方块的颜色；同一类资料用同一个色相。默认中性灰，和系统设置里
-    /// 「没有专属色相」的行一致。
-    var symbolTint: Color = .gray
+    /// 显式色相；不传就按标题从身份色里稳定取一个。
+    var symbolTint: Color? = nil
     var detail: String? = nil
+
+    private var tint: Color {
+        symbolTint ?? Theme.Identity.color(for: title)
+    }
 
     var body: some View {
         // 无障碍字号下放不下一行时改竖排：标题在上、值在下（DESIGN §5.5）。
@@ -56,7 +59,7 @@ struct SettingsLabelRow: View {
     private var label: some View {
         HStack(spacing: Theme.Spacing.m) {
             if let symbol {
-                IconTile(symbol: symbol, tint: symbolTint, filled: true)
+                IconTile(symbol: symbol, tint: tint, filled: true)
             }
             Text(title)
                 .font(Theme.label)
