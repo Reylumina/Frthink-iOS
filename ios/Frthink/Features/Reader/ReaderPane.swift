@@ -363,20 +363,44 @@ struct ReaderPane: View {
     // MARK: - 页脚
 
     private var footer: some View {
-        HStack(spacing: Theme.Spacing.s) {
-            Text(positionLabel)
-                .font(Theme.numeric)
-                .foregroundStyle(.secondary)
-            if !document.blocks.isEmpty {
-                Text("\(document.characterCount.formatted()) 字")
+        VStack(spacing: Theme.Spacing.s) {
+            readingProgressBar
+            HStack(spacing: Theme.Spacing.s) {
+                Text(positionLabel)
                     .font(Theme.numeric)
                     .foregroundStyle(.secondary)
+                if !document.blocks.isEmpty {
+                    Text("\(document.characterCount.formatted()) 字")
+                        .font(Theme.numeric)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .accessibilityElement(children: .combine)
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.vertical, Theme.Spacing.s)
-        .accessibilityElement(children: .combine)
+    }
+
+    /// 读到哪儿了：一条两像素的进度条，不抢正文的注意力。
+    private var readingProgressBar: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.separator)
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: proxy.size.width * readingProgress)
+            }
+        }
+        .frame(height: Theme.Layout.progressBarHeight)
+        .accessibilityHidden(true)
+    }
+
+    /// 0…1；没有正文时不画进度。
+    private var readingProgress: Double {
+        let total = document.blocks.count
+        guard total > 0 else { return 0 }
+        return min(max(Double(currentBlockNumber) / Double(total), 0), 1)
     }
 
     private var positionLabel: String {

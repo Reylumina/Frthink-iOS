@@ -128,6 +128,9 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
+        /// 阅读页页脚进度条的高度（§2.3）：两像素，够看见又不抢正文。
+        static let progressBarHeight: CGFloat = 2
+
         /// 列表行的最小内容高度（§5.1）。
         ///
         /// 行高 = 这个高度 + 系统的上下内边距。不要写成 44：系统在 iOS 26 上

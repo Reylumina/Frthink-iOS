@@ -36,6 +36,8 @@ struct ReaderParagraphView: View {
             .lineSpacing(ReaderStyle.lineSpacing(size: scaledFontSize, lineHeight: lineHeight))
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // 章节标题上方多留一段：段间距对所有块一样时，标题会贴在上一段末尾。
+            .padding(.top, isHeading ? Theme.Spacing.l : 0)
             .textSelection(.enabled)
     }
 
