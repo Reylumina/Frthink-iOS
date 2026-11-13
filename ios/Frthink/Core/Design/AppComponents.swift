@@ -143,6 +143,8 @@ struct IconTile: View {
     var tint: Color = Theme.accent
     /// 显式尺寸（可选，用于特殊场合）。不传就按 32pt 基准跟随 Dynamic Type 缩放。
     var size: CGFloat? = nil
+    /// 实底 + 白色符号（一级分类用，和 Apple 设置同一个做法）；默认是淡底 + tint 符号。
+    var filled: Bool = false
 
     @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = 32
 
@@ -151,10 +153,10 @@ struct IconTile: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: effectiveSize * 0.46, weight: .semibold))
-            .foregroundStyle(tint)
+            .foregroundStyle(filled ? Color.white : tint)
             .frame(width: effectiveSize, height: effectiveSize)
             .background(
-                tint.opacity(Theme.tintedFillOpacity),
+                filled ? tint : tint.opacity(Theme.tintedFillOpacity),
                 in: RoundedRectangle(cornerRadius: effectiveSize * 0.3, style: .continuous)
             )
             .accessibilityHidden(true)
@@ -221,12 +223,14 @@ struct AppSettingsRow: View {
     let title: String
     var symbol: String? = nil
     var symbolTint: Color = Theme.accent
+    /// 一级分类用实底图标，和内容身份色一致。
+    var symbolFilled: Bool = false
     var detail: String? = nil
 
     var body: some View {
         HStack(spacing: Theme.Spacing.m) {
             if let symbol {
-                IconTile(symbol: symbol, tint: symbolTint)
+                IconTile(symbol: symbol, tint: symbolTint, filled: symbolFilled)
             }
             Text(title)
                 .font(.body)

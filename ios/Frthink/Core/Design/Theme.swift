@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 设计系统：系统语义色、系统字体、系统动效。
 ///
@@ -64,6 +65,51 @@ enum Theme {
     /// 对不上。文字用 `.label`，深浅两种底色都自动满足 4.5:1（§5.6）。
     static let bubbleFill = Color(uiColor: .systemGray5)
     static let bubbleForeground = Color(uiColor: .label)
+
+    // MARK: - 内容身份色
+
+    /// 内容身份色：书封和一级分类图标共用的一套纸色。
+    ///
+    /// 它不是品牌色，也不用于按钮、开关、状态或页面底——只给「这是哪一本书 /
+    /// 哪一类东西」上色。色相拉开、明度有深有浅，深色模式各降一档亮度。
+    enum Identity {
+        static let colors: [Color] = [
+            dynamic(light: 0x3C3A37, dark: 0x2B2926),  // 炭黑
+            dynamic(light: 0x8A5A46, dark: 0x6B4435),  // 陶土
+            dynamic(light: 0x5C6B4F, dark: 0x47543D),  // 苔绿
+            dynamic(light: 0x4E5D6C, dark: 0x3C4957),  // 石板蓝
+            dynamic(light: 0x6A4A5E, dark: 0x523A49),  // 梅子
+            dynamic(light: 0x9A7C58, dark: 0x765E42),  // 赭石
+            dynamic(light: 0x2F6F7E, dark: 0x255967),  // 深青
+            dynamic(light: 0xA34E5A, dark: 0x833C46),  // 砖红
+            dynamic(light: 0x6E5AA8, dark: 0x58478A),  // 靛紫
+            dynamic(light: 0xB07C2E, dark: 0x8D6224),  // 琥珀
+        ]
+
+        /// 按 id 稳定取色：同一本书、同一个分类永远同一个颜色。
+        static func color(for seed: String) -> Color {
+            colors[Int(stableHash(seed) % UInt64(colors.count))]
+        }
+
+        static func color(at index: Int) -> Color {
+            colors[index % colors.count]
+        }
+
+        /// 稳定哈希：Fowler–Noll–Vo，跨版本、跨设备都一样。
+        static func stableHash(_ seed: String) -> UInt64 {
+            var hash: UInt64 = 1_469_598_103_934_665_603
+            for scalar in seed.unicodeScalars {
+                hash = (hash ^ UInt64(scalar.value)) &* 1_099_511_628_211
+            }
+            return hash
+        }
+
+        private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+            Color(uiColor: UIColor { traits in
+                UIColor(identityHex: traits.userInterfaceStyle == .dark ? dark : light)
+            })
+        }
+    }
 
     // MARK: - 字体
 
@@ -287,6 +333,20 @@ struct ThemeAnimationModifier<V: Equatable>: ViewModifier {
 
     func body(content: Content) -> some View {
         content.animation(Theme.motion(animation, reduceMotion: reduceMotion), value: value)
+    }
+}
+
+// MARK: - 内容身份色辅助
+
+extension UIColor {
+    /// 内容身份色用 0xRRGGBB 写死；它们是内容身份，不是语义色，不跟随 tint。
+    convenience init(identityHex: UInt32) {
+        self.init(
+            red: CGFloat((identityHex >> 16) & 0xFF) / 255,
+            green: CGFloat((identityHex >> 8) & 0xFF) / 255,
+            blue: CGFloat(identityHex & 0xFF) / 255,
+            alpha: 1
+        )
     }
 }
 

@@ -53,6 +53,8 @@ struct SettingsView: View {
                         AppSettingsRow(
                             title: "提示词与资料",
                             symbol: "text.book.closed",
+                            symbolTint: Theme.Identity.color(at: 8),
+                            symbolFilled: true,
                             detail: "\(store.settings.skills.count) 个技能"
                         )
                     }
@@ -60,19 +62,25 @@ struct SettingsView: View {
                         AppSettingsRow(
                             title: "存档与备份",
                             symbol: "externaldrive",
+                            symbolTint: Theme.Identity.color(at: 6),
+                            symbolFilled: true,
                             detail: "\(store.projects.count) 本"
                         )
                     }
                     NavigationLink(value: SettingsCategory.storage) {
                         AppSettingsRow(
                             title: "存储与用量",
-                            symbol: "chart.bar"
+                            symbol: "chart.bar",
+                            symbolTint: Theme.Identity.color(at: 5),
+                            symbolFilled: true
                         )
                     }
                     NavigationLink(value: SettingsCategory.appearance) {
                         AppSettingsRow(
                             title: "外观与交互",
                             symbol: "paintbrush",
+                            symbolTint: Theme.Identity.color(at: 4),
+                            symbolFilled: true,
                             detail: store.settings.theme.displayName
                         )
                     }
@@ -80,6 +88,8 @@ struct SettingsView: View {
                         AppSettingsRow(
                             title: "关于",
                             symbol: "info.circle",
+                            symbolTint: Theme.Identity.color(at: 2),
+                            symbolFilled: true,
                             detail: Attribution.versionLine
                         )
                     }
@@ -124,7 +134,8 @@ struct SettingsView: View {
         HStack(spacing: Theme.Spacing.m) {
             IconTile(
                 symbol: hasKey ? "point.3.connected.trianglepath.dotted" : "key.fill",
-                tint: hasKey ? Theme.accent : AppTone.warning.color
+                tint: Theme.Identity.color(at: 3),
+                filled: true
             )
 
             Text("连接与模型")

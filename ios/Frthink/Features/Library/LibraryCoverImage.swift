@@ -54,26 +54,24 @@ struct LibraryCoverImage: View {
         .accessibilityHidden(true)
     }
 
-    /// 没有封面时的书脊标记：书名首字，衬线字体，白色。
+    /// 没有封面时的书脊标记：一枚固定的书本类符号。
     ///
-    /// 用一个通用书本图标时，六本书看起来是同一本；换成首字后一行书名自带身份，
-    /// 也省掉一个到处重复的符号。字号跟封面高度走，随 Dynamic Type 缩放。
+    /// 不用书名首字：中文首字在封面上像错字，也不是图标语言。这里从 10 枚
+    /// 书本/文稿符号里按书 id 稳定取一枚，同一本书永远同一个标记。
     private var placeholderMark: some View {
-        Text(initialMark)
-            .font(.system(size: height * 0.36, weight: .medium))
-            // 占位纸色在深浅两档都是压暗的，字色固定白色，是 §1.4 记下的例外。
+        Image(systemName: symbol)
+            .font(.system(size: height * 0.34, weight: .medium))
+            // 占位纸色在深浅两档都是压暗的，图标固定白色，是 §1.4 记下的例外。
             .foregroundStyle(Color.white)
-            .minimumScaleFactor(0.6)
             .accessibilityHidden(true)
     }
 
-    /// 书名首字。空白书名退回「无题」的首字，不会显示一个空封面。
-    private var initialMark: String {
-        String(displayTitle.prefix(1))
+    private var symbol: String {
+        ShelfCoverSymbols.symbol(for: seed.isEmpty ? displayTitle : seed)
     }
 
     private var placeholderColor: Color {
-        ShelfCoverPalette.color(for: seed.isEmpty ? displayTitle : seed)
+        Theme.Identity.color(for: seed.isEmpty ? displayTitle : seed)
     }
 
     @MainActor
@@ -145,42 +143,27 @@ private final class CoverThumbnailCache {
     }
 }
 
-// MARK: - 占位书脊配色
+// MARK: - 占位书脊符号
 
-/// 书脊占位色：固定的 6 种低饱和纸色，只用于封面占位，不参与控件语义。
+/// 占位封面上的 10 枚符号：都是书本/文稿类，风格统一（单色、同一字重）。
 ///
-/// 这是内容身份（每本书有自己的颜色），不是品牌色：色相固定、饱和度压低，
-/// 深色模式再暗一档，和系统语义色放在一起也不打架。
-private enum ShelfCoverPalette {
-    private static let colors: [Color] = [
-        dynamic(light: 0x3C3A37, dark: 0x2B2926),
-        dynamic(light: 0x8A5A46, dark: 0x6B4435),
-        dynamic(light: 0x5C6B4F, dark: 0x47543D),
-        dynamic(light: 0x4E5D6C, dark: 0x3C4957),
-        dynamic(light: 0x6A4A5E, dark: 0x523A49),
-        dynamic(light: 0x9A7C58, dark: 0x765E42),
+/// 和纸色一样按书 id 稳定取，同一本书不会每次打开换一个图标。
+/// 纸色在 Theme.Identity，和一级分类图标共用一套。
+private enum ShelfCoverSymbols {
+    private static let symbols: [String] = [
+        "book.pages",
+        "book.closed",
+        "books.vertical",
+        "text.book.closed",
+        "character.book.closed",
+        "doc.text",
+        "doc.plaintext",
+        "scroll",
+        "quote.opening",
+        "bookmark",
     ]
 
-    static func color(for seed: String) -> Color {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for scalar in seed.unicodeScalars {
-            hash = (hash ^ UInt64(scalar.value)) &* 1_099_511_628_211
-        }
-        return colors[Int(hash % UInt64(colors.count))]
-    }
-
-    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in
-            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
-        })
-    }
-}
-
-private extension UIColor {
-    convenience init(hex: UInt32) {
-        let red = CGFloat((hex >> 16) & 0xFF) / 255
-        let green = CGFloat((hex >> 8) & 0xFF) / 255
-        let blue = CGFloat(hex & 0xFF) / 255
-        self.init(red: red, green: green, blue: blue, alpha: 1)
+    static func symbol(for seed: String) -> String {
+        symbols[Int(Theme.Identity.stableHash(seed) % UInt64(symbols.count))]
     }
 }
