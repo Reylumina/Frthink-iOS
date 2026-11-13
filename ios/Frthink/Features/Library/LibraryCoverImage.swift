@@ -60,7 +60,7 @@ struct LibraryCoverImage: View {
     /// 也省掉一个到处重复的符号。字号跟封面高度走，随 Dynamic Type 缩放。
     private var placeholderMark: some View {
         Text(initialMark)
-            .font(.system(size: height * 0.36, weight: .medium, design: .serif))
+            .font(.custom("Songti SC", size: height * 0.40))
             // 占位纸色在深浅两档都是压暗的，字色固定白色，是 §1.4 记下的例外。
             .foregroundStyle(Color.white)
             .minimumScaleFactor(0.6)

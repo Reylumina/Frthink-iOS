@@ -24,9 +24,9 @@ struct ReaderParagraphView: View {
         DynamicTypeFont.bodySize(Double(fontSize), dynamicTypeSize: dynamicTypeSize)
     }
 
-    /// 章节标题：衬线、略大、稍重。正文仍是系统无衬线，读时不抢注意力。
+    /// 章节标题：宋体、略大。正文仍是系统无衬线，读时不抢注意力。
     private var headingFont: Font {
-        .system(size: scaledFontSize * 1.08, weight: .semibold, design: .serif)
+        .custom("Songti SC", size: scaledFontSize * 1.08, relativeTo: .body)
     }
 
     var body: some View {

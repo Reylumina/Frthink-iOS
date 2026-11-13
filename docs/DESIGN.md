@@ -109,12 +109,15 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 
 ### 2.1 字体角色
 
-所有界面文字用 `Font.TextStyle`，跟随 Dynamic Type，最小 `.caption`（默认 12pt），不用 `.caption2`。中英文都用系统字体（SF、PingFang），不引入 `.serif`，不用自定义字体。层级靠字号、字重和留白，不靠换字体。
+所有界面文字用 `Font.TextStyle`，跟随 Dynamic Type，最小 `.caption`（默认 12pt），不用 `.caption2`。中英文都用系统字体（SF、PingFang），不用自定义字体。层级靠字号、字重和留白，不靠换字体。
+
+**唯一的 serif 例外**：书名与章节标题用系统衬线（`Theme.bookTitle`、`ReaderParagraphView` 的 heading 分支），和书封首字同一套语气——这三处是「书」，不是界面。除此之外任何地方都不许用 `.serif`。
 
 | 角色 | 样式 | token |
 |---|---|---|
 | 页面大标题 | 系统 `navigationTitle`，一级页用大标题 | — |
 | 页内标题、卡片标题 | `.title3.weight(.semibold)` | `Theme.heading` |
+| 书名、章节标题 | 系统衬线（唯一例外，见上） | `Theme.bookTitle` |
 | 区块标题 | 系统 `Section` 标题样式，只去掉大写变换 | `AppSectionHeader` |
 | 行标题、按钮、界面正文 | `.body` | `Theme.label` |
 | 行尾的值 | `.body`，`.secondary` 色 | `Theme.label` |
