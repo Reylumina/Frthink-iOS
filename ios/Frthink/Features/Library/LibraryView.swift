@@ -256,6 +256,9 @@ struct LibraryView: View {
     @MainActor
     private func trash(_ project: Project) {
         store.trash(project)
+        store.showToast("已移入回收站", actionTitle: "撤销") {
+            store.restore(project)
+        }
         store.toast = "已移入回收站"
     }
 }

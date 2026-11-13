@@ -35,10 +35,9 @@ struct ArchiveImportFlowView: View {
                 }
             }
         }
-        .onDisappear {
-            // 正常点「完成」时 close() 已经复位；这里兜住侧滑返回与外部弹出。
-            controller.cancel()
-        }
+        // 离开页面不算取消：切 Tab 也会触发 onDisappear，导入会在后台继续。
+        // 导入期间的返回键已经隐藏，出口只有工具栏上的「取消」和完成后的「完成」，
+        // 两者都会明确复位状态，不会留下半截流程。
         .alert(
             "覆盖同名书项目？",
             isPresented: Binding(

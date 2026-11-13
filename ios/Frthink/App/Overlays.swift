@@ -6,15 +6,33 @@ import SwiftUI
 /// 淡入淡出与位移统一走 `motionLayout`，减弱动态效果时只保留淡入淡出。
 struct ToastView: View {
     let text: String
+    /// 可选的动作按钮（「撤销」一类）。没有动作时就是纯文字提示。
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    @Environment(AppStore.self) private var store
 
     var body: some View {
-        Text(text)
-            .font(Theme.label)
-            .foregroundStyle(.primary)
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, Theme.Spacing.m)
-            .glassSurface(Capsule())
-            .accessibilityAddTraits(.isStaticText)
+        HStack(spacing: Theme.Spacing.m) {
+            Text(text)
+                .font(Theme.label)
+                .foregroundStyle(.primary)
+            if let actionTitle, let action {
+                Button(actionTitle) {
+                    store.toast = nil
+                    action()
+                }
+                .font(Font.subheadline.weight(.semibold))
+                .foregroundStyle(Theme.accent)
+                .buttonStyle(.plain)
+                .frame(minHeight: Theme.Layout.hitTarget)
+                .contentShape(Rectangle())
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.vertical, Theme.Spacing.s)
+        .glassSurface(Capsule())
+        .accessibilityAddTraits(.isStaticText)
     }
 }
 
@@ -28,8 +46,12 @@ struct ToastPresenter: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ToastView(text: text)
-            .padding(.bottom, bottomPadding)
+        ToastView(
+            text: text,
+            actionTitle: store.toastActionTitle,
+            action: store.toastAction
+        )
+        .padding(.bottom, bottomPadding)
             .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             .task(id: text) {
                 try? await Task.sleep(for: .seconds(2.2))

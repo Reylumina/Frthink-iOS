@@ -13,6 +13,9 @@ final class AppStore {
     var settings: AppSettings
     /// 轻提示，UI 读它弹一个 banner 后置 nil。
     var toast: String?
+    /// 轻提示上的动作按钮（撤销一类）。
+    var toastActionTitle: String?
+    var toastAction: (() -> Void)?
     var errorMessage: String?
 
     let fileStore: FileStore
@@ -275,6 +278,13 @@ final class AppStore {
         p.updatedAt = Date()
         projects[idx] = p
         persistProject(p)
+    }
+
+    /// 轻提示，带一个可选的动作（例如「撤销」）。
+    func showToast(_ text: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+        toastActionTitle = actionTitle
+        toastAction = action
+        toast = text
     }
 
     /// 回收站。Android 端是 `trashedAt` 时间戳，不是立即删除。

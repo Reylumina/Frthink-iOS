@@ -55,39 +55,36 @@ struct StreamingTextView: UIViewRepresentable {
             return
         }
 
-        let result = coordinator.window.rendered(text)
-        let rendered = result.text
+        let rendered = coordinator.window.rendered(text).text
         guard coordinator.appliedText != rendered else { return }
 
-        if !result.reset, rendered.hasPrefix(coordinator.appliedText) {
-            let suffix = String(rendered.dropFirst(coordinator.appliedText.count))
-            // 新增的这几个字里出现标题标记或加粗标记时，整段重排：按后缀单独排
-            // 会把「## 第三章」当正文，也接不上跨后缀的 ** 配对。
-            // 标题跨批到达时也要整段重排：上一批刚写了个 "#"，这一批把标题文字补上，
-            // 按后缀追加的话那一行永远按正文排。
-            let tailInHeading = Self.endsInsideHeading(rendered)
-            let needsFullRender = tailInHeading || suffix.contains("#") || suffix.contains("**")
-            if !suffix.isEmpty, !needsFullRender {
-                // 后缀按原样追加：不能再走 attributed()，它会把整段拆开并 trim，
-                // 落在段末的那个换行会被吃掉，下一批字就粘在上一段行尾。
-                uiView.textStorage.append(Self.fragment(
-                    suffix,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing
-                ))
-            } else if needsFullRender {
-                uiView.attributedText = Self.attributed(
-                    rendered,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing
-                )
+        // 先算出「整段应有的排版」，再只替换和屏幕上不同的那一段。
+        //
+        // 原来靠「原始文本前缀相等」判断能不能追加：屏幕上放的其实是归一化后的
+        // 文本（段落合并、去掉标记），两者对不上，下一批就接错位置。现在按显示串
+        // 求公共前缀，公共部分不动，只重排尾部——通常只有最后一段。
+        let newAttributed = Self.attributed(
+            rendered,
+            fontSize: fontSize,
+            lineSpacing: lineSpacing
+        )
+        let oldString = uiView.attributedText?.string ?? "" as String
+        let newString = newAttributed.string
+        if oldString != newString {
+            let oldNS = oldString as NSString
+            let newNS = newString as NSString
+            let maxCommon = min(oldNS.length, newNS.length)
+            var common = 0
+            while common < maxCommon, oldNS.character(at: common) == newNS.character(at: common) {
+                common += 1
             }
-        } else {
-            uiView.attributedText = Self.attributed(
-                rendered,
-                fontSize: fontSize,
-                lineSpacing: lineSpacing
+            let replaceRange = NSRange(location: common, length: oldNS.length - common)
+            let replacement = newAttributed.attributedSubstring(
+                from: NSRange(location: common, length: newNS.length - common)
             )
+            uiView.textStorage.beginEditing()
+            uiView.textStorage.replaceCharacters(in: replaceRange, with: replacement)
+            uiView.textStorage.endEditing()
         }
         coordinator.appliedText = rendered
         // 先让下一次测量拿到新高度，再由 SwiftUI 收这一帧。
@@ -169,31 +166,6 @@ struct StreamingTextView: UIViewRepresentable {
             }
         }
         return result
-    }
-
-    /// 全文最后一个段落是不是从 "#" 开头的标题（含没写完的标题）。
-    private static func endsInsideHeading(_ text: String) -> Bool {
-        let tail = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
-        return tail.trimmingCharacters(in: .whitespaces).hasPrefix("#")
-    }
-
-    /// 增量片段：原样保留换行和空白，只套正文字体与段落样式。
-    private static func fragment(
-        _ text: String,
-        fontSize: CGFloat,
-        lineSpacing: CGFloat
-    ) -> NSAttributedString {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = lineSpacing
-        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing(size: fontSize)
-        return NSAttributedString(
-            string: text,
-            attributes: [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: paragraph,
-            ]
-        )
     }
 
     /// 把一段按 `**` 切成普通/加粗两种 run，标记本身不显示。

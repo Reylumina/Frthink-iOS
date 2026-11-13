@@ -315,6 +315,14 @@ struct AppValueRow: View {
     @ScaledMetric(relativeTo: .footnote) private var iconColumn: CGFloat = 20
 
     var body: some View {
+        // 无障碍字号下值放不进同一行时改竖排，避免数值折行断字（§5.5）。
+        ViewThatFits(in: .horizontal) {
+            horizontal
+            vertical
+        }
+    }
+
+    private var horizontal: some View {
         HStack(spacing: Theme.Spacing.s) {
             if let symbol {
                 Image(systemName: symbol)
@@ -332,6 +340,20 @@ struct AppValueRow: View {
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
+        .frame(minHeight: Theme.Layout.rowContentHeight)
+    }
+
+    private var vertical: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.primary)
+            Text(value)
+                .font(Theme.label)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: Theme.Layout.rowContentHeight)
     }
 }
