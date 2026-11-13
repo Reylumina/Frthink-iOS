@@ -735,8 +735,8 @@ struct PrimaryActionButton: View {
                 Text(title)
                     .font(.body.weight(.semibold))
             }
+            // 高度交给 controlSize（.large 已是系统主操作刻度），再叠内边距会到 74pt。
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.m)
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
@@ -761,8 +761,8 @@ struct SecondaryActionButton: View {
                 Text(title)
                     .font(.subheadline.weight(.medium))
             }
+            // 同上：高度由 controlSize 给出。
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Spacing.s)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)

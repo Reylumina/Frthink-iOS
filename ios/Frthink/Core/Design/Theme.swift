@@ -370,6 +370,21 @@ extension UIColor {
     }
 }
 
+// MARK: - 玻璃分组
+
+extension View {
+    /// 内容层上成组浮起的玻璃。iOS 26 交给 `GlassEffectContainer` 统一渲染，
+    /// 多个玻璃元素才会相互感知、边缘与光感不打架；更早的系统原样返回。
+    @ViewBuilder
+    func glassStack() -> some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer { self }
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - 空状态
 
 /// 空状态。
@@ -386,32 +401,19 @@ struct EmptyStateView: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            Image(systemName: symbol)
-                .font(.largeTitle)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text(title)
-                .font(Theme.labelEmphasis)
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.center)
-
+        // 系统空态组件（iOS 17 起）：字形层级、字号、间距都由系统给，
+        // 和无障碍字号的行为一致。
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
             if !message.isEmpty {
                 Text(message)
-                    .font(Theme.labelSmall)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-
+        } actions: {
             if let actionTitle, let action {
                 actionButton(title: actionTitle, action: action)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Spacing.xxl)
-        .padding(.horizontal, Theme.Spacing.l)
     }
 
     /// 默认用次操作按钮，和世界页两栏的空态保持一致；整页只有一个动作时

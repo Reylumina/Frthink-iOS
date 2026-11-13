@@ -191,11 +191,13 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             if let toast = store.toast {
                 ToastPresenter(text: toast, bottomPadding: Theme.Spacing.xxl * 2)
+                    .glassStack()
             }
         }
         .overlay {
             if let error = store.errorMessage {
                 ErrorBanner(message: error) { store.errorMessage = nil }
+                    .glassStack()
             }
         }
         // 「正在打开书稿…」只留各 Tab 里的占位（openingPlaceholder）：

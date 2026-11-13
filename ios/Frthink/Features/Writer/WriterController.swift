@@ -368,7 +368,8 @@ final class WriterController {
                 store: store,
                 manuscript: manuscript,
                 bodyRange: bodyRange,
-                provider: provider
+                provider: provider,
+                excludingMessageID: preparedUserMessageID
             )
             // 先把用户气泡落盘：组装在 56 万字书上要几秒，这期间被杀掉不能让
             // 指令只活在一个 Task 里。历史快照已经取过，不会把这条重复带进去。
@@ -451,13 +452,16 @@ final class WriterController {
         store: AppStore,
         manuscript: String,
         bodyRange: PromptLibrary.BodyRange,
-        provider: ProviderSetting
+        provider: ProviderSetting,
+        excludingMessageID: String? = nil
     ) throws -> WriterPromptSnapshot {
         let plan = try budget(for: provider, settings: store.settings)
         return WriterPromptSnapshot(
             action: action,
             manuscript: manuscript,
-            messages: session.payload.messages,
+            // 预算重试时用户气泡已经在历史里了：再把它当历史带进去，指令会被
+            // 追加第二遍，同一句话发两次、token 虚高，还可能误判「仍然过大」。
+            messages: session.payload.messages.filter { $0.id != excludingMessageID },
             world: session.payload.world,
             assistantSupplement: session.payload.assistantSupplement,
             settings: store.settings,

@@ -193,6 +193,7 @@ struct WriterPane: View {
             .overlay(alignment: .bottom) {
                 if let prompt = undoPrompt {
                     undoPromptView(prompt)
+                        .glassStack()
                         .padding(.bottom, bottomBarHeight + Theme.Spacing.s)
                         .transition(
                             reduceMotion
