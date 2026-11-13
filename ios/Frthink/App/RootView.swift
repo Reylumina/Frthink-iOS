@@ -118,6 +118,9 @@ struct RootView: View {
         .task(id: activeProjectID) {
             guard let project = activeProject else {
                 session = nil
+                // 没有当前书时把这个键清掉：它同时被创作页用来判断「是否换了书」，
+                // 留着旧 id 会让旧 Pane 以为还在同一本，停不下来。
+                UserDefaults.standard.removeObject(forKey: Self.activeProjectKey)
                 await store.trimSessionCache(keeping: [])
                 // 上次打开的书被删除或放进回收站：落到最近一本，不留空白页。
                 if let fallback = store.activeProjects.first, activeProjectID != fallback.id {

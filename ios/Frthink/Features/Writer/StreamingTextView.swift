@@ -65,7 +65,9 @@ struct StreamingTextView: UIViewRepresentable {
             // 会把「## 第三章」当正文，也接不上跨后缀的 ** 配对。
             let needsFullRender = suffix.contains("#") || suffix.contains("**")
             if !suffix.isEmpty, !needsFullRender {
-                uiView.textStorage.append(Self.attributed(
+                // 后缀按原样追加：不能再走 attributed()，它会把整段拆开并 trim，
+                // 落在段末的那个换行会被吃掉，下一批字就粘在上一段行尾。
+                uiView.textStorage.append(Self.fragment(
                     suffix,
                     fontSize: fontSize,
                     lineSpacing: lineSpacing
@@ -164,6 +166,25 @@ struct StreamingTextView: UIViewRepresentable {
             }
         }
         return result
+    }
+
+    /// 增量片段：原样保留换行和空白，只套正文字体与段落样式。
+    private static func fragment(
+        _ text: String,
+        fontSize: CGFloat,
+        lineSpacing: CGFloat
+    ) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        paragraph.paragraphSpacing = WriterTypography.paragraphSpacing(size: fontSize)
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: paragraph,
+            ]
+        )
     }
 
     /// 把一段按 `**` 切成普通/加粗两种 run，标记本身不显示。

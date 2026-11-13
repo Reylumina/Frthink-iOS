@@ -160,6 +160,7 @@ struct WorldSettingSection: View {
                 )
                 Image(systemName: "chevron.right")
                     .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
             .contentShape(Rectangle())
         }

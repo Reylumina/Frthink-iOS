@@ -155,7 +155,7 @@ struct SettingsView: View {
             }
         }
         .contentShape(Rectangle())
-        .frame(minHeight: Theme.Layout.hitTarget)
+        .frame(minHeight: Theme.Layout.rowContentHeight)
     }
 
     private var hasKey: Bool {

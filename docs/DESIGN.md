@@ -66,7 +66,7 @@ Frthink 应该看起来像 iOS 自带的写作应用：安静、现代、正文�
 
 ### 1.4 书封占位色
 
-书封用 `Theme.Identity` 的 10 种纸色，全部取系统动态色（red/orange/brown/green/teal/blue/indigo/purple/pink/gray），按书项目 id 稳定取色。依据 HIG「Color」的 System colors 一节：用系统色（随深浅色、增强对比度和玻璃材质自动适配），不要在代码里写死系统色值——所以这里不出现 hex。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放四种书本轮廓之一（`book`/`book.closed`/`book.pages`/`books.vertical`），按 id 稳定取；不用带字、带文字行或非书类的图形（箱子、文件夹、报纸都不算书）（`book.pages`、`book.closed`、`books.vertical`、`text.book.closed`、`character.book.closed`、`doc.text`、`doc.plaintext`、`scroll`、`quote.opening`、`bookmark`），按同一个 id 稳定取，单色、同一字重、白色。不用书名首字。不加描边和装饰线。
+书封用 `Theme.Identity` 的 12 种纸色（朱红/橙/琥珀/橄榄/绿/青/湖蓝/靛/紫/玫/赭/石墨），按书项目 id 稳定取色，每种给出浅色与深色两档。这是全项目**唯一允许写死 hex 的地方**：它是内容身份色，不是语义色——系统动态色在白底上偏灰，一排书封看着像褪了色；手调色相才能让 12 本书一眼分开。除这里以外的任何颜色都必须来自语义色或资产目录。它是内容身份，不是品牌色，不用于按钮、开关、状态或页面底。占位封面上放四种书本轮廓之一（`book`/`book.closed`/`book.pages`/`books.vertical`），按 id 稳定取；不用带字、带文字行或非书类的图形（箱子、文件夹、报纸都不算书）（`book.pages`、`book.closed`、`books.vertical`、`text.book.closed`、`character.book.closed`、`doc.text`、`doc.plaintext`、`scroll`、`quote.opening`、`bookmark`），按同一个 id 稳定取，单色、同一字重、白色。不用书名首字。不加描边和装饰线。
 
 **一级分类图标**用系统语义亮色 + 同一种形状：实底圆角方块 + 白色符号，每个分类固定一个色相（连接=蓝、提示词=紫、存档=青、存储=橙、外观=粉、关于=绿）。注意纸色（`Theme.Identity`）只给书封用——它是内容身份，低饱和；UI 图标要用系统色，否则整屏发闷。AI 服务商图标与系统图标同尺寸（32pt），用品牌标，不套圆角色块。
 
@@ -158,7 +158,7 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 - 图标尺寸靠 `.font` 或 `.imageScale` 控制，跟随相邻文字，不用 `.frame` 定尺寸。确实需要固定的控件尺寸时用 `@ScaledMetric`。
 - 字重跟随相邻文字，不单独指定。
 - 默认单色渲染。状态图标可以用 `.symbolRenderingMode(.hierarchical)`。实心变体（`.fill`）只表示「选中 / 当前」或本身就是实心语义的符号（`lock.fill`、`xmark.circle.fill`、`checkmark.circle.fill` 这类），不拿实心做装饰；标签栏由系统处理。
-- 列表行的图标一律用 `IconTile`（实底圆角方块 + 白色符号），和系统设置同一种语法：基准 30pt、圆角 22.6%、字形占 50%、medium 字重，尺寸走 `@ScaledMetric`。颜色取系统动态色（`.blue`、`.indigo`、`.orange`、`.purple`、`.pink`、`.teal`、`.gray`），同一类资料固定一个色相；没有专属含义的行用中性灰。AI 服务商图标用品牌标，不套方块。
+- 列表行的图标一律用 `IconTile`（实底圆角方块 + 白色符号），和系统设置同一种语法：基准 28pt（`Theme.Layout.iconTileSize`，全应用唯一取值）、圆角 22.6%、字形占 54%、medium 字重，尺寸走 `@ScaledMetric`；`ProviderIcon` 用同一基准并同样缩放。颜色取系统动态色（`.blue`、`.indigo`、`.orange`、`.purple`、`.pink`、`.teal`、`.gray`），同一类资料固定一个色相；没有专属含义的行用中性灰。AI 服务商图标用品牌标，不套方块。
 - 只有图标的按钮必须设 `accessibilityLabel`。
 - 符号动效（`symbolEffect`）只表达状态，例如生成中用 `.pulse`，不做装饰。
 
@@ -403,7 +403,7 @@ HStack {
 | `PrimaryActionButton`、`SecondaryActionButton`、`DestructiveActionRow` | 按钮三层（§5.4） |
 | `EmptyStateView`、`InlineEmptyState` | 整页空态、区块空态 |
 | `ChapterNavigationRow` | 阅读目录和写作台章节表共用的章节行 |
-| `IconTile`、`ProviderIcon` | 一级分类图标、服务商图标 |
+| `IconTile`、`ProviderIcon` | 一级分类图标、服务商图标（同为 28pt 且都随字号缩放） |
 | `SheetCloseButton`、`SheetConfirmButton` | sheet/编辑页的关闭与确认（iOS 26 由系统画 ×/✓） |
 | `FloatingGlassButton` | 浮在内容上的按钮：不传 `title` 是圆钮，传了是「图标 + 文字」胶囊（和圆形发送键同屏时用胶囊） |
 | `SettingsLabelRow` | 二级以下页面的导航行：`Label` + 行尾值，无障碍字号下自动竖排 |

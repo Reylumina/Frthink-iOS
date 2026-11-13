@@ -749,10 +749,17 @@ final class ProjectSession {
         return removed
     }
 
-    /// 把撤回掉的一段接回对话末尾（撤回只能从某条删到结尾，所以顺序天然保持）。
-    func restore(_ messages: [ChatMessage]) {
+    /// 把撤回掉的一段接回原位置。
+    ///
+    /// 不能无条件接末尾：撤回后用户可能又发了一条，接末尾会把旧对话排到新对话
+    /// 之后，提示词顺序就永久错了。
+    func restore(_ messages: [ChatMessage], at index: Int?) {
         guard !messages.isEmpty else { return }
-        payload.messages.append(contentsOf: messages)
+        if let index, index >= 0, index <= payload.messages.count {
+            payload.messages.insert(contentsOf: messages, at: index)
+        } else {
+            payload.messages.append(contentsOf: messages)
+        }
         scheduleSave()
     }
 

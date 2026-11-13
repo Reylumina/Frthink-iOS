@@ -121,7 +121,9 @@ struct SettingsTokenUsageSection: View {
         Task { @MainActor in
             let total = await Task.detached(priority: .utility) {
                 projects.reduce(0) { partial, project in
-                    partial + TokenEstimator.estimate(files.loadPayload(project.id).manuscript)
+                    // 正文是分页存的，payload.manuscript 在分页存储后恒为空；
+                    // 这里必须按正文读，否则永远算出 0。
+                    partial + TokenEstimator.estimate(files.loadBody(project.id)?.text ?? "")
                 }
             }.value
             contentTokens = total

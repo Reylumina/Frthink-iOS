@@ -922,8 +922,11 @@ final class WriterController {
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
         // 生成期间没有写 session，结束前必须把最后一段增量并回去。
-        persistPendingDelta(session: session, messageID: messageID)
-        flushStreaming(session: session, messageID: messageID)
+        // 消息可能已经被撤回/删除：此时不能再写回内容，否则删掉的回复会复活。
+        if session.payload.messages.contains(where: { $0.id == messageID }) {
+            persistPendingDelta(session: session, messageID: messageID)
+            flushStreaming(session: session, messageID: messageID)
+        }
         session.finishGeneration()
 
         let wasStopped = stopRequested

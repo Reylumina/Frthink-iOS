@@ -329,16 +329,17 @@ struct WriterPane: View {
             controller.checkpoint(session: session)
             discardUndoActions()
 
-            // 切 Tab 也会触发 onDisappear，但生成必须继续。判据不是「回来了没有」，
-            // 而是「当前书还是不是这本」：切书后旧 Pane 被 .id() 销毁，旧任务必须停，
-            // 否则孤儿流会继续往旧会话写。等两秒让切书时的新会话先落定。
+            // 切 Tab 也会触发 onDisappear，但生成必须继续。
+            //
+            // 判据是「这个会话还在不在缓存里」：切书时 RootView 会把旧会话从缓存里
+            // 驱逐，旧 Pane 的流必须停；切 Tab 时会话仍在缓存里，什么都不做。
+            // 用 activeProjectID 判不对——切走两秒内切回同一本时那个 id 会骗过判断，
+            // 旧流和新流就会并发写同一份会话。
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
-                let active = UserDefaults.standard.string(forKey: RootView.activeProjectKey)
-                guard active != session.project.id else { return }
-                if controller.isBusy {
-                    controller.stop()
-                }
+                let stillCached = store.cachedSession(for: session.project.id) === session
+                guard !stillCached, controller.isBusy else { return }
+                controller.stop()
             }
         }
     }
@@ -786,9 +787,10 @@ struct WriterPane: View {
                     if controller.isBusy {
                         controller.stop()
                     }
+                    let index = session.payload.messages.firstIndex { $0.id == message.id }
                     let removed = session.withdraw(from: message.id)
                     presentUndoPrompt("已撤回这条指令") {
-                        session.restore(removed)
+                        session.restore(removed, at: index)
                     }
                 } label: {
                     Label("撤回（连同之后的对话）", systemImage: "arrow.uturn.backward")

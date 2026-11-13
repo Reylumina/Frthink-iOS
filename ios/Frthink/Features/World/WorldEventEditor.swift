@@ -13,14 +13,16 @@ struct WorldEventEditor: View {
     @State private var confirmingDiscard = false
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: EventCard
+    /// 打开页面时的卡片：写回时只覆盖用户改过的字段，保留刷新并进来的内容。
+    private let openedCard: EventCard
 
     init(session: ProjectSession, eventID: String) {
         self.session = session
         self.eventID = eventID
-        _draft = State(
-            initialValue: session.payload.world.events.first { $0.id == eventID }
-                ?? EventCard(title: "")
-        )
+        let current = session.payload.world.events.first { $0.id == eventID }
+            ?? EventCard(title: "")
+        _draft = State(initialValue: current)
+        openedCard = current
     }
 
     var body: some View {
@@ -219,11 +221,21 @@ struct WorldEventEditor: View {
         guard let index = session.payload.world.events.firstIndex(where: {
             $0.id == eventID
         }) else { return }
-        guard draft != session.payload.world.events[index] else { return }
+        guard draft != openedCard else { return }
         // 标题与其它卡冲突时整份草稿都不写：保存按钮已经禁用并给了行内原因，
         // 下滑也已被拦住，用户只能改标题或点「取消」确认放弃。
         guard !hasDuplicateTitle else { return }
-        var event = draft
+
+        // 三路合并：只写用户改过的字段。整张草稿覆盖会把刷新期间并进来的
+        // 起因/经过/结果抹掉，而那一轮结果不会重来。
+        var event = session.payload.world.events[index]
+        if draft.title != openedCard.title { event.title = draft.title }
+        if draft.scene != openedCard.scene { event.scene = draft.scene }
+        if draft.characters != openedCard.characters { event.characters = draft.characters }
+        if draft.cause != openedCard.cause { event.cause = draft.cause }
+        if draft.development != openedCard.development { event.development = draft.development }
+        if draft.consequence != openedCard.consequence { event.consequence = draft.consequence }
+        guard event != session.payload.world.events[index] else { return }
         event.updatedAt = Date()
         session.payload.world.events[index] = event
         draft = event

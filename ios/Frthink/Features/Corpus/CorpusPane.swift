@@ -562,11 +562,13 @@ private final class CorpusHighlightCache {
     private var values: [String: Entry] = [:]
 
     func highlight(entry: CorpusEntry, tokens: [String]) -> CorpusRowHighlight {
+        // 签名必须包含内容本身：只记长度时，改成同样字数的另一个词
+        // 哈希不变，列表会一直显示旧标题和旧原句。
         let signature = [
             tokens.joined(separator: "\u{1F}"),
-            String(entry.title.count),
-            String(entry.text.count),
-            String(entry.category.count),
+            entry.title,
+            entry.text,
+            entry.category,
             entry.tags.joined(separator: "\u{1F}"),
         ].joined(separator: "|")
         if let cached = values[entry.id], cached.signature == signature {

@@ -8,7 +8,8 @@ import SwiftUI
 /// 星号、短横线很常见，全量块级解析会把它们误读成列表和分隔线。
 enum MarkdownInline {
     static func attributed(_ raw: String) -> AttributedString? {
-        guard raw.contains("**") || raw.contains("__") else { return nil }
+        // 加粗、斜体都交给系统解析；解析失败就退回纯文本，不会出现半截标记。
+        guard raw.contains("*") || raw.contains("__") else { return nil }
         return try? AttributedString(
             markdown: raw,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)

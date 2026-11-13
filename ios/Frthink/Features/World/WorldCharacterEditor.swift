@@ -14,14 +14,17 @@ struct WorldCharacterEditor: View {
     @State private var confirmingDelete = false
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: CharacterCard
+    /// 打开页面那一刻的卡片。写回时靠它判断哪些字段是用户真正改过的，
+    /// 免得把刷新期间并进来的新内容用旧快照盖掉。
+    private let openedCard: CharacterCard
 
     init(session: ProjectSession, cardID: String) {
         self.session = session
         self.cardID = cardID
-        _draft = State(
-            initialValue: session.payload.world.characters.first { $0.id == cardID }
-                ?? CharacterCard(name: "")
-        )
+        let current = session.payload.world.characters.first { $0.id == cardID }
+            ?? CharacterCard(name: "")
+        _draft = State(initialValue: current)
+        openedCard = current
     }
 
     var body: some View {
@@ -241,15 +244,37 @@ struct WorldCharacterEditor: View {
         draft.name.isEmpty ? "人物卡" : draft.name
     }
 
+    /// 三路合并：只把用户动过的字段写到当前卡片上。
+    ///
+    /// 之前是整张草稿覆盖，刷新在打开编辑页之后并入的身份、性格、记忆会被
+    /// 打开时的旧快照抹掉，而断点已经推进、这一轮结果不会重来。
     private func commitDraft() {
         guard let index = session.payload.world.characters.firstIndex(where: {
             $0.id == cardID
         }) else { return }
-        guard draft != session.payload.world.characters[index] else { return }
-        var card = draft
-        card.updatedAt = Date()
-        session.payload.world.characters[index] = card
-        draft = card
+        guard draft != openedCard else { return }
+
+        var merged = session.payload.world.characters[index]
+        if draft.name != openedCard.name { merged.name = draft.name }
+        if draft.identity != openedCard.identity { merged.identity = draft.identity }
+        if draft.personality != openedCard.personality { merged.personality = draft.personality }
+        if draft.voice != openedCard.voice { merged.voice = draft.voice }
+        if draft.goals != openedCard.goals { merged.goals = draft.goals }
+        if draft.boundaries != openedCard.boundaries { merged.boundaries = draft.boundaries }
+        if draft.aliases != openedCard.aliases { merged.aliases = draft.aliases }
+        if draft.personalMemory != openedCard.personalMemory {
+            merged.personalMemory = draft.personalMemory
+        }
+        if draft.relationshipAttitudes != openedCard.relationshipAttitudes {
+            merged.relationshipAttitudes = draft.relationshipAttitudes
+        }
+        if draft.customEntries != openedCard.customEntries {
+            merged.customEntries = draft.customEntries
+        }
+        guard merged != session.payload.world.characters[index] else { return }
+        merged.updatedAt = Date()
+        session.payload.world.characters[index] = merged
+        draft = merged
         session.scheduleSave()
     }
 

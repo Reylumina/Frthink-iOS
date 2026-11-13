@@ -147,7 +147,7 @@ struct IconTile: View {
     var filled: Bool = false
 
     /// 基准 30pt、圆角 22.6%、字形 50%、medium：对着系统设置的方块量的。
-    @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = 30
+    @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = Theme.Layout.iconTileSize
 
     private var effectiveSize: CGFloat { size ?? baseSize }
 
@@ -171,8 +171,12 @@ struct IconTile: View {
 struct ProviderIcon: View {
     let kind: ProviderKind
     var tint: Color = Theme.accent
-    /// 和服务商原本的品牌标尺寸一致：28pt。全应用图标同一把尺子。
-    var size: CGFloat = Theme.Layout.iconTileSize
+    /// 显式尺寸（可选）。不传就按全应用统一的 28pt 基准随字号缩放。
+    var size: CGFloat? = nil
+
+    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = Theme.Layout.iconTileSize
+
+    private var resolvedSize: CGFloat { size ?? scaledSize }
 
     var body: some View {
         Group {
@@ -181,17 +185,17 @@ struct ProviderIcon: View {
                     .resizable()
                     .scaledToFit()
                     // 品牌标留白 8%：14% 时图标看起来比旁边的系统方块小一圈。
-                    .padding(size * 0.08)
+                    .padding(resolvedSize * 0.08)
             } else {
                 Image(systemName: kind.symbolName)
-                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .font(.system(size: resolvedSize * 0.46, weight: .semibold))
                     .foregroundStyle(tint)
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: resolvedSize, height: resolvedSize)
         .background(
             background,
-            in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
+            in: RoundedRectangle(cornerRadius: resolvedSize * 0.3, style: .continuous)
         )
         .accessibilityHidden(true)
     }
@@ -658,7 +662,7 @@ struct PrimaryActionButton: View {
                 if isBusy {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.white)
+                        .tint(Theme.onAccent)
                 } else if let systemImage {
                     Image(systemName: systemImage)
                 }
