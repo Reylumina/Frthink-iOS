@@ -11,8 +11,8 @@ struct ProviderEditorView: View {
 
     private let store: AppStore
     private let onSaved: () -> Void
-    private let original: ProviderSetting
 
+    @State private var original: ProviderSetting
     @State private var draft: ProviderSetting
     /// 新输入的 Key。留空表示不修改已有的。
     @State private var keyInput: String = ""
@@ -35,7 +35,7 @@ struct ProviderEditorView: View {
     init(store: AppStore, provider: ProviderSetting, onSaved: @escaping () -> Void) {
         self.store = store
         self.onSaved = onSaved
-        self.original = provider
+        _original = State(initialValue: provider)
         _draft = State(initialValue: provider)
     }
 
@@ -475,7 +475,6 @@ struct ProviderEditorView: View {
         var normalized = draft
         normalized.baseURL = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         normalized.model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        normalized.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: normalized.baseURL),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
