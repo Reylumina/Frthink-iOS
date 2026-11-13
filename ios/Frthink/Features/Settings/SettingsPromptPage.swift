@@ -92,7 +92,7 @@ struct SettingsPromptPage: View {
             NavigationLink {
                 SettingsLongTermRulesPage(store: store)
             } label: {
-                SettingsLabelRow(title: "长期规则摘要", symbol: "checklist")
+                SettingsLabelRow(title: "长期规则摘要")
             }
         } header: {
             AppSectionHeader(title: "对话总结")

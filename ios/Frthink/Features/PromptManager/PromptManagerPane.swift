@@ -314,10 +314,7 @@ struct PromptManagerPane: View {
                 showingPreview = true
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
-                    SettingsLabelRow(
-                        title: "查看最终提示词",
-                        symbol: "doc.text.magnifyingglass"
-                    )
+                    SettingsLabelRow(title: "查看最终提示词")
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
