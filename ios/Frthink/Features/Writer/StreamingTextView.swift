@@ -5,6 +5,8 @@ import UIKit
 
 struct StreamingTextView: UIViewRepresentable {
     var text: String
+    /// 已增量统计的正文字数，避免流式每帧全串执行 `String.count`。
+    var characterCount: Int? = nil
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
     /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
@@ -24,7 +26,7 @@ struct StreamingTextView: UIViewRepresentable {
         view.textContainer.widthTracksTextView = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
-        let rendered = context.coordinator.window.rendered(text).text
+        let rendered = context.coordinator.window.rendered(text, characterCount: characterCount).text
         view.attributedText = Self.attributed(
             rendered,
             fontSize: fontSize,
@@ -44,18 +46,19 @@ struct StreamingTextView: UIViewRepresentable {
         if coordinator.fontSignature != signature {
             coordinator.fontSignature = signature
             coordinator.window = StreamingTextWindow()
-            let rendered = coordinator.window.rendered(text).text
+            let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
             uiView.attributedText = Self.attributed(
                 rendered,
                 fontSize: fontSize,
                 lineSpacing: lineSpacing
             )
             coordinator.appliedText = rendered
+            coordinator.textRevision += 1
             uiView.invalidateIntrinsicContentSize()
             return
         }
 
-        let rendered = coordinator.window.rendered(text).text
+        let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
         guard coordinator.appliedText != rendered else { return }
 
         // 按显示串求公共前缀，只替换尾部差异（通常只有最后一段），避免整段重排。
@@ -94,6 +97,7 @@ struct StreamingTextView: UIViewRepresentable {
         // 只有真的变了才重新测量：每帧都 invalidate 会让 SwiftUI 反复比对高度，
         // 表现为整块文字轻微抖动。
         if changed {
+            coordinator.textRevision += 1
             uiView.invalidateIntrinsicContentSize()
         }
     }
@@ -104,10 +108,19 @@ struct StreamingTextView: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         let width = JustifiedText.resolvedProposalWidth(proposal)
+        let coordinator = context.coordinator
+        if coordinator.cachedRevision == coordinator.textRevision,
+           abs(coordinator.cachedWidth - width) < 0.5 {
+            return CGSize(width: width, height: coordinator.cachedHeight)
+        }
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        return CGSize(width: width, height: max(1, measured.height))
+        let height = max(1, measured.height)
+        coordinator.cachedWidth = width
+        coordinator.cachedRevision = coordinator.textRevision
+        coordinator.cachedHeight = height
+        return CGSize(width: width, height: height)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -118,6 +131,10 @@ struct StreamingTextView: UIViewRepresentable {
         var appliedText = ""
         var fontSignature = ""
         var window = StreamingTextWindow()
+        var textRevision = 0
+        var cachedWidth: CGFloat = 0
+        var cachedRevision = -1
+        var cachedHeight: CGFloat = 0
     }
 
     // MARK: - 排版

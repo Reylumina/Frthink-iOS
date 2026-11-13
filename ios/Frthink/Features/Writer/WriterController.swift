@@ -763,11 +763,35 @@ final class WriterController {
         model: String
     ) async {
         var failure: Error?
+        let initialChars = streamingCharacterCount
         do {
             if useStreaming {
-                for try await event in client.stream(request) {
-                    handleStreamEvent(event, session: session, messageID: messageID)
-                    if Task.isCancelled { break }
+                do {
+                    for try await event in client.stream(request) {
+                        handleStreamEvent(event, session: session, messageID: messageID)
+                        if Task.isCancelled { break }
+                    }
+                } catch {
+                    // 流式未收到任何可见正文且非取消时，按原版 `-compat` 改用非流式重发一次。
+                    let noContentYet = streamingCharacterCount == initialChars
+                    if noContentYet,
+                       !error.isLLMCancellation,
+                       !Task.isCancelled,
+                       let attemptId = request.attemptId,
+                       !attemptId.isEmpty {
+                        var compat = request
+                        compat.stream = false
+                        compat.attemptId = attemptId + "-compat"
+                        let text = try await client.complete(compat)
+                        if !text.isEmpty {
+                            streamingText = text
+                            streamingCharacterCount = text.count
+                            pendingDelta += text
+                            flushStreaming(session: session, messageID: messageID)
+                        }
+                    } else {
+                        throw error
+                    }
                 }
             } else {
                 // 用户在设置里关掉了流式：一次性拿完整段再落盘。

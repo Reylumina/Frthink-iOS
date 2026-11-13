@@ -58,15 +58,14 @@ struct ChatMessage: Identifiable, Codable, Hashable {
 ///
 /// `sourceHash` 是原文分段内容的哈希，原文没变就命中缓存，不再请求 LLM。
 struct TranslationSegment: Identifiable, Codable, Hashable {
-    /// iOS 的目标语言标记。Android 的 TranslationRecord 把正文译文记成 `body`，
-    /// 存档导入时会映射到这个值。
-    static let defaultTarget = "zh-CN"
+    /// 正文译文目标标记，与 Android 端保持一致。
+    static let defaultTarget = "body"
 
     var id: String
     /// 设备/账号归属，Android 端用 `owner` 区分同一台机器上的多用户隔离。
     var owner: String
     var project: String
-    /// 目标语言，目前只有 `zh-CN`。
+    /// 目标语言标记，默认 `body`。
     var target: String
     var sourceHash: String
     var segment: Int
@@ -87,8 +86,8 @@ struct TranslationSegment: Identifiable, Codable, Hashable {
         owner = (try? c.decode(String.self, forKey: .owner)) ?? ""
         project = (try? c.decode(String.self, forKey: .project)) ?? ""
         target = (try? c.decode(String.self, forKey: .target)) ?? Self.defaultTarget
-        // Android 把正文译文记成 `body`，映射成本机目标语言标记。
-        if target.isEmpty || target == "body" {
+        // 兼容旧版持久化的 `"zh-CN"` 与空值，统一归一化为 `"body"`。
+        if target.isEmpty || target == "zh-CN" {
             target = Self.defaultTarget
         }
         let hash = (try? c.decode(String.self, forKey: .sourceHash)) ?? ""
@@ -126,7 +125,7 @@ struct TranslationSegment: Identifiable, Codable, Hashable {
         id: String = UUID().uuidString,
         owner: String,
         project: String,
-        target: String = "zh-CN",
+        target: String = TranslationSegment.defaultTarget,
         sourceHash: String,
         segment: Int,
         payload: String,

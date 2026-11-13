@@ -65,6 +65,7 @@ enum WorldWorkflow {
         session: ProjectSession,
         store: AppStore,
         forceFull: Bool,
+        targetCharacter: String? = nil,
         progress: @escaping @MainActor (Int, Int) -> Void
     ) async throws -> RefreshOutcome {
         let manuscript = session.manuscript
@@ -73,8 +74,7 @@ enum WorldWorkflow {
         }
 
         let context = try WorldRequestContext.make(store: store)
-        // 「刷新人物卡」固定走增量模式（P24 开关），不走非增量的「世界建立」入口。
-        let incremental = true
+        let incremental = !session.payload.world.characters.isEmpty
 
         let sourceHash = await Task.detached(priority: .userInitiated) {
             ContentHash.of(manuscript)
@@ -90,6 +90,7 @@ enum WorldWorkflow {
                 sourceHash: sourceHash,
                 incremental: incremental,
                 forceFull: forceFull,
+                targetCharacter: targetCharacter,
                 progress: progress
             )
         }
@@ -122,7 +123,9 @@ enum WorldWorkflow {
         }
         let pendingIndexes = (0..<allSegments.count)
             .filter { !session.payload.world.completedAnalysisSegments.contains($0) }
-        let chunks = pendingIndexes.map { allSegments[$0] }
+        // 每轮最多处理 256 段（与 APK `L1/K0.smali:5774-5776` 对齐），剩余段留到下次点击继续。
+        let batchIndexes = Array(pendingIndexes.prefix(256))
+        let chunks = batchIndexes.map { allSegments[$0] }
 
         guard !chunks.isEmpty else {
             // 上次可能正好跑完最后一段但没来得及去重/落库，这里补完。
@@ -154,7 +157,7 @@ enum WorldWorkflow {
         for (index, chunk) in chunks.enumerated() {
             try Task.checkCancellation()
             progress(index + 1, chunks.count)
-            let segmentIndex = pendingIndexes[index]
+            let segmentIndex = batchIndexes[index]
 
             let messages = PromptComposer.worldRefreshMessages(
                 existingCharacters: session.payload.world.characters,
@@ -168,40 +171,26 @@ enum WorldWorkflow {
                     start: chunk.startCodePoint + 1,
                     end: chunk.endCodePoint
                 ),
+                targetCharacter: targetCharacter,
                 // 设置里「世界建立」改写过 P18 就用用户的版本。
                 worldBuildInstruction: store.settings.worldBuildInstruction.isEmpty
                     ? nil
                     : store.settings.worldBuildInstruction
             )
-            let raw: String
-            do {
-                raw = try await context.complete(
-                    messages,
-                    failOnLength: true
-                )
-            } catch {
-                if error.isLLMCancellation { throw CancellationError() }
-                throw WorldRunError(message: "世界刷新请求失败：\(error.localizedDescription)")
-            }
-            // 请求期间用户可能已经停止刷新或切书：先确认没被取消，再改会话，
-            // 否则已驱逐的旧会话还会把这一段写回同一份 payload.json。
-            try Task.checkCancellation()
+            let payload = try await context.completeAndParse(
+                messages,
+                failOnLength: true,
+                requestErrorPrefix: "世界刷新请求失败",
+                parseErrorPrefix: "世界刷新解析失败",
+                parse: WorldJSON.parseWorldRefresh
+            )
 
-            let payload: WorldJSON.WorldRefreshPayload
-            do {
-                payload = try WorldJSON.parseWorldRefresh(raw)
-            } catch {
-                throw WorldRunError(
-                    message: "世界刷新解析失败：\(error.localizedDescription)",
-                    rawResponse: raw
-                )
-            }
-
-            if !payload.characters.isEmpty {
+            let filtered = Self.filterTargetCharacter(payload.characters, target: targetCharacter)
+            if !filtered.isEmpty {
                 // P32 的触发时机是「分段抽取完成、准备写库前」。
                 // 先按段累积候选；等全部段完成后再统一去重、并入卡片。
                 session.payload.world.analysisMergedCards.append(
-                    contentsOf: payload.characters
+                    contentsOf: filtered
                 )
             }
 
@@ -281,6 +270,7 @@ enum WorldWorkflow {
         sourceHash: String,
         incremental: Bool,
         forceFull: Bool,
+        targetCharacter: String?,
         progress: @escaping @MainActor (Int, Int) -> Void
     ) async throws -> RefreshOutcome {
         let totalCodePoints = manuscript.unicodeScalars.count
@@ -321,7 +311,10 @@ enum WorldWorkflow {
                 .joined(separator: "\n")
         )
         let overhead = TokenEstimator.estimate(instruction) + baselineTokens + 4_096
-        let prefixBudget = max(1_024, store.settings.promptBudgetTokens - overhead)
+        let prefixBudget = store.settings.promptBudgetTokens - overhead
+        guard prefixBudget >= 256 else {
+            throw WorldRunError(message: "当前模型可用上下文不足，请调整输入或预算。")
+        }
         let prefix = await Task.detached(priority: .userInitiated) {
             WorldDigest.prefixChunk(of: remaining, tokenBudget: prefixBudget)
         }.value
@@ -336,31 +329,22 @@ enum WorldWorkflow {
             digest: prefix,
             incremental: incremental,
             wholeText: true,
+            targetCharacter: targetCharacter,
             worldBuildInstruction: store.settings.worldBuildInstruction.isEmpty
                 ? nil
                 : store.settings.worldBuildInstruction
         )
-        let raw: String
-        do {
-            raw = try await context.complete(messages, failOnLength: true)
-        } catch {
-            if error.isLLMCancellation { throw CancellationError() }
-            throw WorldRunError(message: "世界刷新请求失败：\(error.localizedDescription)")
-        }
-        // 与分段路径一致：取消后不再往会话里写这一段的结果。
-        try Task.checkCancellation()
-        let payload: WorldJSON.WorldRefreshPayload
-        do {
-            payload = try WorldJSON.parseWorldRefresh(raw)
-        } catch {
-            throw WorldRunError(
-                message: "世界刷新解析失败：\(error.localizedDescription)",
-                rawResponse: raw
-            )
-        }
+        let payload = try await context.completeAndParse(
+            messages,
+            failOnLength: true,
+            requestErrorPrefix: "世界刷新请求失败",
+            parseErrorPrefix: "世界刷新解析失败",
+            parse: WorldJSON.parseWorldRefresh
+        )
 
-        if !payload.characters.isEmpty {
-            session.payload.world.analysisMergedCards.append(contentsOf: payload.characters)
+        let filtered = Self.filterTargetCharacter(payload.characters, target: targetCharacter)
+        if !filtered.isEmpty {
+            session.payload.world.analysisMergedCards.append(contentsOf: filtered)
         }
         let committed = try await commitCandidates(session: session, context: context)
 
@@ -401,8 +385,9 @@ enum WorldWorkflow {
         session: ProjectSession,
         context: WorldRequestContext
     ) async throws -> (added: Int, updated: Int, note: String?) {
-        let candidates = session.payload.world.analysisMergedCards
-        guard !candidates.isEmpty else { return (0, 0, nil) }
+        let rawCandidates = session.payload.world.analysisMergedCards
+        guard !rawCandidates.isEmpty else { return (0, 0, nil) }
+        let candidates = WorldMerge.consolidateConnected(rawCandidates)
         let deduped = try await WorldDedupe.dedupe(
             candidates: candidates,
             existing: session.payload.world.characters,
@@ -416,6 +401,67 @@ enum WorldWorkflow {
         session.payload.world.characters = merged.cards
         session.payload.world.analysisMergedCards = []
         return (merged.added, merged.updated, deduped.outcome.note)
+    }
+
+    /// 单条码字机气泡 → 一张人物卡（使用 `create_character_card` function calling）。
+    static func ingestCharacterFromBubble(
+        _ bubble: String,
+        session: ProjectSession,
+        store: AppStore
+    ) async throws -> (cardName: String, isNew: Bool) {
+        let trimmed = bubble.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw WorldRunError(message: "气泡内容为空，无法提取人物卡。")
+        }
+        let context = try WorldRequestContext.make(store: store)
+        let request = LLMRequest(
+            model: context.provider.resolvedModel,
+            messages: PromptComposer.characterIngestMessages(bubble: trimmed),
+            stream: false,
+            temperature: context.provider.temperature,
+            maxTokens: 8_192,
+            attemptId: UUID().uuidString,
+            failOnLength: true,
+            tools: [PromptComposer.createCharacterCardTool],
+            toolChoiceName: "create_character_card",
+            parallelToolCalls: false,
+            omitThinking: true
+        )
+        let calls: [LLMToolCall]
+        do {
+            calls = try await context.client.completeToolCall(request)
+        } catch {
+            if error.isLLMCancellation { throw CancellationError() }
+            throw WorldRunError(message: "人物卡提取失败：\(error.localizedDescription)")
+        }
+        guard let target = calls.first(where: { $0.functionName == "create_character_card" }) ?? calls.first,
+              let data = target.arguments.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let card = WorldJSON.character(from: object) else {
+            throw WorldRunError(message: "未能从气泡中识别出有效的人物卡内容。")
+        }
+
+        let merged = WorldMerge.mergeCharacters(
+            existing: session.payload.world.characters,
+            incoming: [card]
+        )
+        session.payload.world.characters = merged.cards
+        session.scheduleSave()
+        return (card.name, merged.added > 0)
+    }
+
+    private static func filterTargetCharacter(
+        _ cards: [CharacterCard],
+        target: String?
+    ) -> [CharacterCard] {
+        guard let target, !target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return cards
+        }
+        let targetKey = WorldMerge.normalize(target)
+        return cards.filter { card in
+            if WorldMerge.normalize(card.name) == targetKey { return true }
+            return card.aliases.contains { WorldMerge.normalize($0) == targetKey }
+        }
     }
 
     /// 全部段抽完后统一去重并写库；候选来自 checkpoint 的 `mergedCards`。

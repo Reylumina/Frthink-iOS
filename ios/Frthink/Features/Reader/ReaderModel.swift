@@ -121,12 +121,11 @@ struct ReaderDocument {
 }
 
 /// 按页取正文的缓存。页面固定 UTF-16 大小，块可能跨页。
-///
-/// 只在主线程用：阅读行、搜索都在主线程触发，缓存不加锁。
 final class ReaderPageSource {
     private let pageCount: Int
     private let pageSize: Int
     private let loader: (Int) -> String?
+    private let lock = NSLock()
     private var cache: [Int: String] = [:]
     private var recency: [Int] = []
     private let cacheLimit = 8
@@ -188,11 +187,22 @@ final class ReaderPageSource {
     }
 
     private func page(_ index: Int) -> String {
+        lock.lock()
+        if let cached = cache[index] {
+            touch(index)
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let text = loader(index) ?? ""
+
+        lock.lock()
+        defer { lock.unlock() }
         if let cached = cache[index] {
             touch(index)
             return cached
         }
-        let text = loader(index) ?? ""
         cache[index] = text
         touch(index)
         if recency.count > cacheLimit, let oldest = recency.first {

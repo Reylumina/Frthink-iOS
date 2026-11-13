@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 对应 Android 端「世界」「世界建立」「世界刷新」三套流程的产出。
 struct WorldBook: Codable {
-    /// 本地旧版「世界设定」文本；只用于迁移到世界书，不再注入。
+    /// 遗留「世界设定」文本；仅用于迁移为世界书词条，不直接注入。
     var setting: String
     /// APK `world.currentState`，世界摘要状态，不是用户设定。
     var currentState: String
@@ -144,8 +144,7 @@ struct WorldBook: Codable {
         self.materialSourceProgress = materialSourceProgress
     }
 
-    /// 解码旧版本 payload：`worldbookEntries` 等后加字段缺失时用默认值，
-    /// 不能让整本书因为一个新增键读不出来。
+    /// 兼容缺失字段：后加键按默认值回填，避免整本书解码失败。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         setting = (try? c.decode(String.self, forKey: .setting)) ?? ""
@@ -158,15 +157,11 @@ struct WorldBook: Codable {
         characters = (try? c.decode([CharacterCard].self, forKey: .characters)) ?? []
         characterGroups =
             (try? c.decode([CharacterGroup].self, forKey: .characterGroups)) ?? []
-        // 事件卡：正常是对象数组；更早的存档/Android 旧版可能写成字符串数组，
-        // 此时不能整段丢掉，按标题还原成最小事件卡。
+        // 事件卡优先按对象数组解码；若为纯标题数组则按标题还原成最小事件卡。
         let objectEvents = (try? c.decode([EventCard].self, forKey: .events)) ?? []
         if objectEvents.isEmpty {
             let legacyEvents = (try? c.decode([String].self, forKey: .events)) ?? []
-            events = legacyEvents
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { EventCard(title: $0) }
+            events = EventCard.fromLegacyTitles(legacyEvents)
         } else {
             events = objectEvents
         }
@@ -212,7 +207,7 @@ struct WorldBook: Codable {
         summaryPreviousRevisions =
             (try? c.decode([SummaryRevision].self, forKey: .summaryPreviousRevisions)) ?? []
 
-        // 旧版 iOS 的 setting 迁移成真实世界书词条；currentState 保持 APK 语义。
+        // 将遗留 setting 文本迁移为真实世界书词条；currentState 保持 APK 语义。
         let legacy = setting.trimmingCharacters(in: .whitespacesAndNewlines)
         if !legacy.isEmpty {
             if !worldbookEntries.contains(where: { $0.title == "世界设定" }) {
@@ -505,6 +500,13 @@ struct EventCard: Identifiable, Codable, Hashable {
         self.development = development
         self.consequence = consequence
         self.updatedAt = updatedAt
+    }
+
+    static func fromLegacyTitles(_ titles: [String]) -> [EventCard] {
+        titles
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { EventCard(title: $0) }
     }
 }
 

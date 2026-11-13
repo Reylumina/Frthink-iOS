@@ -61,7 +61,7 @@ struct TranslationPane: View {
             if !running { confirmingStop = false }
         }
         .onChange(of: session.sourceText) { _, _ in
-            session.saveSource()
+            session.scheduleSourceSave()
         }
         .fileImporter(
             isPresented: $importing,
@@ -373,6 +373,7 @@ struct TranslationPane: View {
         let model = provider.resolvedModel
         let temperature = provider.temperature
         let maxTokens = provider.maxTokens
+        let sourceSnapshot = session.sourceText
 
         store.errorMessage = nil
         isRunning = true
@@ -382,7 +383,7 @@ struct TranslationPane: View {
         runTask = Task { @MainActor in
             var translated = 0
             for index in targets {
-                if Task.isCancelled || runID != thisRun { break }
+                if Task.isCancelled || runID != thisRun || session.sourceText != sourceSnapshot { break }
                 let item = snapshot[index]
 
                 if !force, let cachedText = cache[item.hash], !cachedText.isEmpty {
@@ -394,10 +395,12 @@ struct TranslationPane: View {
                     messages: PromptComposer.translationMessages(item.text),
                     stream: false,
                     temperature: temperature,
-                    maxTokens: maxTokens
+                    maxTokens: maxTokens,
+                    failOnLength: true
                 )
                 do {
                     let raw = try await client.complete(request)
+                    if Task.isCancelled || runID != thisRun || session.sourceText != sourceSnapshot { break }
                     let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                     if text.isEmpty {
                         store.errorMessage = "第 \(index + 1) 段返回了空译文。"

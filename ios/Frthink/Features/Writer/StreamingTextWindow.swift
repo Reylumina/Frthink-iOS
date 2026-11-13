@@ -15,8 +15,11 @@ struct StreamingTextWindow {
     }
 
     /// 返回要渲染的文本，以及是否发生了窗口重置（调用方需要整段替换）。
-    mutating func rendered(_ fullText: String) -> (text: String, reset: Bool) {
-        let count = fullText.count
+    mutating func rendered(
+        _ fullText: String,
+        characterCount: Int? = nil
+    ) -> (text: String, reset: Bool) {
+        let count = characterCount ?? fullText.count
         if count <= maxCharacters {
             let reset = baseOffset != 0
             baseOffset = 0

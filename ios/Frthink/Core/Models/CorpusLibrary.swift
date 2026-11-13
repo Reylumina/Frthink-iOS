@@ -13,31 +13,51 @@ struct CorpusLibrary: Identifiable, Codable, Hashable {
     var entries: [CorpusEntry]
     var enabled: Bool
     var createdAt: Date
+    /// 语料提取规则提示词与已处理去重键（对齐 Android `CorpusLibrary`）。
+    var rules: String
+    var processedKeys: [String]
+    var deletedTextKeys: [String]
+    var classifiedKeys: [String]
 
     init(
         id: String = UUID().uuidString,
         name: String,
         entries: [CorpusEntry] = [],
         enabled: Bool = true,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        rules: String = "",
+        processedKeys: [String] = [],
+        deletedTextKeys: [String] = [],
+        classifiedKeys: [String] = []
     ) {
         self.id = id
         self.name = name
         self.entries = entries
         self.enabled = enabled
         self.createdAt = createdAt
+        self.rules = rules
+        self.processedKeys = processedKeys
+        self.deletedTextKeys = deletedTextKeys
+        self.classifiedKeys = classifiedKeys
     }
 
-    /// 规格 P09：每个启用的语料库最多取 10 条进提示词。
-    static let promptEntryLimit = 10
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        entries = (try? c.decode([CorpusEntry].self, forKey: .entries)) ?? []
+        enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        createdAt = (try? c.decode(Date.self, forKey: .createdAt)) ?? Date()
+        rules = (try? c.decode(String.self, forKey: .rules)) ?? ""
+        processedKeys = (try? c.decode([String].self, forKey: .processedKeys)) ?? []
+        deletedTextKeys = (try? c.decode([String].self, forKey: .deletedTextKeys)) ?? []
+        classifiedKeys = (try? c.decode([String].self, forKey: .classifiedKeys)) ?? []
+    }
 
-    /// 本次会进入提示词的条目：库启用、原句非空，按原顺序取前 10 条。
+    /// 本次会进入提示词的条目：库启用、原句非空，按 0.8.213 全量注入（无 10 条上限）。
     var promptEntries: [CorpusEntry] {
         guard enabled else { return [] }
-        return entries
-            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .prefix(Self.promptEntryLimit)
-            .map { $0 }
+        return entries.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     /// 本库的一条条目渲染成 P09 块。

@@ -48,17 +48,6 @@ enum WorldMaterialWorkflow {
         guard offset < ns.length else {
             return EventOutcome(added: 0, updated: 0, total: session.payload.world.events.count)
         }
-        let tail = ns.substring(from: offset)
-        let allChunks = await Task.detached(priority: .userInitiated) {
-            // 剧情素材从已归纳偏移继续，3000 token、无重叠，最多 256 段。
-            WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
-                .map(\.text)
-        }.value
-        let chunks = Array(allChunks.prefix(256))
-        guard !chunks.isEmpty else {
-            return EventOutcome(added: 0, updated: 0, total: session.payload.world.events.count)
-        }
-
         let context = try WorldRequestContext.make(store: store)
         // 预算推不出来（模型窗口比输出预留还小）时不拦抽取：本轮正文才是要抽取的
         // 对象，P53 只是只读基线，退化成不带已有事件即可。
@@ -66,6 +55,23 @@ enum WorldMaterialWorkflow {
             settings: store.settings,
             model: context.provider.resolvedModel
         )
+        let tail = ns.substring(from: offset)
+        let isLargeBook = manuscript.unicodeScalars.count >= 500_000
+        let chunks: [String]
+        if isLargeBook {
+            let prefix = Self.largeBookPrefix(tail, budget: budget)
+            chunks = prefix.isEmpty ? [] : [prefix]
+        } else {
+            let allChunks = await Task.detached(priority: .userInitiated) {
+                // 剧情素材从已归纳偏移继续，3000 token、无重叠，最多 256 段。
+                WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
+                    .map(\.text)
+            }.value
+            chunks = Array(allChunks.prefix(256))
+        }
+        guard !chunks.isEmpty else {
+            return EventOutcome(added: 0, updated: 0, total: session.payload.world.events.count)
+        }
         var added = 0
         var updated = 0
         var consumed = 0
@@ -80,26 +86,13 @@ enum WorldMaterialWorkflow {
                 digest: chunk,
                 incremental: !session.payload.world.events.isEmpty
             )
-            let raw: String
-            do {
-                raw = try await context.complete(messages)
-            } catch {
-                if error.isLLMCancellation { throw CancellationError() }
-                throw WorldRunError(
-                    message: "事件卡抽取请求失败：\(error.localizedDescription)"
-                )
-            }
-            // 取消/切书后不再写这一段的结果。
-            try Task.checkCancellation()
-            let events: [EventCard]
-            do {
-                events = try WorldJSON.parseEvents(raw)
-            } catch {
-                throw WorldRunError(
-                    message: "事件卡解析失败：\(error.localizedDescription)",
-                    rawResponse: raw
-                )
-            }
+            let events = try await context.completeAndParse(
+                messages,
+                failOnLength: true,
+                requestErrorPrefix: "事件卡抽取请求失败",
+                parseErrorPrefix: "事件卡解析失败",
+                parse: WorldJSON.parseEvents
+            )
             consumed += (chunk as NSString).length
             if !events.isEmpty {
                 let result = WorldMerge.mergeEvents(
@@ -145,18 +138,28 @@ enum WorldMaterialWorkflow {
         guard offset < ns.length else {
             return NotesOutcome(updated: false)
         }
+        let context = try WorldRequestContext.make(store: store)
+        let budget = try? PromptBudget.make(
+            settings: store.settings,
+            model: context.provider.resolvedModel
+        )
         let tail = ns.substring(from: offset)
-        let allChunks = await Task.detached(priority: .userInitiated) {
-            // 素材归纳从已归纳偏移继续，3000 token、无重叠，最多 256 段。
-            WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
-                .map(\.text)
-        }.value
-        let chunks = Array(allChunks.prefix(256))
+        let isLargeBook = manuscript.unicodeScalars.count >= 500_000
+        let chunks: [String]
+        if isLargeBook {
+            let prefix = Self.largeBookPrefix(tail, budget: budget)
+            chunks = prefix.isEmpty ? [] : [prefix]
+        } else {
+            let allChunks = await Task.detached(priority: .userInitiated) {
+                // 素材归纳从已归纳偏移继续，3000 token、无重叠，最多 256 段。
+                WorldDigest.chunks(of: tail, tokenBudget: 3_000, overlapTokens: 0)
+                    .map(\.text)
+            }.value
+            chunks = Array(allChunks.prefix(256))
+        }
         guard !chunks.isEmpty else {
             return NotesOutcome(updated: false)
         }
-
-        let context = try WorldRequestContext.make(store: store)
         // 合并基准取本轮开始前的笔记：循环里逐段追加只是中途兜底，
         // 最终结果要从旧内容出发，否则合成稿会把已追加的原段落再叠一遍。
         let before = session.payload.world.styleNotes
@@ -164,38 +167,21 @@ enum WorldMaterialWorkflow {
         var consumed = 0
         for chunk in chunks {
             try Task.checkCancellation()
-            let raw: String
-            do {
-                raw = try await context.complete(
-                    PromptComposer.segmentStyleNotesMessages(segment: chunk)
-                )
-            } catch {
-                if error.isLLMCancellation { throw CancellationError() }
-                throw WorldRunError(
-                    message: "文风笔记请求失败：\(error.localizedDescription)"
-                )
-            }
+            let raw = try await context.completeOrThrow(
+                PromptComposer.segmentStyleNotesMessages(segment: chunk),
+                errorPrefix: "文风笔记请求失败"
+            )
             consumed += (chunk as NSString).length
-            // 取消/切书后不再写这一段的结果。
-            try Task.checkCancellation()
             let note = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !note.isEmpty, !WorldMerge.isNoAdditions(note) {
                 notes.append(note)
-                // 先落原文笔记；合成不在本轮成功也不丢已提炼内容。
+                // 先落原文笔记；合成失败时保留笔记但不推进进度。
                 session.payload.world.styleNotes = WorldMerge.appendStyleNotes(
                     existing: session.payload.world.styleNotes,
                     incoming: note
                 )
+                session.scheduleSave()
             }
-            // 每块立即推进进度：中断或失败后下次从已消费位置继续，不重复跑前面几块。
-            session.payload.world.materialSourceProgress[key] = Self.materialProgress(
-                manuscript: manuscript,
-                offset: offset,
-                consumed: consumed,
-                prompt: PromptLibrary.segmentStyleNotesInstruction
-                    + PromptLibrary.styleNotesMergeInstruction
-            )
-            session.scheduleSave()
         }
 
         let progress = Self.materialProgress(
@@ -215,18 +201,11 @@ enum WorldMaterialWorkflow {
         if notes.count == 1 {
             mergedNote = notes[0]
         } else {
-            do {
-                mergedNote = try await context.complete(
-                    PromptComposer.styleNotesMergeMessages(notes: notes)
-                )
-            } catch {
-                if error.isLLMCancellation { throw CancellationError() }
-                throw WorldRunError(
-                    message: "文风笔记合并失败：\(error.localizedDescription)"
-                )
-            }
+            mergedNote = try await context.completeOrThrow(
+                PromptComposer.styleNotesMergeMessages(notes: notes),
+                errorPrefix: "文风笔记合并失败"
+            )
         }
-        try Task.checkCancellation()
         let incoming = mergedNote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !incoming.isEmpty, !WorldMerge.isNoAdditions(incoming) else {
             session.payload.world.materialSourceProgress[key] = progress
@@ -237,23 +216,15 @@ enum WorldMaterialWorkflow {
         let merged = WorldMerge.appendStyleNotes(existing: before, incoming: incoming)
         // P42/P43 首次建模板；已有模板走 P44/P45，只追加新增规则。
         let templateBefore = session.payload.world.styleTemplate
-        let templateRaw: String
-        do {
-            templateRaw = try await context.complete(
-                templateBefore.isEmpty
-                    ? PromptComposer.styleSynthesisMessages(notes: incoming)
-                    : PromptComposer.styleAppendMessages(
-                        existingTemplate: templateBefore,
-                        notes: incoming
-                    )
-            )
-        } catch {
-            if error.isLLMCancellation { throw CancellationError() }
-            throw WorldRunError(
-                message: "仿写模板请求失败：\(error.localizedDescription)"
-            )
-        }
-        try Task.checkCancellation()
+        let templateRaw = try await context.completeOrThrow(
+            templateBefore.isEmpty
+                ? PromptComposer.styleSynthesisMessages(notes: incoming)
+                : PromptComposer.styleAppendMessages(
+                    existingTemplate: templateBefore,
+                    notes: incoming
+                ),
+            errorPrefix: "仿写模板请求失败"
+        )
         let templateText = templateRaw.trimmingCharacters(in: .whitespacesAndNewlines)
         var templateAfter = templateBefore
         if !templateText.isEmpty, !WorldMerge.isNoAdditions(templateText) {
@@ -342,6 +313,27 @@ enum WorldMaterialWorkflow {
             prefixHash: ContentHash.of(prefix),
             promptHash: ContentHash.of(prompt)
         )
+    }
+
+    /// 大书模式（≥ 50 万码点）：单次取当前上下文可容纳的前缀。
+    private static func largeBookPrefix(_ text: String, budget: PromptBudget?) -> String {
+        let tokenLimit = max(2_000, (budget?.effectiveInputBudget ?? 24_000) - 2_000)
+        guard TokenEstimator.estimate(text) > tokenLimit else { return text }
+        var low = 0
+        var high = text.count
+        var best = ""
+        while low <= high {
+            let mid = (low + high) / 2
+            let end = text.index(text.startIndex, offsetBy: mid)
+            let candidate = String(text[..<end])
+            if TokenEstimator.estimate(candidate) <= tokenLimit {
+                best = candidate
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return best
     }
 
 }

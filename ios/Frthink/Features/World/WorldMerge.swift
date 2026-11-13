@@ -28,6 +28,51 @@ enum WorldMerge {
 
     /// 同名或同别称的人物更新已有卡；匹配到多张时用第一张并在状态里提一句，
     /// 不抛错——手动建重卡不应该让整轮刷新失败。
+    /// 按姓名/别称交集对候选卡做连通分量合并（对应 APK `L1.r.b` / `q0`）。
+    ///
+    /// 例如 A(林昭), B(小昭), C(林昭/别称小昭) 三张卡会合并为一张，避免后续去重出现孤立碎片。
+    static func consolidateConnected(_ cards: [CharacterCard]) -> [CharacterCard] {
+        guard cards.count >= 2 else { return cards }
+        var parent = Array(0..<cards.count)
+        func find(_ x: Int) -> Int {
+            var v = x
+            while parent[v] != v {
+                parent[v] = parent[parent[v]]
+                v = parent[v]
+            }
+            return v
+        }
+        func union(_ a: Int, _ b: Int) {
+            let ra = find(a), rb = find(b)
+            if ra != rb { parent[max(ra, rb)] = min(ra, rb) }
+        }
+
+        var ownerByKey: [String: Int] = [:]
+        for (idx, card) in cards.enumerated() {
+            for key in nameSet(name: card.name, aliases: card.aliases) {
+                if let first = ownerByKey[key] {
+                    union(first, idx)
+                } else {
+                    ownerByKey[key] = idx
+                }
+            }
+        }
+
+        var groups: [Int: [Int]] = [:]
+        var orderedRoots: [Int] = []
+        for idx in cards.indices {
+            let root = find(idx)
+            if groups[root] == nil { orderedRoots.append(root) }
+            groups[root, default: []].append(idx)
+        }
+        return orderedRoots.compactMap { root in
+            guard let members = groups[root], let first = members.first else { return nil }
+            return members.dropFirst().reduce(cards[first]) { acc, idx in
+                merge(existing: acc, incoming: cards[idx])
+            }
+        }
+    }
+
     static func mergeCharacters(
         existing: [CharacterCard],
         incoming: [CharacterCard]
@@ -203,9 +248,8 @@ enum WorldMerge {
 
     // MARK: - 文本追加
 
-    /// 旧文本只读：新文本按标点/换行切句，已在旧文本里出现过的句子丢掉，
-    /// 剩下的另起一行接在旧文本后面。用换行而不是「；」，避免人物卡/事件字段
-    /// 越刷新越像一串分号。
+    /// 旧文本只读：新文本按换行与句末标点切分，过滤已在旧文本出现的句子，
+    /// 保留原有标点与逗号从句并换行追加。
     static func appended(_ existing: String, _ incoming: String) -> String {
         let oldText = existing.trimmingCharacters(in: .whitespacesAndNewlines)
         let newText = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -219,11 +263,7 @@ enum WorldMerge {
             let key = comparisonKey(piece)
             guard !key.isEmpty, !oldKey.contains(key), !seen.contains(key) else { continue }
             seen.insert(key)
-            if let last = piece.last, "。！？!?；;".contains(last) {
-                additions.append(piece)
-            } else {
-                additions.append(piece + "。")
-            }
+            additions.append(piece)
         }
         guard !additions.isEmpty else { return existing }
         return oldText + "\n" + additions.joined(separator: "\n")
@@ -306,13 +346,42 @@ enum WorldMerge {
         }
     }
 
-    private static let sentenceSeparators = CharacterSet(
-        charactersIn: "；;，,。！？!?、\n\r\t"
-    )
+    private static let sentenceTerminators: Set<Character> = [
+        "。", "！", "？", "!", "?", "；", ";",
+    ]
+    private static let trailingClosers: Set<Character> = [
+        "”", "」", "』", "’", "）", ")", "\"", "'", "】", "]",
+    ]
 
+    /// 按换行与句末标点切分，保留逗号从句与句末原始标点。
     private static func splitSentences(_ text: String) -> [String] {
-        text.components(separatedBy: sentenceSeparators)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        var sentences: [String] = []
+        var current = ""
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            let ch = chars[i]
+            if ch.isNewline {
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { sentences.append(trimmed) }
+                current = ""
+                i += 1
+                continue
+            }
+            current.append(ch)
+            if sentenceTerminators.contains(ch) {
+                while i + 1 < chars.count, trailingClosers.contains(chars[i + 1]) {
+                    i += 1
+                    current.append(chars[i])
+                }
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { sentences.append(trimmed) }
+                current = ""
+            }
+            i += 1
+        }
+        let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { sentences.append(tail) }
+        return sentences
     }
 }

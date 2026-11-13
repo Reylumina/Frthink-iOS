@@ -181,9 +181,7 @@ enum PromptComposer {
         blocks.map(\.rendered).filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
-    /// 主写作请求的 messages：system（块 1–12 + 调用方追加的块）→ 历史消息 → 本轮 user 指令。
-    ///
-    /// 第 14 行「历史消息」是真正的 messages，不是 system 里的文本。
+    /// 主写作请求的 messages：system（块 1–10 + 非用户侧追加块）→ 只读日志/正文 user 块（块 11–12 + 锚点）→ 历史消息 → 本轮 user 指令。
     static func writingMessages(
         assembly: PromptAssembly,
         history: [LLMMessage],
@@ -193,9 +191,24 @@ enum PromptComposer {
         // 13 · 调用方追加的块
         blocks.append(contentsOf: assembly.appendedBlocks)
 
+        let userBlockKeys: Set<String> = ["body:authoritative", "task:continuation-anchor"]
+        let isUserSideBlock: (PromptBlock) -> Bool = { block in
+            block.category == .chatHistory
+                || block.category == .authoritativeBody
+                || userBlockKeys.contains(block.key)
+                || block.key.hasPrefix("summary:conversation:")
+        }
+
+        let systemBlocks = blocks.filter { !isUserSideBlock($0) }
+        let contextUserBlocks = blocks.filter(isUserSideBlock)
+
         var messages: [LLMMessage] = []
-        let system = systemPrompt(from: blocks)
+        let system = systemPrompt(from: systemBlocks)
         if !system.isEmpty { messages.append(.system(system)) }
+        for block in contextUserBlocks {
+            let rendered = block.rendered
+            if !rendered.isEmpty { messages.append(.user(rendered)) }
+        }
         messages.append(contentsOf: history)
         // 本轮用户指令（P15 这类「用户输入」角色）永远在最后。
         if let userInstruction, !userInstruction.isEmpty {
@@ -392,9 +405,7 @@ extension PromptAssembly {
         // 4 · 去 AI 味规则（P05），标题是「全局审查规则」
         assembly.aiFlavorRules = settings.aiFlavorRules
 
-        // 5 · 宇宙共享世界书（P06）。原版双闸门：条目全局启用 + 当前项目勾选。
-        // 旧版把 `settings.enabledUniverseEntryIDs` 当第一道闸门，但那个列表默认空
-        // 且界面上不可达，P06 会恒空；现在用条目自己的 `enabled`。
+        // 5 · 宇宙共享世界书（P06）：条目全局启用 + 当前项目勾选。
         let projectUniverse = settings.enabledUniverseEntries(
             for: enabledUniverseEntryIDs
         )
@@ -405,13 +416,11 @@ extension PromptAssembly {
         // 6 · 本书仿写模板（P07）
         assembly.imitationTemplate = world.styleTemplate
 
-        // 7 · 剧情梗概（P08）。原版直接渲染事件卡列表
-        // （`L1/W2.java:480-484` + `L1/C0604u0.java:78-102`），
-        // 数据模型里的 `plotOutline` 字符串在 APK 中没有任何读取点，
-        // 这里不再拿它兜底；没有事件卡就不发这一块。
+        // 7 · 剧情梗概（P08）：直接渲染事件卡列表（`L1/W2.java`），
+        // `plotOutline` 在 APK 中无读取点；无事件卡时不发此块。
         assembly.plotOutline = PromptComposer.renderEvents(world.events)
 
-        // 8 · 语料条目（P09）：每个启用库最多 10 条。
+        // 8 · 语料条目（P09）：注入启用语料库的全部条目（0.8.213 全量注入）。
         // 全局「语料收集库」开关关掉时一律不注入——总开关的语义就是「本次写作不用语料」。
         if settings.corpusEnabled {
             assembly.corpus = settings.corpusLibraries
@@ -441,7 +450,20 @@ extension PromptAssembly {
         assembly.characters = PromptComposer.activeCharacters(in: world)
 
         // 11 · 长期规则摘要（P12）
-        assembly.conversationSummary = world.longTermRules
+        let trimmedRules = world.longTermRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hashValid: Bool = {
+            guard !world.summarySourceHash.isEmpty else { return true }
+            return !world.summarySourceMessageKeys.isEmpty
+                && world.summarySourceMessageKeys.allSatisfy { $0.hasPrefix("user:") }
+                && SummaryKey.sourceHash(keys: world.summarySourceMessageKeys) == world.summarySourceHash
+        }()
+        if world.summaryEnabled,
+           world.summaryRulesVersion == 1,
+           !trimmedRules.isEmpty,
+           trimmedRules != "暂无长期规则。",
+           hashValid {
+            assembly.conversationSummary = world.longTermRules
+        }
 
         // 12 · 权威正文（P13）
         assembly.body = manuscript

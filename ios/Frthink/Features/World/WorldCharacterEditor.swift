@@ -93,7 +93,8 @@ struct WorldCharacterEditor: View {
             WorldTagsField(
                 title: "别称",
                 values: $draft.aliases,
-                placeholder: "用、分隔"
+                placeholder: "用、分隔",
+                flat: true
             )
             AppTextField(
                 title: "身份",

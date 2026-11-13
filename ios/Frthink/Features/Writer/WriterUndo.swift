@@ -119,12 +119,7 @@ final class WriterBodyUndoAction {
 }
 
 enum WriterUndo {
-    /// 没有窗口栈时用的兜底栈。
-    ///
-    /// `UIWindow.undoManager` 只在响应链上有能提供撤销栈的响应者时才非 nil：
-    /// 输入框没聚焦（例如刚在气泡上点「插入正文」）、或者页面里没有正在编辑的
-    /// 文本视图时，它返回 nil。以前这里直接返回 nil，插入动作于是根本没登记进
-    /// 任何栈，页面上的提示四秒后一消失，这件事就再也撤不回来了。
+    /// 响应链无活跃文本视图时（如刚从气泡触发插入）使用兜底栈，确保撤销始终可用。
     @MainActor private static let fallback = UndoManager()
 
     /// 撤销栈：优先窗口栈（和正文编辑器的逐字撤销共用一个），否则用兜底栈。

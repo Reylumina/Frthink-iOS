@@ -303,7 +303,7 @@ final class ArchiveImportController {
                 forKeys: [.ubiquitousItemDownloadingStatusKey]
             ).ubiquitousItemDownloadingStatus
             if status == .current || status == .downloaded { return }
-            try await Task.sleep(nanoseconds: 250_000_000)
+            try await Task.sleep(for: .milliseconds(250))
         }
         throw FrthinkArchiveError.importUnreadable(
             "文件仍在从 iCloud 下载。请稍后重试，或先把文件下载到本机。"

@@ -83,7 +83,8 @@ struct WorldEventEditor: View {
                 WorldTagsField(
                     title: "人物",
                     values: $draft.characters,
-                    placeholder: "用、分隔"
+                    placeholder: "用、分隔",
+                    flat: true
                 )
             } header: {
                 AppSectionHeader(title: "基本")

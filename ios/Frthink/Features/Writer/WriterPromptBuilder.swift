@@ -74,7 +74,7 @@ enum WriterPromptBuilder {
         try checkpoint()
         let effective = effectiveBody(snapshot)
         try checkpoint()
-        let assembly = PromptAssembly.from(
+        var assembly = PromptAssembly.from(
             world: snapshot.world,
             manuscript: effective.text,
             assistantSupplement: snapshot.assistantSupplement,
@@ -83,6 +83,18 @@ enum WriterPromptBuilder {
             enabledUniverseEntryIDs: snapshot.enabledUniverseEntryIDs,
             bodyRange: effective.range
         )
+        if case .anchorPrefix = effective.range, !effective.text.isEmpty {
+            let anchorTail = PromptComposer.codePointTail(effective.text, limit: 200)
+            assembly.appendedBlocks.append(PromptBlock(
+                key: "task:continuation-anchor",
+                category: .userInput,
+                title: "指定续写锚点",
+                body: PromptLibrary.render(PromptLibrary.continuationAnchorTemplate, [
+                    "锚点文本": anchorTail,
+                ]),
+                locked: true
+            ))
+        }
         try checkpoint()
 
         let history: [LLMMessage]
@@ -97,10 +109,11 @@ enum WriterPromptBuilder {
             )
         case .continueWriting:
             history = PromptComposer.llmMessages(from: snapshot.messages)
+            let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })?.content ?? ""
             built = PromptComposer.continueFragmentMessages(
                 assembly: assembly,
                 history: history,
-                fragment: snapshot.manuscript
+                fragment: lastAssistant
             )
         case .regenerate(let index):
             let prefix = index > 0
@@ -111,7 +124,7 @@ enum WriterPromptBuilder {
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: history,
-                    fragment: snapshot.manuscript
+                    fragment: last.content
                 )
             } else {
                 built = PromptComposer.writingMessages(
@@ -210,13 +223,20 @@ enum WriterPromptBuilder {
     ) rethrows -> (messages: [LLMMessage], omitted: Int) {
         guard messages.count > 1 else { return (messages, 0) }
         var system: LLMMessage?
-        var tail: LLMMessage?
+        var tailMessages: [LLMMessage] = []
         var history = messages
         if history.first?.role == "system" {
             system = history.removeFirst()
         }
         if history.last?.role == "user" {
-            tail = history.removeLast()
+            let lastUser = history.removeLast()
+            if lastUser.content == PromptLibrary.continueLastFragmentInstruction,
+               history.last?.role == "assistant" {
+                let fragment = history.removeLast()
+                tailMessages = [fragment, lastUser]
+            } else {
+                tailMessages = [lastUser]
+            }
         }
 
         // 每个 turn 从 user 开始，带上其后的 assistant/system，直到下一个 user。
@@ -230,7 +250,7 @@ enum WriterPromptBuilder {
         }
 
         var used = (system.map { TokenEstimator.estimate($0.content) } ?? 0)
-            + (tail.map { TokenEstimator.estimate($0.content) } ?? 0)
+            + tailMessages.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
         var keptTurns: [[LLMMessage]] = []
         for turn in turns.reversed() {
             try checkpoint()
@@ -245,7 +265,7 @@ enum WriterPromptBuilder {
         var result: [LLMMessage] = []
         if let system { result.append(system) }
         result.append(contentsOf: kept)
-        if let tail { result.append(tail) }
+        result.append(contentsOf: tailMessages)
         return (result, omitted)
     }
 }

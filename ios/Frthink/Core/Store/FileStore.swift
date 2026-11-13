@@ -9,7 +9,7 @@ import Foundation
 ///   projects/<projectID>/project.json      — Project 元数据
 ///   projects/<projectID>/payload.json      — ProjectPayload，AES-256-GCM 密文
 ///   projects/<projectID>/body.pages/*.bin  — 正文分页，逐页 AES-256-GCM 密文
-///   projects/<projectID>/body.json         — 旧版单文件正文，仅迁移用
+///   projects/<projectID>/body.json         — 遗留单文件正文（仅迁移读取）
 ///   projects/<projectID>/body.meta.json    — 字数/UTF-16 长度/章节/页数/块索引，AES-256-GCM 密文
 ///   projects/<projectID>/source.json       — 原文（翻译源），AES-256-GCM 密文
 ///   projects/<projectID>/translations.json — [TranslationSegment]，AES-256-GCM 密文
@@ -256,7 +256,7 @@ struct FileStore {
             return .loaded(merged)
         }
         if let body = loadLegacyBody(projectID) {
-            // 旧版单个 body.json：迁成页文件；失败时退回整份正文。
+            // 将遗留单文件 body.json 迁移为页文件；失败时回退内存拼接。
             do {
                 try saveBody(body.text, chapters: body.chapters, projectID: projectID)
                 var merged = payload
@@ -393,7 +393,7 @@ struct FileStore {
         return ranges
     }
 
-    /// 旧版单文件正文，仅用于迁移。
+    /// 读取遗留单文件正文（仅迁移用）。
     private func loadLegacyBody(_ projectID: String) -> BodyDocument? {
         guard let plain = readEncrypted(file("body.json", in: projectID)) else {
             return nil

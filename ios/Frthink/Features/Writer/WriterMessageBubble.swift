@@ -64,7 +64,7 @@ struct WriterMessageBubble: View {
         .onTapGesture {
             if isSelecting { actions.toggleSelection() }
         }
-        // 长按交给外层挂的 contextMenu（复制/撤回/重新生成…），这里不再抢手势。
+        // 长按交给外层挂的 contextMenu，这里不抢手势。
         .overlay(alignment: .topLeading) {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -148,83 +148,24 @@ struct WriterMessageBubble: View {
         }
     }
 
-    /// 已完成的回复：分段按段排版，段间留 `WriterTypography.paragraphSpacing`。
-    /// 整段当成一个视图时，模型输出里的空行会按整行高度排版，段间比阅读页松一倍。
+    /// 已完成的回复：整条合并进单个 `JustifiedText`，以 `\n` 分段才能让 TextKit 的 `paragraphSpacing` 生效。
     private var content: some View {
-        let paragraphs = WriterTypography.paragraphs(message.content)
+        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
         return Group {
-            if paragraphs.isEmpty {
+            if trimmed.isEmpty {
                 Text("（空回复）")
+                    .dynamicBodyFont(store.settings.bodyFontSize)
                     .foregroundStyle(.tertiary)
             } else {
-                // 段与段之间用 TextKit 的段后间距，VStack 不再额外留白。
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(paragraphs.indices, id: \.self) { index in
-                        paragraph(paragraphs[index], isLast: index == paragraphs.count - 1)
-                    }
-                }
+                WriterAssistantBodyView(
+                    text: message.content,
+                    fontSize: bodyFontSize,
+                    lineHeight: lineHeight
+                )
+                .equatable()
             }
         }
-        .dynamicBodyFont(store.settings.bodyFontSize)
-        .foregroundStyle(.primary)
-        .lineSpacing(bodyLineSpacing)
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 一段正文：两端对齐，一到三级标题按字号和字重区分。
-    ///
-    /// 排版走 `JustifiedText`（TextKit）：SwiftUI 的 Text 没有两端对齐，
-    /// 而中文长行左对齐时右边参差很明显。
-    private func paragraph(_ text: String, isLast: Bool) -> some View {
-        let level = MarkdownInline.headingLevel(text)
-        let plain = level == nil ? text : MarkdownInline.strippingHeadingMarker(text)
-        let size = level.map(headingSize) ?? bodyFontSize
-        let weight: UIFont.Weight = level == nil ? .regular : .semibold
-        return JustifiedText(
-            attributed: attributed(plain, size: size, weight: weight),
-            lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight),
-            paragraphSpacing: isLast
-                ? 0
-                : WriterTypography.paragraphSpacing(size: bodyFontSize, lineHeight: lineHeight)
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// 段内排版：加粗/斜体按 run 换字体，颜色交给系统语义色。
-    private func attributed(
-        _ text: String,
-        size: CGFloat,
-        weight: UIFont.Weight
-    ) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        for (run, style) in MarkdownInline.runs(text) {
-            let font: UIFont
-            switch style {
-            case .normal:
-                font = .systemFont(ofSize: size, weight: weight)
-            case .bold:
-                font = .systemFont(ofSize: size, weight: weight == .semibold ? .bold : .bold)
-            case .italic:
-                let base = UIFont.systemFont(ofSize: size, weight: weight)
-                font = base.fontDescriptor.withSymbolicTraits(.traitItalic)
-                    .map { UIFont(descriptor: $0, size: size) } ?? base
-            }
-            result.append(NSAttributedString(
-                string: run,
-                attributes: [.font: font, .foregroundColor: UIColor.label]
-            ))
-        }
-        return result
-    }
-
-    /// 标题字号按正文字号派生：一/二/三级分别 1.45 / 1.26 / 1.12 倍。
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: return bodyFontSize * 1.45
-        case 2: return bodyFontSize * 1.26
-        default: return bodyFontSize * 1.12
-        }
     }
 
     /// `‹ 2/3 ›`：同一条回复的候选版本，切换只改 selectedVariant，不新增消息。
@@ -257,6 +198,102 @@ struct WriterMessageBubble: View {
             .accessibilityLabel("下一版本")
 
             Spacer(minLength: 0)
+        }
+    }
+}
+
+/// 完成态助手正文：单视图渲染整条回复，`Equatable` 避免外层滚动状态变化时重复排版。
+private struct WriterAssistantBodyView: View, Equatable {
+    let text: String
+    let fontSize: CGFloat
+    let lineHeight: Double
+
+    var body: some View {
+        let lineSpacing = WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight)
+        JustifiedText(
+            attributed: attributedText(lineSpacing: lineSpacing),
+            lineSpacing: lineSpacing,
+            paragraphSpacing: WriterTypography.paragraphSpacing(size: fontSize, lineHeight: lineHeight),
+            preservesParagraphStyles: true
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func attributedText(lineSpacing: CGFloat) -> NSAttributedString {
+        let paragraphs = WriterTypography.paragraphs(text)
+        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let result = NSMutableAttributedString()
+        for (index, paragraphText) in paragraphs.enumerated() {
+            let isLast = index == paragraphs.count - 1
+            let style = JustifiedText.paragraphStyle(
+                lineSpacing: lineSpacing,
+                paragraphSpacing: isLast ? 0 : spacing
+            )
+            let level = MarkdownInline.headingLevel(paragraphText)
+            let plain = level == nil
+                ? paragraphText
+                : MarkdownInline.strippingHeadingMarker(paragraphText)
+            let size = level.map(headingSize) ?? fontSize
+            let baseWeight: UIFont.Weight = level == nil ? .regular : .semibold
+
+            if level != nil {
+                let font = UIFont.systemFont(ofSize: size, weight: baseWeight)
+                result.append(NSAttributedString(
+                    string: plain,
+                    attributes: [
+                        .font: font,
+                        .foregroundColor: UIColor.label,
+                        .paragraphStyle: style,
+                    ]
+                ))
+            } else {
+                for (run, inlineStyle) in MarkdownInline.runs(plain) {
+                    result.append(NSAttributedString(
+                        string: run,
+                        attributes: [
+                            .font: inlineFont(size: size, baseWeight: baseWeight, style: inlineStyle),
+                            .foregroundColor: UIColor.label,
+                            .paragraphStyle: style,
+                        ]
+                    ))
+                }
+            }
+            if !isLast {
+                result.append(NSAttributedString(
+                    string: "\n",
+                    attributes: [
+                        .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
+                        .foregroundColor: UIColor.label,
+                        .paragraphStyle: style,
+                    ]
+                ))
+            }
+        }
+        return result
+    }
+
+    private func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return fontSize * 1.45
+        case 2: return fontSize * 1.26
+        default: return fontSize * 1.12
+        }
+    }
+
+    private func inlineFont(
+        size: CGFloat,
+        baseWeight: UIFont.Weight,
+        style: MarkdownInline.InlineStyle
+    ) -> UIFont {
+        switch style {
+        case .normal:
+            return .systemFont(ofSize: size, weight: baseWeight)
+        case .bold:
+            return .systemFont(ofSize: size, weight: .bold)
+        case .italic:
+            let base = UIFont.systemFont(ofSize: size, weight: baseWeight)
+            return base.fontDescriptor.withSymbolicTraits(.traitItalic)
+                .map { UIFont(descriptor: $0, size: size) } ?? base
         }
     }
 }
@@ -312,8 +349,7 @@ struct WriterStreamingBubble: View {
         .padding(.vertical, Theme.Spacing.xs)
     }
 
-    /// 生成中的状态行：只报「创作中 + 字数」。
-    /// 停止入口在输入条的主操作键上（§5.7），这里不再放第二个停止按钮。
+    /// 生成中的状态行：仅显示「创作中 + 字数」（停止入口在输入条主操作键）。
     private var header: some View {
         HStack(spacing: Theme.Spacing.s) {
             WriterAssistantBadge()
@@ -333,7 +369,10 @@ struct WriterStreamingBubble: View {
     private var content: some View {
         // 思考过程默认收起：只是一行字，点一下展开，不加任何图标。
         if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-            reasoningBlock(reasoning)
+            reasoningBlock(
+                reasoning,
+                characterCount: controller.streamingReasoningCharacterCount
+            )
         }
 
         if controller.streamingText.isEmpty {
@@ -345,6 +384,7 @@ struct WriterStreamingBubble: View {
             // 生成中用 UITextView 增量排版；字号/行距/宽度与完成态气泡同一套换算。
             StreamingTextView(
                 text: controller.streamingText,
+                characterCount: controller.streamingCharacterCount,
                 fontSize: bodyFontSize,
                 lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight)
             )
@@ -355,14 +395,14 @@ struct WriterStreamingBubble: View {
 
     /// 思考过程：一行文字按钮，点一下展开全文，再点收起。不用 DisclosureGroup——
     /// 它自带一个箭头图标，触屏上直接点这一行更好用。
-    private func reasoningBlock(_ reasoning: String) -> some View {
+    private func reasoningBlock(_ reasoning: String, characterCount: Int) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Button {
                 reasoningExpanded.toggle()
             } label: {
                 Text(reasoningExpanded
-                     ? "收起思考过程（\(reasoning.count.formatted()) 字）"
-                     : "思考过程（\(reasoning.count.formatted()) 字）")
+                     ? "收起思考过程（\(characterCount.formatted()) 字）"
+                     : "思考过程（\(characterCount.formatted()) 字）")
                     .font(Font.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)

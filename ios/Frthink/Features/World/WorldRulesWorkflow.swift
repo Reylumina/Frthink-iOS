@@ -104,16 +104,17 @@ enum WorldRulesWorkflow {
         // 请求期间用户可能点了停止：取消后不写规则、不落盘，按「已停止」上报。
         try Task.checkCancellation()
 
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        let rawTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTrimmed.isEmpty else {
             throw WorldRunError(
                 message: "长期规则更新返回了空响应。",
                 rawResponse: raw
             )
         }
-        if WorldMerge.isNoAdditions(text) {
+        if WorldMerge.isNoAdditions(rawTrimmed) {
             return RulesOutcome(updated: false)
         }
+        let text = rawTrimmed == "暂无长期规则。" ? "" : rawTrimmed
         guard text != session.payload.world.longTermRules else {
             return RulesOutcome(updated: false)
         }

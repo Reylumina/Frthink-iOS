@@ -5,7 +5,7 @@ import SwiftUI
 import UIKit
 
 /// 一段正文。命中区间用背景色标出来，排版交给 `JustifiedText`（TextKit）。
-struct ReaderParagraphView: View {
+struct ReaderParagraphView: View, Equatable {
     /// 本段文本。阅读器只在可见段上按 range 切片，块模型不长期持有整段字符串。
     let text: String
     let fontSize: CGFloat
@@ -70,5 +70,15 @@ struct ReaderParagraphView: View {
     private func isCurrent(_ range: NSRange) -> Bool {
         guard let current else { return false }
         return current.location == range.location && current.length == range.length
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.text == rhs.text
+            && lhs.fontSize == rhs.fontSize
+            && lhs.lineHeight == rhs.lineHeight
+            && lhs.darkPage == rhs.darkPage
+            && lhs.highlights == rhs.highlights
+            && lhs.current == rhs.current
+            && lhs.isHeading == rhs.isHeading
     }
 }

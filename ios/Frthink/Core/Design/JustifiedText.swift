@@ -20,18 +20,45 @@ struct JustifiedText: UIViewRepresentable {
     var isSelectable = false
     /// 段落结束才对齐：流式最后一段还在变长，先左对齐，避免每帧重排行内字距。
     var alignsLastLine = true
+    /// true 时保留调用方逐段设置的 `.paragraphStyle`。
+    var preservesParagraphStyles = false
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
         configure(view)
         view.attributedText = styled(attributed)
+        context.coordinator.record(
+            attributed: attributed,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            alignsLastLine: alignsLastLine,
+            preservesParagraphStyles: preservesParagraphStyles
+        )
         return view
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        let coordinator = context.coordinator
+        guard !coordinator.matches(
+            attributed: attributed,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            alignsLastLine: alignsLastLine,
+            preservesParagraphStyles: preservesParagraphStyles
+        ) else {
+            return
+        }
         let next = styled(attributed)
+        coordinator.record(
+            attributed: attributed,
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            alignsLastLine: alignsLastLine,
+            preservesParagraphStyles: preservesParagraphStyles
+        )
         guard !uiView.attributedText.isEqual(to: next) else { return }
         uiView.attributedText = next
+        coordinator.revision += 1
         uiView.invalidateIntrinsicContentSize()
     }
 
@@ -50,10 +77,65 @@ struct JustifiedText: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         let width = Self.resolvedProposalWidth(proposal)
+        let coordinator = context.coordinator
+        if coordinator.cachedRevision == coordinator.revision,
+           abs(coordinator.cachedWidth - width) < 0.5 {
+            return CGSize(width: width, height: coordinator.cachedHeight)
+        }
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        return CGSize(width: width, height: max(1, measured.height))
+        let height = max(1, measured.height)
+        coordinator.cachedWidth = width
+        coordinator.cachedRevision = coordinator.revision
+        coordinator.cachedHeight = height
+        return CGSize(width: width, height: height)
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        private var lastInput: NSAttributedString?
+        private var lastLineSpacing: CGFloat = -1
+        private var lastParagraphSpacing: CGFloat = -1
+        private var lastAlignsLastLine = true
+        private var lastPreservesParagraphStyles = false
+        var revision = 0
+        var cachedWidth: CGFloat = 0
+        var cachedRevision = -1
+        var cachedHeight: CGFloat = 0
+
+        func matches(
+            attributed: NSAttributedString,
+            lineSpacing: CGFloat,
+            paragraphSpacing: CGFloat,
+            alignsLastLine: Bool,
+            preservesParagraphStyles: Bool
+        ) -> Bool {
+            guard lastLineSpacing == lineSpacing,
+                  lastParagraphSpacing == paragraphSpacing,
+                  lastAlignsLastLine == alignsLastLine,
+                  lastPreservesParagraphStyles == preservesParagraphStyles,
+                  let lastInput
+            else { return false }
+            return lastInput.isEqual(to: attributed)
+        }
+
+        func record(
+            attributed: NSAttributedString,
+            lineSpacing: CGFloat,
+            paragraphSpacing: CGFloat,
+            alignsLastLine: Bool,
+            preservesParagraphStyles: Bool
+        ) {
+            lastInput = attributed
+            lastLineSpacing = lineSpacing
+            lastParagraphSpacing = paragraphSpacing
+            lastAlignsLastLine = alignsLastLine
+            lastPreservesParagraphStyles = preservesParagraphStyles
+        }
     }
 
     private func configure(_ view: UITextView) {
@@ -68,8 +150,11 @@ struct JustifiedText: UIViewRepresentable {
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
     }
 
-    /// 把段落样式整体套到文本上：对齐、断行策略、行距、中文禁则由 CoreText 处理。
-    private func styled(_ source: NSAttributedString) -> NSAttributedString {
+    static func paragraphStyle(
+        lineSpacing: CGFloat,
+        paragraphSpacing: CGFloat,
+        alignsLastLine: Bool = true
+    ) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = alignsLastLine ? .justified : .natural
         // pushOut：断行时尽量把整词推出去，避免靠断词凑长度——这是系统阅读器
@@ -78,7 +163,17 @@ struct JustifiedText: UIViewRepresentable {
         paragraph.lineSpacing = lineSpacing
         paragraph.paragraphSpacing = paragraphSpacing
         paragraph.hyphenationFactor = 0.85
+        return paragraph
+    }
 
+    /// 把段落样式整体套到文本上：对齐、断行策略、行距、中文禁则由 CoreText 处理。
+    private func styled(_ source: NSAttributedString) -> NSAttributedString {
+        guard !preservesParagraphStyles else { return source }
+        let paragraph = Self.paragraphStyle(
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            alignsLastLine: alignsLastLine
+        )
         let result = NSMutableAttributedString(attributedString: source)
         let whole = NSRange(location: 0, length: result.length)
         result.addAttribute(.paragraphStyle, value: paragraph, range: whole)

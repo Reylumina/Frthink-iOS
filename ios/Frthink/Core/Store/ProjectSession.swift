@@ -33,6 +33,7 @@ final class ProjectSession {
 
     private let store: FileStore
     private var saveTask: Task<Void, Never>?
+    private var sourceSaveTask: Task<Void, Never>?
     /// 同一时间只允许一次编码/写盘，避免多个编码任务并发抢占 CPU 与内存峰值导致输入或滚动卡顿。
     private enum SaveKind: Equatable {
         /// 只写正文页和 body.meta，payload.json 不动。
@@ -275,8 +276,7 @@ final class ProjectSession {
         }
         // 上次进程在生成中被杀：把断点转为可见的中断标记。
         _ = self.payload.recoverInterruptedGeneration()
-        // 导入的书、旧版本落盘的 payload 可能没有章节索引（章节是派生数据）。
-        // 这里补一次后台扫描：不占打开书的这一帧，扫完再刷新章节条。
+        // 章节是派生索引，缺失时在后台扫描补齐，避免阻塞打开这一帧。
         if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
             scanChaptersIfNeeded(payload.manuscript)
         }
@@ -398,6 +398,8 @@ final class ProjectSession {
     func quiesceSaves() async {
         saveTask?.cancel()
         saveTask = nil
+        sourceSaveTask?.cancel()
+        sourceSaveTask = nil
         await waitForSaveCompletion()
         if !isReadOnly, isDirty {
             nextSaveKind = .all
@@ -478,24 +480,15 @@ final class ProjectSession {
         let generation = saveGeneration
         if kind != .payloadOnly {
             bodyDirty = false
-            if let windowSnapshot {
-                project.bodyCharacterCount = windowSnapshot.prefixCharacterCount
-                    + windowSnapshot.text.count
-                project.bodyUTF16Length = windowSnapshot.totalLength
-            } else if let bodySnapshot {
-                project.bodyCharacterCount = bodySnapshot.count
-                project.bodyUTF16Length = (bodySnapshot as NSString).length
-            }
         }
 
         project.updatedAt = Date()
         project.revision += 1
-        let projectSnapshot = project
+        let baseProjectSnapshot = project
         // payload 是值类型，拷一份丢后台去编码写盘。整份 JSON 编码 56 万字的正文
         // 在主线程做会掉帧，这活儿不该占 UI 线程。
         let payloadSnapshot = payload
-        // 检查点不把整本正文再写进 payload：正文页已经独立存在，payload 里的
-        // manuscript 只是旧版兜底。仅当确认正文页存在时才裁掉，避免丢稿。
+        // 仅写检查点时若正文页已独立落盘，则裁掉 payload 中的 manuscript 避免重复序列化。
         let stripsBody = kind == .payloadOnly
             && !payloadSnapshot.manuscript.isEmpty
             && (bodyPageCount > 0 || lastSavedManuscript != nil)
@@ -503,90 +496,181 @@ final class ProjectSession {
         let previousManuscript = lastSavedManuscript
         // 先保留 dirty，等编码真正结束再清；期间界面显示“保存中”是对的。
         Task.detached(priority: .utility) { [weak self] in
-            var firstError: Error?
-            do { try store.saveProject(projectSnapshot) } catch {
-                firstError = firstError ?? error
-            }
-            var savedBody = false
-            var savedMeta: FileStore.BodyMeta?
-            if let windowSnapshot {
-                do {
-                    try store.saveBodyWindow(
-                        windowSnapshot.text,
-                        startPage: windowSnapshot.startPage,
-                        windowStart: windowSnapshot.start,
-                        prefixCharacterCount: windowSnapshot.prefixCharacterCount,
-                        chapters: payloadSnapshot.chapters,
-                        projectID: projectSnapshot.id
-                    )
-                    savedBody = true
-                    savedMeta = store.loadBodyMeta(projectSnapshot.id)
-                } catch {
-                    firstError = firstError ?? error
-                }
-            } else if let bodySnapshot {
-                let fromPage = Self.changedPageIndex(
-                    previous: previousManuscript,
-                    current: bodySnapshot
-                )
-                do {
-                    try store.saveBody(
-                        bodySnapshot,
-                        chapters: payloadSnapshot.chapters,
-                        projectID: projectSnapshot.id,
-                        changedFromPage: fromPage
-                    )
-                    savedBody = true
-                } catch {
-                    firstError = firstError ?? error
-                }
-            }
-            if kind == .all || kind == .payloadOnly {
-                do {
-                    var payloadForDisk = payloadSnapshot
-                    if stripsBody { payloadForDisk.manuscript = "" }
-                    try store.savePayload(payloadForDisk, projectID: projectSnapshot.id)
-                } catch {
-                    firstError = firstError ?? error
-                }
-            }
+            let writeResult = Self.performDiskWrite(
+                store: store,
+                kind: kind,
+                baseProject: baseProjectSnapshot,
+                payloadSnapshot: payloadSnapshot,
+                windowSnapshot: windowSnapshot,
+                bodySnapshot: bodySnapshot,
+                previousManuscript: previousManuscript,
+                stripsBody: stripsBody
+            )
             await MainActor.run {
-                guard let self, self.saveGeneration == generation else { return }
-                if savedBody { self.lastSavedManuscript = bodySnapshot }
-                if let savedMeta {
-                    self.bodyBlocks = savedMeta.blocks
-                    self.bodyPageCount = savedMeta.pageCount ?? 0
-                    self.bodyUTF16Length = savedMeta.utf16Length
-                    self.manuscriptCharacterCount = savedMeta.characterCount
-                }
-                self.saveInFlight = false
-                self.resumeSaveWaiters()
-                if let firstError {
-                    // 保持 dirty，但不再自动重试：磁盘满时每 2 秒重试只会更糟。
-                    if hadBodyDirty { self.bodyDirty = true }
-                    self.isDirty = true
-                    self.queuedSaveKind = nil
-                    self.onSaveError?("保存失败：\(firstError.localizedDescription)")
-                    return
-                }
-                if self.savesQuiesced {
-                    // 导入正在替换磁盘内容：旧快照不能再写回去。
-                    self.queuedSaveKind = nil
-                    self.isDirty = false
-                } else if let queued = self.queuedSaveKind {
-                    self.queuedSaveKind = nil
-                    self.nextSaveKind = Self.merge(self.nextSaveKind, queued)
-                    // 快照之后 payload 又变了：用最新内容再写一次。
-                    self.flushSave()
-                } else {
-                    self.isDirty = false
-                }
+                self?.finishFlushSave(
+                    writeResult: writeResult,
+                    bodySnapshot: bodySnapshot,
+                    hadBodyDirty: hadBodyDirty,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private struct FlushWriteResult {
+        var computedBodyChars: Int?
+        var computedBodyUTF16: Int?
+        var savedBody: Bool
+        var savedMeta: FileStore.BodyMeta?
+        var firstError: Error?
+    }
+
+    private nonisolated static func performDiskWrite(
+        store: FileStore,
+        kind: SaveKind,
+        baseProject: ProjectRecord,
+        payloadSnapshot: ProjectPayload,
+        windowSnapshot: EditorWindowState?,
+        bodySnapshot: String?,
+        previousManuscript: String?,
+        stripsBody: Bool
+    ) -> FlushWriteResult {
+        var projectSnapshot = baseProject
+        var result = FlushWriteResult(savedBody: false)
+        if kind != .payloadOnly {
+            if let windowSnapshot {
+                let chars = windowSnapshot.prefixCharacterCount + windowSnapshot.text.count
+                result.computedBodyChars = chars
+                result.computedBodyUTF16 = windowSnapshot.totalLength
+                projectSnapshot.bodyCharacterCount = chars
+                projectSnapshot.bodyUTF16Length = windowSnapshot.totalLength
+            } else if let bodySnapshot {
+                let chars = bodySnapshot.count
+                let utf16 = (bodySnapshot as NSString).length
+                result.computedBodyChars = chars
+                result.computedBodyUTF16 = utf16
+                projectSnapshot.bodyCharacterCount = chars
+                projectSnapshot.bodyUTF16Length = utf16
+            }
+        }
+        do { try store.saveProject(projectSnapshot) } catch {
+            result.firstError = result.firstError ?? error
+        }
+        if let windowSnapshot {
+            do {
+                try store.saveBodyWindow(
+                    windowSnapshot.text,
+                    startPage: windowSnapshot.startPage,
+                    windowStart: windowSnapshot.start,
+                    prefixCharacterCount: windowSnapshot.prefixCharacterCount,
+                    chapters: payloadSnapshot.chapters,
+                    projectID: projectSnapshot.id
+                )
+                result.savedBody = true
+                result.savedMeta = store.loadBodyMeta(projectSnapshot.id)
+            } catch {
+                result.firstError = result.firstError ?? error
+            }
+        } else if let bodySnapshot {
+            let fromPage = changedPageIndex(previous: previousManuscript, current: bodySnapshot)
+            do {
+                try store.saveBody(
+                    bodySnapshot,
+                    chapters: payloadSnapshot.chapters,
+                    projectID: projectSnapshot.id,
+                    changedFromPage: fromPage
+                )
+                result.savedBody = true
+            } catch {
+                result.firstError = result.firstError ?? error
+            }
+        }
+        if kind == .all || kind == .payloadOnly {
+            do {
+                var payloadForDisk = payloadSnapshot
+                if stripsBody { payloadForDisk.manuscript = "" }
+                try store.savePayload(payloadForDisk, projectID: projectSnapshot.id)
+            } catch {
+                result.firstError = result.firstError ?? error
+            }
+        }
+        return result
+    }
+
+    private func finishFlushSave(
+        writeResult: FlushWriteResult,
+        bodySnapshot: String?,
+        hadBodyDirty: Bool,
+        generation: Int
+    ) {
+        guard saveGeneration == generation else { return }
+        if let chars = writeResult.computedBodyChars, let utf16 = writeResult.computedBodyUTF16 {
+            project.bodyCharacterCount = chars
+            project.bodyUTF16Length = utf16
+        }
+        if writeResult.savedBody { lastSavedManuscript = bodySnapshot }
+        if let savedMeta = writeResult.savedMeta {
+            bodyBlocks = savedMeta.blocks
+            bodyPageCount = savedMeta.pageCount ?? 0
+            bodyUTF16Length = savedMeta.utf16Length
+            manuscriptCharacterCount = savedMeta.characterCount
+        }
+        saveInFlight = false
+        resumeSaveWaiters()
+        if let firstError = writeResult.firstError {
+            // 保持 dirty，但不再自动重试：磁盘满时每 2 秒重试只会更糟。
+            if hadBodyDirty { bodyDirty = true }
+            isDirty = true
+            queuedSaveKind = nil
+            onSaveError?("保存失败：\(firstError.localizedDescription)")
+            return
+        }
+        if savesQuiesced {
+            // 导入正在替换磁盘内容：旧快照不能再写回去。
+            queuedSaveKind = nil
+            isDirty = false
+        } else if let queued = queuedSaveKind {
+            queuedSaveKind = nil
+            nextSaveKind = Self.merge(nextSaveKind, queued)
+            // 快照之后 payload 又变了：用最新内容再写一次。
+            flushSave()
+        } else {
+            isDirty = false
+        }
+    }
+
+    func scheduleSourceSave() {
+        guard !isReadOnly else { return }
+        sourceSaveTask?.cancel()
+        sourceSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            self.saveSourceAsync()
+        }
+    }
+
+    func saveSourceAsync() {
+        guard !isReadOnly else { return }
+        sourceSaveTask?.cancel()
+        sourceSaveTask = nil
+        let snapshot = sourceText
+        let projectID = project.id
+        let store = self.store
+        Task { [weak self] in
+            do {
+                try await Task.detached(priority: .utility) {
+                    try store.saveSource(snapshot, projectID: projectID)
+                }.value
+            } catch {
+                self?.onSaveError?("原文保存失败：\(error.localizedDescription)")
             }
         }
     }
 
     func saveSource() {
         guard !isReadOnly else { return }
+        sourceSaveTask?.cancel()
+        sourceSaveTask = nil
         do {
             try store.saveSource(sourceText, projectID: project.id)
         } catch {
@@ -640,8 +724,7 @@ final class ProjectSession {
 
     // MARK: - 正文
 
-    /// 正文变化。章节扫描**不在这里同步做**：56 万字的全文正则一次要几十毫秒，
-    /// 每敲一个字扫一遍会直接卡死输入法。改成防抖 + 后台线程。
+    /// 章节扫描防抖并在后台执行，避免长文敲字时主线程正则卡顿。
     func updateManuscript(_ text: String) {
         payload.manuscript = text
         bodyLoaded = true

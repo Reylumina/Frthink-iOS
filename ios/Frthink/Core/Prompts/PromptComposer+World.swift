@@ -185,4 +185,43 @@ extension PromptComposer {
         [.system(PromptLibrary.characterIngestSystem), .user(bubble)]
     }
 
+    /// 0.8.213 `L1/W.smali:423-805` 校验后的 `create_character_card` 工具定义。
+    static let createCharacterCardTool = LLMToolDefinition(
+        name: "create_character_card",
+        description: "将唯一提供的码字机气泡整理为一张人物卡；非标准字段放入自定义词条。",
+        parametersJSON: """
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "identity": { "type": "string" },
+            "personality": { "type": "string" },
+            "voice": { "type": "string" },
+            "goals": { "type": "string" },
+            "boundaries": { "type": "string" },
+            "personal_memory": { "type": "string" },
+            "relationship_attitudes": { "type": "string" },
+            "aliases": { "type": "array", "items": { "type": "string" } },
+            "custom_entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "content": { "type": "string" }
+                },
+                "required": ["name", "content"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "name", "identity", "personality", "voice", "goals", "boundaries",
+            "personal_memory", "relationship_attitudes", "aliases", "custom_entries"
+          ],
+          "additionalProperties": false
+        }
+        """
+    )
+
 }

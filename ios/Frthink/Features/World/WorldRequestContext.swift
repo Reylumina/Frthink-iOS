@@ -50,4 +50,50 @@ struct WorldRequestContext {
             )
         )
     }
+
+    func completeOrThrow(
+        _ messages: [LLMMessage],
+        provider providerOverride: ProviderSetting? = nil,
+        failOnLength: Bool = false,
+        errorPrefix: String
+    ) async throws -> String {
+        do {
+            let raw = try await complete(
+                messages,
+                provider: providerOverride,
+                failOnLength: failOnLength
+            )
+            try Task.checkCancellation()
+            return raw
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if error.isLLMCancellation { throw CancellationError() }
+            throw WorldRunError(message: "\(errorPrefix)：\(error.localizedDescription)")
+        }
+    }
+
+    func completeAndParse<T>(
+        _ messages: [LLMMessage],
+        provider providerOverride: ProviderSetting? = nil,
+        failOnLength: Bool = true,
+        requestErrorPrefix: String,
+        parseErrorPrefix: String,
+        parse: (String) throws -> T
+    ) async throws -> T {
+        let raw = try await completeOrThrow(
+            messages,
+            provider: providerOverride,
+            failOnLength: failOnLength,
+            errorPrefix: requestErrorPrefix
+        )
+        do {
+            return try parse(raw)
+        } catch {
+            throw WorldRunError(
+                message: "\(parseErrorPrefix)：\(error.localizedDescription)",
+                rawResponse: raw
+            )
+        }
+    }
 }

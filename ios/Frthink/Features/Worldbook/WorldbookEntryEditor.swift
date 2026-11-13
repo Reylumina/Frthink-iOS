@@ -40,32 +40,31 @@ struct WorldbookEntryEditor: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                AppTextField(
-                    title: "词条名",
-                    text: $title,
-                    placeholder: "例如：雾港城的潮汐规则",
-                    flat: true
-                )
-
-                AppTextEditor(
-                    text: $bodyText,
-                    placeholder: "这条设定具体是什么",
-                    minHeight: 160,
-                    expands: true
-                )
-
-                Toggle("启用词条", isOn: $enabled)
-                    .font(Font.body)
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .background(Theme.groupedCard)
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+            Form {
+                Section {
+                    AppTextField(
+                        title: "词条名",
+                        text: $title,
+                        placeholder: "例如：雾港城的潮汐规则",
+                        flat: true
                     )
+                    AppTextArea(
+                        title: "内容",
+                        text: $bodyText,
+                        placeholder: "这条设定具体是什么",
+                        minLines: 6,
+                        maxLines: 14,
+                        flat: true
+                    )
+                }
+
+                Section {
+                    Toggle("启用词条", isOn: $enabled)
+                }
             }
-            .padding(Theme.Spacing.l)
+            .scrollContentBackground(.hidden)
             .groupedPageBackground()
+            .keyboardDismissOnScroll()
             .navigationTitle(isNew ? "新建世界书词条" : "编辑世界书词条")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

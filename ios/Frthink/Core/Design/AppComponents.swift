@@ -453,15 +453,20 @@ private struct FieldChrome: ViewModifier {
     var flat: Bool = false
 
     func body(content: Content) -> some View {
+        let effectiveHorizontal = flat ? 0 : horizontal
+        let effectiveVertical = flat ? Theme.Spacing.xs : vertical
         let padded = content
-            .padding(.horizontal, horizontal)
-            .padding(.vertical, vertical)
+            .padding(.horizontal, effectiveHorizontal)
+            .padding(.vertical, effectiveVertical)
         let strokeColor = focused ? Theme.accent.opacity(0.45) : Color.clear
 
         Group {
             if flat {
                 padded
-                    .overlay(Rectangle().strokeBorder(strokeColor, lineWidth: 1))
+                    .overlay(alignment: .bottom) {
+                        Divider()
+                            .overlay(focused ? Theme.accent.opacity(0.6) : Color.clear)
+                    }
             } else {
                 let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
                 padded
@@ -496,8 +501,7 @@ private struct FieldCaption: View {
 
 /// 字段下方的说明文字；为空时整块不出现，也不占位。
 ///
-/// 用 @ViewBuilder 函数而不是包一层 View：结果直接落进父 VStack，
-/// 与原先的内联 `if` 分支等价，不会多出一个参与间距计算的子视图。
+/// 用 @ViewBuilder 函数直接展开进父 VStack，避免包一层 View 影响间距计算。
 @ViewBuilder
 private func fieldHint(_ text: String?) -> some View {
     if let text, !text.isEmpty {
@@ -685,7 +689,8 @@ struct AppTextEditor: View {
                     Text(placeholder)
                         .font(Theme.prose)
                         .foregroundStyle(.tertiary)
-                        .padding(.top, Theme.Spacing.xs)
+                        // 对齐 TextEditor（UITextView）默认文本容器边距
+                        .padding(.top, Theme.Spacing.s)
                         .padding(.leading, Theme.Spacing.xs)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)

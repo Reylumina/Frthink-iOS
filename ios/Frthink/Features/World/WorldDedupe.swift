@@ -28,11 +28,19 @@ enum WorldDedupe {
             return (candidates, Outcome(mergedGroups: 0, removedCards: 0, note: nil))
         }
 
-        let existingNames = existing
-            .flatMap { [$0.name] + $0.aliases }
-            .filter { !$0.isEmpty }
+        let existingNames = existing.compactMap { card -> String? in
+            guard !card.name.isEmpty else { return nil }
+            let aliases = card.aliases.filter { !$0.isEmpty }.joined(separator: "、")
+            return "\(card.id)\t\(card.name)\t\(aliases)"
+        }
+        let candidateLabels = candidates.map { card in
+            let aliases = card.aliases.filter { !$0.isEmpty }
+            return aliases.isEmpty
+                ? card.name
+                : "\(card.name)（别称：\(aliases.joined(separator: "、"))）"
+        }
         let messages = PromptComposer.dedupeMessages(
-            candidates: candidates.map(\.name),
+            candidates: candidateLabels,
             existingNames: existingNames
         )
         // 与其它世界任务同参数：输出至少 4096，整段 JSON 被截断时直接报错。

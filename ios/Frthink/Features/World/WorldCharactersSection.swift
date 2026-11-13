@@ -222,7 +222,6 @@ struct WorldCharactersSection: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
-        .contentMargins(.top, 0, for: .scrollContent)
         .groupedPageBackground()
         .keyboardDismissOnScroll()
         .deleteConfirmationDialog(deleteTitle, isPresented: deleteAlertBinding) {
@@ -244,7 +243,7 @@ struct WorldCharactersSection: View {
         }
 
         var body: some View {
-            HStack(alignment: .top, spacing: Theme.Spacing.m) {
+            HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 Image(systemName: "person.fill")
                     .font(Theme.label)
                     .foregroundStyle(Color.secondary)
@@ -260,13 +259,13 @@ struct WorldCharactersSection: View {
                     .font(Font.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
-            .padding(.vertical, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.s)
             .contentShape(Rectangle())
         }
 
         private var summaryColumn: some View {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: Theme.Spacing.xs) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.xs) {
                     Text(card.name.isEmpty ? "未命名人物" : card.name)
                         .font(Font.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)

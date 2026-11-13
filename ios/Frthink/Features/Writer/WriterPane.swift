@@ -37,17 +37,15 @@ struct WriterPane: View {
     @State private var bottomBarHeight: CGFloat = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
-    /// 对话内容高度与视口高度：内容不满一屏时从顶部排，不把几条消息压在底部。
-    @State private var contentHeight: CGFloat = .greatestFiniteMagnitude
-    @State private var viewportHeight: CGFloat = 0
+    /// 对话内容是否撑满视口：内容不满一屏时从顶部排，只跨阈值时刷新，避免流式期每帧重算 body。
+    @State private var contentOverflowsViewport = true
+    @State private var scrollAnchorMetrics = ScrollAnchorMetrics()
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
     @State private var cursorOffset = -1
     /// 用户是否亲手在正文里放过插入点；false 时插到末尾，避免旧偏移插到开头。
     @State private var cursorPlaced = false
     /// 对话只渲染最近 N 条；更早的按原版「加载更早的对话」补。
     @State private var visibleMessageCount = 15
-    @State private var rollbackTarget: ChatMessage?
-    @State private var showRollbackDialog = false
     @State private var budgetPresented = false
     @State private var activeSheet: WriterSheet?
     @State private var isImportingBody = false
@@ -103,6 +101,7 @@ struct WriterPane: View {
 
     private enum MessageAction: Identifiable {
         case append(ChatMessage)
+        case rollback(ChatMessage)
         case cleanup(ChatMessage)
         case delete(ChatMessage)
         case deleteMessage(ChatMessage)
@@ -112,6 +111,7 @@ struct WriterPane: View {
         var id: String {
             switch self {
             case .append(let message): return "append-\(message.id)"
+            case .rollback(let message): return "rollback-\(message.id)"
             case .cleanup(let message): return "cleanup-\(message.id)"
             case .delete(let message): return "delete-\(message.id)"
             case .deleteMessage(let message): return "delete-message-\(message.id)"
@@ -123,6 +123,7 @@ struct WriterPane: View {
         var title: String {
             switch self {
             case .append: return "追加到正文？"
+            case .rollback: return "回退到这条用户指令"
             case .cleanup: return "清理历史版本？"
             case .delete: return "删除当前版本？"
             case .deleteMessage: return "删除这条消息？"
@@ -134,6 +135,7 @@ struct WriterPane: View {
         var confirmTitle: String {
             switch self {
             case .append: return "追加"
+            case .rollback: return "回退"
             case .cleanup, .delete, .deleteMessage, .deleteSelected: return "删除"
             case .clearAll: return "清空"
             }
@@ -142,7 +144,7 @@ struct WriterPane: View {
         var confirmRole: ButtonRole? {
             switch self {
             case .append: return nil
-            case .cleanup, .delete, .deleteMessage, .deleteSelected, .clearAll:
+            case .rollback, .cleanup, .delete, .deleteMessage, .deleteSelected, .clearAll:
                 return .destructive
             }
         }
@@ -151,6 +153,8 @@ struct WriterPane: View {
             switch self {
             case .append:
                 return "把当前展示的版本追加到正文末尾。追加后可撤销。"
+            case .rollback:
+                return "把该指令恢复到输入框并删除其后的对话分支。"
             case .cleanup:
                 return "只保留当前展示的版本，其余版本会被删除且无法恢复。"
             case .delete(let message):
@@ -204,9 +208,6 @@ struct WriterPane: View {
             .pageBackground()
             .onChange(of: controller.budgetAlert?.id) { _, newValue in
                 budgetPresented = newValue != nil
-            }
-            .deleteConfirmationDialog("回退到这条用户指令", isPresented: $showRollbackDialog, actionTitle: "把该指令恢复到输入框并删除其后的对话分支") {
-                performRollback()
             }
             .confirmationDialog(
                 messageAction?.title ?? "确认操作",
@@ -421,9 +422,14 @@ struct WriterPane: View {
         Set(windowedMessages.map(\.id))
     }
 
+    private final class ScrollAnchorMetrics {
+        var contentHeight: CGFloat = .greatestFiniteMagnitude
+        var viewportHeight: CGFloat = 0
+    }
+
     /// 首帧锚点：内容比视口短时从顶部排（不把内容压在底部），长了才锚底。
     private var scrollAnchor: UnitPoint? {
-        guard contentHeight >= viewportHeight else { return nil }
+        guard contentOverflowsViewport else { return nil }
         return isAtBottom && !session.payload.messages.isEmpty ? .bottom : nil
     }
 
@@ -468,7 +474,11 @@ struct WriterPane: View {
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height
                 } action: { height in
-                    contentHeight = height
+                    scrollAnchorMetrics.contentHeight = height
+                    let overflows = height >= scrollAnchorMetrics.viewportHeight
+                    if overflows != contentOverflowsViewport {
+                        contentOverflowsViewport = overflows
+                    }
                 }
             }
             // 首帧用 defaultScrollAnchor 落在底部，避免布局前按估算行高定位；
@@ -478,7 +488,11 @@ struct WriterPane: View {
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
             } action: { height in
-                viewportHeight = height
+                scrollAnchorMetrics.viewportHeight = height
+                let overflows = scrollAnchorMetrics.contentHeight >= height
+                if overflows != contentOverflowsViewport {
+                    contentOverflowsViewport = overflows
+                }
             }
             // 键盘弹起时右侧浮一个圆形 X：点一下收起，和系统搜索的关闭键同形状。
             // 滚动收起由下面的 .scrollDismissesKeyboard 负责（§5.9）。
@@ -761,10 +775,7 @@ struct WriterPane: View {
             regenerate: {
                 controller.regenerate(messageID: message.id, session: session, store: store)
             },
-            rollback: {
-                rollbackTarget = message
-                showRollbackDialog = true
-            },
+            rollback: { messageAction = .rollback(message) },
             selectVariant: { index in
                 session.selectVariant(index, for: message.id)
             },
@@ -786,79 +797,108 @@ struct WriterPane: View {
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
         if message.role == .user {
-            menuAnchor(row) {
-                Button {
-                    copyToClipboard(message.content)
-                } label: {
-                    Label("复制", systemImage: "doc.on.doc")
-                }
-                Button(role: .destructive) {
-                    if controller.isBusy {
-                        controller.stop()
-                    }
-                    let index = session.payload.messages.firstIndex { $0.id == message.id }
-                    let removed = session.withdraw(from: message.id)
-                    presentUndoPrompt("已撤回这条指令") {
-                        session.restore(removed, at: index)
-                    }
-                } label: {
-                    Label("撤回", systemImage: "arrow.uturn.backward")
-                }
-                Button(role: .destructive) {
-                    messageAction = .deleteMessage(message)
-                } label: {
-                    Label("删除这条消息", systemImage: "trash")
-                }
-                .disabled(controller.isBusy)
-            }
+            menuAnchor(row) { userContextMenu(for: message) }
         } else {
-            menuAnchor(row) {
-                Button {
-                    copyToClipboard(message.content)
-                } label: {
-                    Label("复制", systemImage: "doc.on.doc")
-                }
-                Button {
-                    insertIntoManuscript(message.content)
-                } label: {
-                    Label("插入到光标处", systemImage: "text.insert")
-                }
-                Button {
-                    messageAction = .append(message)
-                } label: {
-                    Label("追加到正文末尾", systemImage: "text.append")
-                }
-                Button {
-                    controller.regenerate(messageID: message.id, session: session, store: store)
-                } label: {
-                    Label("重新生成", systemImage: "arrow.clockwise")
-                }
-                .disabled(controller.isBusy)
-                Button {
-                    rollbackTarget = message
-                    showRollbackDialog = true
-                } label: {
-                    Label("回退到此", systemImage: "arrow.uturn.backward")
-                }
-                .disabled(controller.isBusy)
-                if message.variants.count > 1 {
-                    Button {
-                        messageAction = .cleanup(message)
-                    } label: {
-                        Label("清理历史版本", systemImage: "archivebox")
+            menuAnchor(row) { assistantContextMenu(for: message) }
+        }
+    }
+
+    @ViewBuilder
+    private func userContextMenu(for message: ChatMessage) -> some View {
+        Button {
+            copyToClipboard(message.content)
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        Button(role: .destructive) {
+            if controller.isBusy {
+                controller.stop()
+            }
+            let index = session.payload.messages.firstIndex { $0.id == message.id }
+            let removed = session.withdraw(from: message.id)
+            presentUndoPrompt("已撤回这条指令") {
+                session.restore(removed, at: index)
+            }
+        } label: {
+            Label("撤回", systemImage: "arrow.uturn.backward")
+        }
+        Button(role: .destructive) {
+            messageAction = .deleteMessage(message)
+        } label: {
+            Label("删除这条消息", systemImage: "trash")
+        }
+        .disabled(controller.isBusy)
+    }
+
+    @ViewBuilder
+    private func assistantContextMenu(for message: ChatMessage) -> some View {
+        Button {
+            copyToClipboard(message.content)
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        Button {
+            insertIntoManuscript(message.content)
+        } label: {
+            Label("插入到光标处", systemImage: "text.insert")
+        }
+        Button {
+            messageAction = .append(message)
+        } label: {
+            Label("追加到正文末尾", systemImage: "text.append")
+        }
+        if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Button {
+                let text = message.content
+                Task { @MainActor in
+                    do {
+                        let result = try await WorldWorkflow.ingestCharacterFromBubble(
+                            text,
+                            session: session,
+                            store: store
+                        )
+                        store.toast = result.isNew
+                            ? "已新建人物卡：\(result.cardName)"
+                            : "已更新人物卡：\(result.cardName)"
+                    } catch {
+                        if !error.isLLMCancellation {
+                            store.errorMessage = error.localizedDescription
+                        }
                     }
                 }
-                Button(role: .destructive) {
-                    messageAction = .delete(message)
-                } label: {
-                    Label(
-                        message.variants.count > 1 ? "删除当前版本" : "删除气泡",
-                        systemImage: "trash"
-                    )
-                }
-                .disabled(controller.isBusy)
+            } label: {
+                Label("提取为人物卡", systemImage: "person.crop.rectangle.badge.plus")
+            }
+            .disabled(controller.isBusy)
+        }
+        Button {
+            controller.regenerate(messageID: message.id, session: session, store: store)
+        } label: {
+            Label("重新生成", systemImage: "arrow.clockwise")
+        }
+        .disabled(controller.isBusy)
+        Button {
+            messageAction = .rollback(message)
+        } label: {
+            Label("回退到此", systemImage: "arrow.uturn.backward")
+        }
+        .disabled(controller.isBusy)
+        if message.variants.count > 1 {
+            Button {
+                messageAction = .cleanup(message)
+            } label: {
+                Label("清理历史版本", systemImage: "archivebox")
             }
         }
+        Button(role: .destructive) {
+            messageAction = .delete(message)
+        } label: {
+            Label(
+                message.variants.count > 1 ? "删除当前版本" : "删除气泡",
+                systemImage: "trash"
+            )
+        }
+        .disabled(controller.isBusy)
     }
 
     /// 长按菜单挂在透明的命中层上。
@@ -1157,9 +1197,7 @@ struct WriterPane: View {
     }
 
     /// 回退：把对话砍到这条助手回复对应的用户指令之前，指令放回输入框。
-    private func performRollback() {
-        guard let target = rollbackTarget else { return }
-        rollbackTarget = nil
+    private func performRollback(to target: ChatMessage) {
         let messages = session.payload.messages
         guard let index = messages.firstIndex(where: { $0.id == target.id }) else { return }
 
@@ -1217,6 +1255,8 @@ struct WriterPane: View {
             presentUndoPrompt("已追加到正文") {
                 action.undoViaButton()
             }
+        case .rollback(let message):
+            performRollback(to: message)
         case .cleanup(let message):
             session.keepOnlySelectedVariant(for: message.id)
             store.toast = "已清理历史版本"

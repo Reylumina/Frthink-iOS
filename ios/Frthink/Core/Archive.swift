@@ -531,9 +531,8 @@ enum FrthinkArchive {
         let docs = (try? c.decode([SourceDocJSON].self, forKey: .localSourceDocuments)) ?? []
         sourceText = docs.first?.content ?? ""
 
-        // 事件卡：Android 的新版本把剧情事件放在 `world.plotEvents`
-        // （`PlotEventCard`），老版本放 `world.events` 字符串数组。两者都读，
-        // 前者是真正能还原成事件卡的那份。
+        // 事件卡：同时兼容 `world.plotEvents`（结构化对象）与 `world.events`（纯标题列表），
+        // 优先取结构化事件卡。
         let events: [EventCard] = {
             let plotEvents = (worldJSON?.plotEvents ?? []).compactMap { raw -> EventCard? in
                 guard let title = raw.title, !title.isEmpty else { return nil }
@@ -549,11 +548,7 @@ enum FrthinkArchive {
             }
             if !plotEvents.isEmpty { return plotEvents }
             // 老存档只有标题，按标题还原成最小事件卡，至少不丢剧情节点。
-            return (worldJSON?.events ?? [])
-                .map(\.title)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { EventCard(title: $0) }
+            return EventCard.fromLegacyTitles((worldJSON?.events ?? []).map(\.title))
         }()
 
         let groups: [CharacterGroup] = {
@@ -927,9 +922,9 @@ enum FrthinkArchive {
         var materialChunkHashes: [String: String]?
         /// 世界材料分段进度，原版 `world.materialSourceProgress`。
         var materialSourceProgress: [String: RawMaterialProgress]?
-        /// 新版 Android 的事件卡（`world.plotEvents`）。
+        /// Android 结构化事件卡（`world.plotEvents`）。
         var plotEvents: [PlotEventJSON]?
-        /// 老版本的剧情事件只有标题字符串（`world.events`），也兼容误写成对象的情况。
+        /// `world.events` 列表（通常为纯标题字符串，兼容对象形态）。
         struct LegacyEvent: Decodable {
             var title: String
 
@@ -1004,7 +999,9 @@ enum FrthinkArchive {
         var payload: String
         var updatedAt: Date
         var index: Int
+        var chunkHash: String
         var text: String
+        var model: String
 
         init(_ segment: TranslationSegment) {
             self.id = segment.id
@@ -1016,7 +1013,9 @@ enum FrthinkArchive {
             self.payload = segment.payload
             self.updatedAt = segment.updatedAt
             self.index = segment.segment
+            self.chunkHash = ContentHash.of(segment.payload)
             self.text = segment.payload
+            self.model = ""
         }
     }
 
@@ -1367,9 +1366,7 @@ enum FrthinkArchive {
             if let extra = try? c.decode(SettingsExtra.self, forKey: .settings) {
                 extra.apply(to: &merged)
             }
-            // 真实备份的语料库不在 settings 里，而是和 projects 平级的
-            // `corpusLibrary`（库 → 集合嵌套）。旧版本放在 settings 里，
-            // 上面那条 `SettingsExtra` 已经兼容；这里读顶层，后者优先。
+            // 语料库同时兼容顶层 `corpusLibrary`（库 → 集合嵌套）与 `settings` 内嵌列表，顶层优先。
             if let topLevelCorpus = try? c.decode(
                 SettingsExtra.CorpusLibraryJSON.self,
                 forKey: .corpusLibrary
@@ -1435,6 +1432,14 @@ enum FrthinkArchive {
                 .first { $0.id == settings.translationProviderID }?
                 .resolvedModel ?? ""
             dict["baseUrl"] = provider?.baseURLForDisplay ?? ""
+            dict["apiKey"] = provider?.apiKey ?? ""
+            dict["temperature"] = provider?.temperature ?? 0.2
+            dict["maxTokens"] = provider?.maxTokens ?? 4_096
+            dict["useStream"] = true
+            dict["owner"] = settings.ownerID
+            dict["corpusEnabled"] = settings.corpusEnabled
+            dict["writingFontSize"] = Int(settings.bodyFontSize)
+            dict["readingFontSize"] = Int(settings.readerFontSize)
             dict["skills"] = settings.skills.map {
                 [
                     "id": $0.id,
@@ -1472,17 +1477,25 @@ enum FrthinkArchive {
                 "id": library.id,
                 "name": library.name,
                 "enabled": library.enabled,
+                "rules": library.rules,
+                "processedKeys": library.processedKeys,
+                "deletedTextKeys": library.deletedTextKeys,
+                "classifiedKeys": library.classifiedKeys,
                 "entries": library.entries.map(encodeCorpusEntry),
             ]
         }
 
         private static func encodeCorpusEntry(_ entry: CorpusEntry) -> [String: Any] {
             [
+                "id": entry.id,
                 "source": entry.source,
+                "origins": entry.source.isEmpty ? [] : [entry.source],
                 "title": entry.title,
                 "text": entry.text,
                 "category": entry.category,
                 "tags": entry.tags,
+                "createdAt": 0,
+                "updatedAt": 0,
             ]
         }
     }
@@ -1748,13 +1761,17 @@ enum FrthinkArchive {
         }
     }
 
-    /// 原版文件名：`frthink书项目-yyyy-MM-dd-HHmm.frthink` /
-    /// `frthink备份-yyyy-MM-dd-HHmm.frthink`。
-    static func filename(kind: Kind, at date: Date = Date()) -> String {
+    private static let filenameFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd-HHmm"
-        let stamp = formatter.string(from: date)
+        return formatter
+    }()
+
+    /// 原版文件名：`frthink书项目-yyyy-MM-dd-HHmm.frthink` /
+    /// `frthink备份-yyyy-MM-dd-HHmm.frthink`。
+    static func filename(kind: Kind, at date: Date = Date()) -> String {
+        let stamp = filenameFormatter.string(from: date)
         let prefix = kind.isFull ? "frthink备份" : "frthink书项目"
         return "\(prefix)-\(stamp).\(fileExtension)"
     }

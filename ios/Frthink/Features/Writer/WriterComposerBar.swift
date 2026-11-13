@@ -124,11 +124,7 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 草稿只在收键盘/离开页面时落盘。
-    ///
-    /// 以前每次停顿 600ms 就写一次 `session.payload.composerDraft`：`payload` 是
-    /// `@Observable` 上的值类型，写一次会让写作台整页重算（正文、气泡、章节全部
-    /// 重新求值），输入时每隔半秒就顿一下。草稿不是高频状态，收键盘再存足够。
+    /// 草稿仅在收键盘或离开页面时写回 `session.payload`，避免输入期间高频触发 `@Observable` 整页重算。
     private func saveDraft() {
         let text = model.text
         guard session.payload.composerDraft != text else { return }

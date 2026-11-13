@@ -11,13 +11,14 @@ struct WorldTagsField: View {
     @Binding var values: [String]
     var placeholder: String
     var separator: String = "、"
+    var flat: Bool = false
 
     @State private var draft = ""
     @State private var loaded = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text(title)
                 .font(Font.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -28,19 +29,31 @@ struct WorldTagsField: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focused)
-                .padding(.horizontal, Theme.Spacing.m)
-                .padding(.vertical, Theme.Spacing.s)
-                .background(Theme.field)
+                .accessibilityLabel(title)
+                .padding(.horizontal, flat ? 0 : Theme.Spacing.m)
+                .padding(.vertical, flat ? Theme.Spacing.xs : Theme.Spacing.s)
+                .background(flat ? Color.clear : Theme.field)
                 .clipShape(
-                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    RoundedRectangle(
+                        cornerRadius: flat ? 0 : Theme.Radius.medium,
+                        style: .continuous
+                    )
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                        .strokeBorder(
-                            focused ? Theme.accent.opacity(0.45) : Color.clear,
-                            lineWidth: 1
-                        )
-                )
+                .overlay(alignment: .bottom) {
+                    if flat {
+                        Divider()
+                            .overlay(focused ? Theme.accent.opacity(0.6) : Color.clear)
+                    }
+                }
+                .overlay {
+                    if !flat {
+                        RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                            .strokeBorder(
+                                focused ? Theme.accent.opacity(0.45) : Color.clear,
+                                lineWidth: 1
+                            )
+                    }
+                }
                 .animation(Theme.motionSelection, value: focused)
                 .onChange(of: draft) { _, newValue in
                     commit(newValue)

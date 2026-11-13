@@ -1,15 +1,15 @@
 # APK-NOTES.md · 原版拆解笔记
 
 对 Android 应用 `com.frthink.app` v0.8.213 的拆解结论索引。详细证据在
-[`docs/spec/`](spec/) 四份规格里，本文只做总览和交叉引用。
+[`docs/spec/`](spec/) 四份规格里，本文汇总 v0.8.213 的核心结构与行为。
 
-本文记录原版 v0.8.213 的行为，不代表 iOS 当前实现。v0.8.213 相对 v0.8.210 的差异见 [`archive/APK-0.8.213-DELTA.md`](archive/APK-0.8.213-DELTA.md)；下文未改标「v0.8.210 复核」的规格引用仍指向旧版反编译。
+本文记录原版 v0.8.213 的行为，不代表 iOS 当前实现。
 
 ## 一、这是什么
 
 AI 中文小说写作工具。主要功能是将长篇小说写作所需的上下文自动化：人物、事件、文风、写作规则
 由模型从正文里增量提炼，再回灌到下一次续写的系统提示词。世界刷新、剧情梗概、文风笔记、
-事件卡、长期规则都由用户触发，只有自动对话摘要会在达到阈值时后台更新长期规则。
+事件卡、长期规则均由用户显式触发（`J1/C0398d` 中的 `autoConversationSummary` / `conversationSummaryThresholdPercent` 在 0.8.213 为未触发的死字段）。
 
 作者署名 **Fr33**（原版设置页 `Power by Fr33`）。
 
@@ -95,19 +95,22 @@ AES-256-GCM，密钥在 AndroidKeyStore 里不可导出。所以跨平台迁移�
 | 硬编码密钥 | 未发现 |
 | 可疑行为 | 未发现。`usesCleartextTraffic=true` 是为了允许自建 HTTP 反代 |
 
-## 八、移植到 iOS
+## 八、v0.8.213 关键机制核实与移植要点
 
-[SwiftUI 重写](../README.md)，提示词主体逐字保留（[`script/prompt_check.py`](../script/prompt_check.py)
-对拍 61/61 命中）。P48–P51 额外追加了事件行文要求：原版只约束「不流水账」，
-模型仍会一句一顿；iOS 在原文后要求连贯段落，并在解析时把字段内换行并段。
+- [SwiftUI 重写](../README.md)，提示词主体逐字保留（[`script/prompt_check.py`](../script/prompt_check.py) 对拍 61/61 命中）。
+- **世界刷新（`L1/W2.B`）**：UI 入口仅写人物卡；普通模式按 `clamp(min(4000, contextBudget × 0.2), 256, 4000)` token 切段（96 token 重叠），**每轮上限 256 段**（`L1/K0.smali:5774-5776`）；大书模式（码点数 `≥ 500,000`）单次只分析上下文放得下的前缀（收尾文案「已分析正文前 N 字，其余未分析」），并扣除已有角色卡串（上限 6000 字）与 `4096` 等预算；写库前先按姓名/别称做连通分量合并（`L1.r.b`/`q0`）再执行 P32–P34 全书去重。
+- **素材归纳（`L1/W2.Q0` / `L1/Q2`）**：按 **3000 token** 切段、最多 256 段；剧情模式只接受「事件数组」或「`events` / `plot_events` 恰好一个」（同现报 `事件卡结果必须包含唯一事件数组`），**不写 `plotOutline`**；每段结束写回 `materialChunkHashes` 与 `materialSourceProgress` 并更新 `StateFlow<C0>` 落盘。
+- **语料全量注入（`L1/W2.java:489-530`）**：注入所有启用语料库的全部条目，无 10 条上限。
+- **长期规则门控（`L1/W2.java:606-658`）**：要求 `enabled == true && rulesVersion == 1 && !content.isBlank() && content != "暂无长期规则。"`，且所有 `sourceMessageKeys` 以 `"user:"` 开头、`sourceHash == p000a.a.o(sourceMessageKeys)`；`previousRevisions` 保留最近 10 条。
+- **人物卡工具路径（`L1/W.smali:423-805`）**：`create_character_card` schema 字段与层级已完整验证；首次请求不发 `thinking`，仅在 HTTP 400 返回同时含 `thinking mode` 与 `tool[_\s-]?choice` 时，无条件附带 `"thinking": {"type": "disabled"}` 与 `Idempotency-Key: {attemptId}-thinking-disabled` 重试。
+- **写作台范围限制**：支持 `1–1,000,000` 字「正文范围」配置与保存回执。
 
 ## 九、已知缺口
 
 见各规格末节，汇总：
 
 - 阅读页 `J5.i0` 方法体 9923 条指令，jadx 放弃反编译，内部分页算法**未验证**
-- `L1/K0` 系列（世界抽取主力）jadx 全部失败，只能读 smali
-- `create_character_card` 工具 schema 是运行时生成的，**未验证**
+- `L1/K0` 系列（世界抽取主力）jadx 全部失败，主要结论按 smali 核实
 - 自动保存去抖间隔、SSE 重连退避：**未验证**
 - `M1/v2.smali` 与 `M1/V2.smali` 在 Windows 大小写碰撞，幸存的 `v2.1.smali`
   是唯一含「Tab 到界面」分发逻辑的文件

@@ -230,8 +230,7 @@ struct ProjectPayload: Codable {
         self.interruptedMessageIDs = interruptedMessageIDs
     }
 
-    /// 解码旧版本 payload：新增的 `assistantSupplement` 缺失时用空串，
-    /// 避免整本书因为一个新增键读成空项目。
+    /// 兼容早期存档：可选字段缺失时按默认值回填，避免整本书解码失败。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = (try? c.decode(Int.self, forKey: .schemaVersion)) ?? 1

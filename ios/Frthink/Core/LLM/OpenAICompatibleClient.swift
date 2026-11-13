@@ -64,9 +64,7 @@ final class OpenAICompatibleClient: LLMClient {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        // OpenCode Go 用会话头保持同一对话的路由与缓存；按 host 识别，兼容并入 OpenAI 兼容的配置。
-        if provider.kind == .openCodeGo
-            || provider.baseURLForDisplay.lowercased().contains("opencode.ai") {
+        if provider.isOpenCode {
             request.setValue(openCodeSessionID, forHTTPHeaderField: "x-opencode-session")
         }
         // 幂等键：一次「尝试」的稳定标识，重试时原版会加后缀。
@@ -105,90 +103,28 @@ final class OpenAICompatibleClient: LLMClient {
         do {
             var req = request
             req.stream = true
-            let urlRequest = try makeRequest(
-                path: "/chat/completions",
-                body: req.jsonBody(
-                    isDeepSeek: provider.isDeepSeek,
-                    kind: provider.kind,
-                    providerLevel: provider.effectiveThinkingLevel,
-                    offStyle: provider.effectiveReasoningOffStyle
-                ),
-                accept: "text/event-stream",
-                attemptId: req.attemptId
-            )
-            let (bytes, response) = try await session.bytes(for: urlRequest)
-
-            guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("拿不到 HTTP 状态码")
+            let (bytes, http) = try await openStream(for: req)
+            if (400..<500).contains(http.statusCode) {
+                let body = try await Self.drain(bytes)
+                if !provider.isDeepSeek,
+                   req.sendStreamOptions,
+                   Self.isUnsupportedStreamOptions(status: http.statusCode, body: body) {
+                    req.sendStreamOptions = false
+                    let (retryBytes, retryHTTP) = try await openStream(for: req)
+                    guard (200..<300).contains(retryHTTP.statusCode) else {
+                        let retryBody = try await Self.drain(retryBytes)
+                        throw LLMError.http(status: retryHTTP.statusCode, body: retryBody)
+                    }
+                    try await consumeStream(retryBytes, continuation: continuation)
+                    return
+                }
+                throw LLMError.http(status: http.statusCode, body: body)
             }
             guard (200..<300).contains(http.statusCode) else {
                 let body = try await Self.drain(bytes)
                 throw LLMError.http(status: http.statusCode, body: body)
             }
-
-            var finishReason: String?
-            var emittedAnything = false
-            var sawDone = false
-            var undecodableLines = 0
-            // 收到的原始 SSE 行。判定「空响应」时一并带出去——
-            // 只说「空响应」没法区分是鉴权、参数还是模型名的问题。
-            var rawLog: [String] = []
-            // 一个解码器复用整条流：每个 chunk 新建 JSONDecoder 是纯浪费。
-            let chunkDecoder = JSONDecoder()
-
-            for try await line in bytes.lines {
-                if Task.isCancelled {
-                    continuation.finish(throwing: LLMError.cancelled)
-                    return
-                }
-                if rawLog.count < 40, !line.isEmpty {
-                    rawLog.append(line)
-                }
-                guard line.hasPrefix("data:") else { continue }
-                let payload = line
-                    .dropFirst("data:".count)
-                    .trimmingCharacters(in: .whitespaces)
-
-                if payload == "[DONE]" {
-                    sawDone = true
-                    break
-                }
-                if payload.isEmpty { continue }
-
-                guard let data = payload.data(using: .utf8) else { continue }
-                // 长时间流式循环里每行都在产生临时对象，autoreleasepool
-                // 把每块的生命周期限制在本行，避免几万行后一起释放。
-                guard let chunk = autoreleasepool(invoking: {
-                    try? chunkDecoder.decode(StreamChunk.self, from: data)
-                }) else {
-                    undecodableLines += 1
-                    continue
-                }
-                try handleChunk(
-                    chunk,
-                    continuation: continuation,
-                    finishReason: &finishReason,
-                    emittedAnything: &emittedAnything
-                )
-            }
-
-            if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
-                throw LLMError.streamError(
-                    detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
-                )
-            }
-
-            if !emittedAnything {
-                let detail = rawLog.joined(separator: " / ")
-                continuation.finish(
-                    throwing: LLMError.emptyResponse(
-                        detail: detail.isEmpty ? "（连接建立但没有收到任何 SSE 行）" : detail
-                    )
-                )
-                return
-            }
-            continuation.yield(.finished(reason: finishReason))
-            continuation.finish()
+            try await consumeStream(bytes, continuation: continuation)
         } catch is CancellationError {
             continuation.finish(throwing: LLMError.cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -196,6 +132,106 @@ final class OpenAICompatibleClient: LLMClient {
         } catch {
             continuation.finish(throwing: error)
         }
+    }
+
+    private func openStream(for req: LLMRequest) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let urlRequest = try makeRequest(
+            path: "/chat/completions",
+            body: req.jsonBody(
+                isDeepSeek: provider.isDeepSeek,
+                kind: provider.kind,
+                providerLevel: provider.effectiveThinkingLevel,
+                offStyle: provider.effectiveReasoningOffStyle
+            ),
+            accept: "text/event-stream",
+            attemptId: req.attemptId
+        )
+        let (bytes, response) = try await session.bytes(for: urlRequest)
+        guard let http = response as? HTTPURLResponse else {
+            throw LLMError.decoding("拿不到 HTTP 状态码")
+        }
+        return (bytes, http)
+    }
+
+    private static func isUnsupportedStreamOptions(status: Int, body: String) -> Bool {
+        guard status == 400 || status == 422 else { return false }
+        let lower = body.lowercased()
+        guard lower.contains("stream_options") else { return false }
+        let markers = [
+            "unsupported", "not supported", "unknown", "unrecognized",
+            "not allowed", "not permitted", "extra fields", "invalid",
+            "不支持", "不允许",
+        ]
+        return markers.contains { lower.contains($0) }
+    }
+
+    private func consumeStream(
+        _ bytes: URLSession.AsyncBytes,
+        continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
+    ) async throws {
+        var finishReason: String?
+        var emittedAnything = false
+        var sawDone = false
+        var undecodableLines = 0
+        // 收到的原始 SSE 行。判定「空响应」时一并带出去——
+        // 只说「空响应」没法区分是鉴权、参数还是模型名的问题。
+        var rawLog: [String] = []
+        // 一个解码器复用整条流：每个 chunk 新建 JSONDecoder 是纯浪费。
+        let chunkDecoder = JSONDecoder()
+
+        for try await line in bytes.lines {
+            if Task.isCancelled {
+                continuation.finish(throwing: LLMError.cancelled)
+                return
+            }
+            if rawLog.count < 40, !line.isEmpty {
+                rawLog.append(line)
+            }
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line
+                .dropFirst("data:".count)
+                .trimmingCharacters(in: .whitespaces)
+
+            if payload == "[DONE]" {
+                sawDone = true
+                break
+            }
+            if payload.isEmpty { continue }
+
+            guard let data = payload.data(using: .utf8) else { continue }
+            // 长时间流式循环里每行都在产生临时对象，autoreleasepool
+            // 把每块的生命周期限制在本行，避免几万行后一起释放。
+            guard let chunk = autoreleasepool(invoking: {
+                try? chunkDecoder.decode(StreamChunk.self, from: data)
+            }) else {
+                undecodableLines += 1
+                continue
+            }
+            try handleChunk(
+                chunk,
+                continuation: continuation,
+                finishReason: &finishReason,
+                emittedAnything: &emittedAnything
+            )
+        }
+
+        if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
+            throw LLMError.streamError(
+                detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
+            )
+        }
+
+        if !emittedAnything {
+            let detail = rawLog.joined(separator: " / ")
+            continuation.finish(
+                throwing: LLMError.emptyResponse(
+                    detail: detail.isEmpty ? "（连接建立但没有收到任何 SSE 行）" : detail
+                )
+            )
+            return
+        }
+        continuation.yield(.finished(reason: finishReason))
+        continuation.finish()
     }
 
     private func handleChunk(
@@ -327,6 +363,56 @@ final class OpenAICompatibleClient: LLMClient {
         return text
     }
 
+    func completeToolCall(_ request: LLMRequest) async throws -> [LLMToolCall] {
+        let decoded: CompletionResponse
+        do {
+            (decoded, _) = try await completionPayload(request)
+        } catch let LLMError.http(status, body) where Self.shouldRetryToolCallWithThinkingDisabled(
+            status: status,
+            body: body,
+            alreadyDisabled: request.forceThinkingDisabledLiteral
+        ) {
+            var retry = request
+            retry.omitThinking = false
+            retry.forceThinkingDisabledLiteral = true
+            retry.attemptId = (request.attemptId ?? UUID().uuidString) + "-thinking-disabled"
+            (decoded, _) = try await completionPayload(retry)
+        }
+
+        let choice = decoded.choices?.first
+        if request.failOnLength,
+           choice?.finish_reason?.lowercased() == "length" {
+            throw LLMError.truncated(detail: "finish_reason=length")
+        }
+        let calls = (choice?.message?.tool_calls ?? []).compactMap { call -> LLMToolCall? in
+            guard let fn = call.function,
+                  let name = fn.name, !name.isEmpty,
+                  let args = fn.arguments else {
+                return nil
+            }
+            return LLMToolCall(
+                id: call.id ?? "",
+                functionName: name,
+                arguments: args
+            )
+        }
+        guard !calls.isEmpty else {
+            throw LLMError.decoding("模型没有返回人物卡工具结果")
+        }
+        return calls
+    }
+
+    private static func shouldRetryToolCallWithThinkingDisabled(
+        status: Int,
+        body: String,
+        alreadyDisabled: Bool
+    ) -> Bool {
+        guard !alreadyDisabled, status == 400 else { return false }
+        let lower = body.lowercased()
+        guard lower.contains("thinking mode") else { return false }
+        return lower.range(of: #"tool[_\s-]?choice"#, options: .regularExpression) != nil
+    }
+
     // MARK: - 模型列表
 
     func listModels() async throws -> [String] {
@@ -334,7 +420,11 @@ final class OpenAICompatibleClient: LLMClient {
         guard let decoded = try? JSONDecoder().decode(ModelListResponse.self, from: data) else {
             throw LLMError.decoding("模型列表结构不符合预期")
         }
-        return (decoded.data ?? []).map(\.id).sorted()
+        var seen = Set<String>()
+        return (decoded.data ?? [])
+            .map(\.id)
+            .filter { seen.insert($0).inserted }
+            .sorted()
     }
 
     // MARK: - 连通性
@@ -459,9 +549,18 @@ final class OpenAICompatibleClient: LLMClient {
     private struct CompletionResponse: Decodable {
         struct Choice: Decodable {
             struct Message: Decodable {
+                struct ToolCall: Decodable {
+                    struct Function: Decodable {
+                        let name: String?
+                        let arguments: String?
+                    }
+                    let id: String?
+                    let function: Function?
+                }
                 let content: String?
                 let text: String?
                 let output_text: String?
+                let tool_calls: [ToolCall]?
                 /// 思考型模型把推理过程放这里，`content` 可能为空。
                 let reasoning_content: String?
                 let reasoning: String?

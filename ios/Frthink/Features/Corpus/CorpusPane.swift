@@ -64,7 +64,15 @@ struct CorpusPane: View {
         .navigationTitle("语料收集库")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    activeSheet = .extract
+                } label: {
+                    Image(systemName: "sparkles")
+                }
+                .accessibilityLabel("AI 提取语料")
+                .disabled(activeLibrary == nil)
+
                 Button {
                     activeSheet = .newEntry
                 } label: {
@@ -98,6 +106,12 @@ struct CorpusPane: View {
                 }
             case .libraryManager:
                 CorpusLibraryManagerSheet(store: store, activeLibraryID: $activeLibraryID)
+            case .extract:
+                if let library = activeLibrary {
+                    CorpusExtractSheet(store: store, library: library) { updated in
+                        saveLibrary(updated)
+                    }
+                }
             }
         }
         .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
@@ -333,18 +347,161 @@ struct CorpusPane: View {
         )
     }
 
-    /// 新增条目、编辑条目、语料库管理共用一个 sheet。
+    /// 新增条目、编辑条目、AI 提取、语料库管理共用一个 sheet。
     private enum CorpusSheet: Identifiable {
         case newEntry
         case edit(CorpusEntry)
         case libraryManager
+        case extract
 
         var id: String {
             switch self {
             case .newEntry: return "new"
             case .edit(let entry): return entry.id
             case .libraryManager: return "libraries"
+            case .extract: return "extract"
             }
+        }
+    }
+}
+
+/// 从粘贴片段中按筛选规则调用模型提取语料（`PromptComposer.corpusMessages`）。
+private struct CorpusExtractSheet: View {
+    let store: AppStore
+    let library: CorpusLibrary
+    let onCommit: (CorpusLibrary) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var rules: String
+    @State private var sourceText = ""
+    @State private var isRunning = false
+    @State private var errorText: String?
+
+    init(store: AppStore, library: CorpusLibrary, onCommit: @escaping (CorpusLibrary) -> Void) {
+        self.store = store
+        self.library = library
+        self.onCommit = onCommit
+        _rules = State(initialValue: library.rules)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("提取规则（可选）") {
+                    TextField("例如：只收动作描写与环境烘托句", text: $rules, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+                Section("待提取文本") {
+                    TextEditor(text: $sourceText)
+                        .frame(minHeight: 160)
+                }
+                if let errorText {
+                    Section {
+                        Text(errorText)
+                            .font(Font.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("AI 提取语料")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isRunning ? "提取中…" : "开始提取") {
+                        Task { await runExtract() }
+                    }
+                    .disabled(isRunning || sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func runExtract() async {
+        errorText = nil
+        isRunning = true
+        defer { isRunning = false }
+        let trimmed = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let client = try store.clientForActiveProvider()
+            guard let provider = store.settings.activeProvider else {
+                errorText = "还没有可用的 AI 服务商"
+                return
+            }
+            let existingCategories = Array(Set(library.entries.map(\.category).filter { !$0.isEmpty })).sorted()
+            let request = WorldRequestContext.request(
+                provider: provider,
+                messages: PromptComposer.corpusMessages(
+                    rules: rules.trimmingCharacters(in: .whitespacesAndNewlines),
+                    fragments: [trimmed],
+                    categories: existingCategories
+                ),
+                failOnLength: true
+            )
+            let raw = try await client.complete(request)
+            let parsed = Self.parseEntries(from: raw)
+            var updated = library
+            updated.rules = rules.trimmingCharacters(in: .whitespacesAndNewlines)
+            let existingTexts = Set(updated.entries.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) })
+            let deleted = Set(updated.deletedTextKeys)
+            var addedCount = 0
+            for item in parsed {
+                let textKey = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !textKey.isEmpty,
+                      !existingTexts.contains(textKey),
+                      !deleted.contains(ContentHash.of(textKey)) else { continue }
+                updated.entries.append(item)
+                addedCount += 1
+            }
+            let fragmentKey = ContentHash.of(trimmed)
+            if !updated.processedKeys.contains(fragmentKey) {
+                updated.processedKeys.append(fragmentKey)
+            }
+            onCommit(updated)
+            store.toast = addedCount > 0 ? "已提取 \(addedCount) 条语料" : "没有新增有效语料"
+            dismiss()
+        } catch {
+            if !error.isLLMCancellation {
+                errorText = error.localizedDescription
+            }
+        }
+    }
+
+    private static func parseEntries(from raw: String) -> [CorpusEntry] {
+        guard let json = WorldJSON.extractJSON(from: raw),
+              let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) else {
+            return []
+        }
+        let objects: [[String: Any]]
+        if let dict = root as? [String: Any],
+           let list = dict["entries"] as? [[String: Any]] {
+            objects = list
+        } else if let list = root as? [[String: Any]] {
+            objects = list
+        } else {
+            return []
+        }
+        return objects.compactMap { obj in
+            let text = (obj["text"] as? String ?? obj["sentence"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let title = (obj["title"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let category = (obj["category"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let tags = (obj["tags"] as? [String] ?? [])
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return CorpusEntry(
+                source: "AI提取",
+                title: title.isEmpty ? String(text.prefix(16)) : title,
+                text: text,
+                category: category,
+                tags: tags
+            )
         }
     }
 }

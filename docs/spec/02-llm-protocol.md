@@ -5,7 +5,7 @@
 > jadx 有 185 个类反编译失败，其中 **`L1/T`（主聊天流式协程，3474 条指令）** 只能用 smali 读，本文已补。
 > 标注「未验证」的是从代码推得出、但缺少直接执行证据的部分。
 
-> v0.8.213 复核：提示词库、请求协议与模型字段未变；差异见 [`../archive/APK-0.8.213-DELTA.md`](../archive/APK-0.8.213-DELTA.md)。本文证据仍指向 v0.8.210 的 `out/`。
+> v0.8.213 复核：关键结构与协议汇总见 [`../APK-NOTES.md`](../APK-NOTES.md)；本文补充协议细节。
 
 ---
 
@@ -307,12 +307,12 @@ put("messages", JsonArray([ JsonObject{ "role": r, "content": c } for each ]));
 `temperature = 0.2`（`const-wide v19, 0x3fc999999999999a`）、`thinkingFlag = Boolean.FALSE`、
 `taskKind = null`、`maxTokens = snapshot.outputReserveTokens`。
 
-### 4.2 人物卡工具路径（`L1/V.java:54-140` + `smali:L1/V.smali:930-1044`）
+### 4.2 人物卡工具路径（0.8.213 `L1/W.smali:423-805`；原 0.8.210 `L1/V.java`）
 
-同一套字段，额外加 `tools` / `tool_choice` / `parallel_tool_calls`，`max_tokens` 固定 8192，
-DeepSeek 时 `thinking` 固定 `{"type":"disabled"}`。
+同一套字段，额外加 `tools` / `tool_choice` / `parallel_tool_calls`，`max_tokens` 固定 8192。
+**首次请求不带 `thinking` 字段**（`p6 = false`）；仅当返回 `400` 且报错同时含 `thinking mode` 与 `tool[_\s-]?choice` 时，才在重试请求中无条件附带 `"thinking": {"type": "disabled"}`（不检查 `isDeepSeek`）。
 
-**可以直接照抄的 JSON**
+**可以直接照抄的 JSON（含 400 重试时的 `thinking` 字段）**
 
 ```json
 {
@@ -372,10 +372,8 @@ DeepSeek 时 `thinking` 固定 `{"type":"disabled"}`。
 
 证据：`system` 提示词原文见 `out/dex-stringtable.txt:17388`（与 `smali:L1/V.smali:825` 一致）；
 `create_character_card` / 描述 / `parameters` / `tool_choice` / `parallel_tool_calls=false` 见
-`smali:L1/V.smali:885, 893, 903, 1036, 1042`；`max_tokens=8192`（`const/16 v1, 0x2000`）见 `smali:L1/V.smali:951-959`；
-`thinking={"type":"disabled"}` 见 `smali:L1/V.smali:961-981`。
-`parameters` 里各字段的**嵌套层级**是从 `properties` / `required` / `items` / `additionalProperties` 的键名
-+ `L1/V.java:70-124` 的骨架重建的，**层级细节标「未验证」**；键名与字符串原文已验证。
+`smali:L1/W.smali:423-805`（0.8.213）；`max_tokens=8192`（`const/16 v1, 0x2000`）见 `smali:L1/V.smali:951-959`；
+`parameters` 各字段名、嵌套层级、`required` 与 `additionalProperties: false` 已在 0.8.213 `L1/W.smali` 中完整核实。
 
 工具路径的成功响应解析（非流式）在 `p068s2/a.java` 的 `w0(Json, responseBody)`：取
 `choices[0].message.tool_calls[]`，没有就抛 `IllegalArgumentException("模型没有返回人物卡工具结果")`。
@@ -946,8 +944,8 @@ if (!thinkingDisabledAlready && status == 400) {
 }
 ```
 
-重发时：`thinking = {"type":"disabled"}`（DeepSeek），`Idempotency-Key = {attemptId}-thinking-disabled`，
-`Accept` 换成 `text/event-stream, application/json`（`L1/V.java:130`）。
+重发时：无条件附带 `"thinking": {"type": "disabled"}`（不区分 DeepSeek 与其他提供方），`Idempotency-Key = {attemptId}-thinking-disabled`，
+`Accept` 换成 `text/event-stream, application/json`（0.8.213 `L1/Q.java` / `L1/W.java`）。
 
 ### 9.4 幂等键后缀总表
 

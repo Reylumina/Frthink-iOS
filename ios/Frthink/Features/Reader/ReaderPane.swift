@@ -28,7 +28,8 @@ struct ReaderPane: View {
     /// 原文的 UTF-16 长度。译文模式折算章节位置时要用，避免每帧桥接一次 NSString。
     @State private var manuscriptLength = 0
     /// 当前定位点（UTF-16 偏移），滚动时跟着视口顶部那一段走。
-    @State private var anchorOffset = 0
+    @State private var position = ReaderPositionState()
+    @State private var offsetSaveTask: Task<Void, Never>?
     /// `scrollPosition(id:)` 报告的顶部段落起点；跳转也写它，只保留一个滚动驱动。
     @State private var scrolledBlockStart: Int?
     @State private var showSettings = false
@@ -52,6 +53,8 @@ struct ReaderPane: View {
     @State private var chapterDisplayOffsets: [Int] = []
     /// 当前滚动位置落在第几章。随 `anchorOffset` 更新，body 里只读结果。
     @State private var currentChapterIndex: Int?
+    /// 章节标题所在块的起点，随章节偏移一起缓存。
+    @State private var chapterStarts: Set<Int> = []
 
     init(session: ProjectSession) {
         self.session = session
@@ -69,7 +72,7 @@ struct ReaderPane: View {
         VStack(spacing: 0) {
             readingSurface
             Divider().overlay(Theme.separator)
-            footer
+            ReaderFooterView(position: position, document: document)
         }
         // 搜索是浮在正文上的控制层：不占布局高度，打开时正文不下推。
         .overlay(alignment: .top) {
@@ -99,6 +102,9 @@ struct ReaderPane: View {
             rebuildTask = nil
             searchTask?.cancel()
             searchTask = nil
+            offsetSaveTask?.cancel()
+            offsetSaveTask = nil
+            lastOffset = anchorOffset
         }
         // 结构改动（插入/撤销/导入/覆盖恢复）才需要重排；逐字编辑走正文编辑器，
         // 不用在这里比一遍 56 万字的字符串。
@@ -284,11 +290,6 @@ struct ReaderPane: View {
 
     // MARK: - 正文
 
-    /// 章节标题所在块的起点；读一次，块循环里只做集合查找。
-    private var chapterStarts: Set<Int> {
-        Set(session.payload.chapters.map(\.location))
-    }
-
     private var readingSurface: some View {
         ScrollView {
             LazyVStack(
@@ -315,6 +316,7 @@ struct ReaderPane: View {
                         current: currentHighlight(in: block),
                         isHeading: chapterStarts.contains(block.start)
                     )
+                    .equatable()
                     .id(block.start)
                 }
             }
@@ -336,7 +338,7 @@ struct ReaderPane: View {
         .onChange(of: scrolledBlockStart) { _, start in
             guard let start, start != anchorOffset else { return }
             anchorOffset = start
-            lastOffset = start
+            scheduleOffsetSave(start)
             refreshCurrentChapter()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -366,55 +368,20 @@ struct ReaderPane: View {
             .padding(.vertical, Theme.Spacing.xxl)
     }
 
-    // MARK: - 页脚
+    // MARK: - 页脚与位置状态
 
-    private var footer: some View {
-        VStack(spacing: Theme.Spacing.s) {
-            readingProgressBar
-            HStack(spacing: Theme.Spacing.s) {
-                Text(positionLabel)
-                    .font(Theme.numeric)
-                    .foregroundStyle(.secondary)
-                if !document.blocks.isEmpty {
-                    Text("\(document.characterCount.formatted()) 字")
-                        .font(Theme.numeric)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .accessibilityElement(children: .combine)
+    private var anchorOffset: Int {
+        get { position.anchorOffset }
+        nonmutating set { position.anchorOffset = newValue }
+    }
+
+    private func scheduleOffsetSave(_ offset: Int) {
+        offsetSaveTask?.cancel()
+        offsetSaveTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            lastOffset = offset
         }
-        .padding(.horizontal, Theme.Spacing.l)
-        .padding(.vertical, Theme.Spacing.s)
-    }
-
-    /// 读到哪儿了：一条两像素的进度条，不抢正文的注意力。
-    private var readingProgressBar: some View {
-        ZStack(alignment: .leading) {
-            Capsule().fill(Theme.separator)
-            Capsule()
-                .fill(Theme.accent)
-                .scaleEffect(x: max(0, min(1, readingProgress)), y: 1, anchor: .leading)
-        }
-        .frame(height: Theme.Layout.progressBarHeight)
-        .accessibilityHidden(true)
-    }
-
-    /// 0…1；没有正文时不画进度。
-    private var readingProgress: Double {
-        let total = document.blocks.count
-        guard total > 0 else { return 0 }
-        return min(max(Double(currentBlockNumber) / Double(total), 0), 1)
-    }
-
-    private var positionLabel: String {
-        guard !document.blocks.isEmpty else { return "暂无正文" }
-        return "第 \(currentBlockNumber.formatted())/\(document.blocks.count.formatted()) 段"
-    }
-
-    private var currentBlockNumber: Int {
-        guard !document.blocks.isEmpty else { return 0 }
-        return ReaderLocator.blockIndex(for: anchorOffset, in: document.blocks) + 1
     }
 
     // MARK: - 模式与章节位置
@@ -450,6 +417,7 @@ struct ReaderPane: View {
 
     /// 章节偏移只在文档重建和章节表变化时算一次；body 里直接读缓存。
     private func refreshChapterOffsets() {
+        chapterStarts = Set(session.payload.chapters.map(\.location))
         chapterDisplayOffsets = session.payload.chapters.map { displayOffset(for: $0) }
         refreshCurrentChapter()
     }
@@ -575,8 +543,7 @@ struct ReaderPane: View {
         scheduleRebuild(immediate: true)
     }
 
-    /// 后台重排。56 万字的切块、逐块 substring、字数统计，全都不能在主线程做——
-    /// 以前打开阅读页或在写作台敲字都会同步跑这一遍，是另一个「整页卡住」的来源。
+    /// 后台重排分块与字数统计，避免长文渲染阻塞主线程。
     private func scheduleRebuild(immediate: Bool = false) {
         rebuildTask?.cancel()
         if document.blocks.isEmpty { isLoadingDocument = true }
@@ -649,5 +616,62 @@ struct ReaderPane: View {
         scrolledBlockStart = anchorOffset
         refreshChapterOffsets()
         performSearch()
+    }
+}
+
+@Observable
+private final class ReaderPositionState {
+    var anchorOffset = 0
+}
+
+private struct ReaderFooterView: View {
+    let position: ReaderPositionState
+    let document: ReaderDocument
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.s) {
+            readingProgressBar
+            HStack(spacing: Theme.Spacing.s) {
+                Text(positionLabel)
+                    .font(Theme.numeric)
+                    .foregroundStyle(.secondary)
+                if !document.blocks.isEmpty {
+                    Text("\(document.characterCount.formatted()) 字")
+                        .font(Theme.numeric)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.vertical, Theme.Spacing.s)
+    }
+
+    private var readingProgressBar: some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(Theme.separator)
+            Capsule()
+                .fill(Theme.accent)
+                .scaleEffect(x: max(0, min(1, readingProgress)), y: 1, anchor: .leading)
+        }
+        .frame(height: Theme.Layout.progressBarHeight)
+        .accessibilityHidden(true)
+    }
+
+    private var readingProgress: Double {
+        let total = document.blocks.count
+        guard total > 0 else { return 0 }
+        return min(max(Double(currentBlockNumber) / Double(total), 0), 1)
+    }
+
+    private var positionLabel: String {
+        guard !document.blocks.isEmpty else { return "暂无正文" }
+        return "第 \(currentBlockNumber.formatted())/\(document.blocks.count.formatted()) 段"
+    }
+
+    private var currentBlockNumber: Int {
+        guard !document.blocks.isEmpty else { return 0 }
+        return ReaderLocator.blockIndex(for: position.anchorOffset, in: document.blocks) + 1
     }
 }

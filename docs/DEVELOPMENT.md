@@ -88,7 +88,7 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 out/apktool/smali/…       字节码，R8 混淆后的类名是 A、L1、M1 等（v0.8.210 基线）
 out/jadx/sources/…        Java 反编译，部分类失败
 out/dex-stringtable.txt   全部字符串，18580 条
-out-0.8.213/…             v0.8.213 反编译，差异见 archive/APK-0.8.213-DELTA.md
+docs/APK-NOTES.md         v0.8.213 APK 拆解总览
 docs/spec/                已整理的规格：架构、协议、数据模型、提示词
 ```
 

@@ -7,7 +7,7 @@ import Foundation
 /// 所以按 `ContentHash.of(segment)` 就能稳定命中缓存。
 enum TranslationSegmenter {
 
-    /// 目标语言固定 zh-CN（Android 端目前只有这一种）。
+    /// 正文译文目标标记。
     static let target = TranslationSegment.defaultTarget
 
     /// 一个待翻译单元。`hash` 是 `ContentHash.of(text)`，缓存命中和落盘都用它。

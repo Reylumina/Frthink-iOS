@@ -5,7 +5,7 @@
 > **原始全限定名**（来自 kotlinx.serialization 的 `PluginGeneratedSerialDescriptor`）和**混淆类名**。
 > 字段名一律用代码里的真实拼写。拿不准的标「未验证」。
 
-> v0.8.213 复核：提示词库、请求协议与模型字段未变；差异见 [`../archive/APK-0.8.213-DELTA.md`](../archive/APK-0.8.213-DELTA.md)。本文证据仍指向 v0.8.210 的 `out/`。
+> v0.8.213 复核：关键结构与差异汇总见 [`../APK-NOTES.md`](../APK-NOTES.md)；本文保留数据字段规格。
 
 ---
 

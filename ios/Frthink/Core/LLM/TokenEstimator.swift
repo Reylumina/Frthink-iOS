@@ -129,7 +129,8 @@ struct PromptBudget {
         contextWindowOverride: Int? = nil
     ) throws -> PromptBudget {
         // 输入预算 0 = 跟随模型：用窗口减输出与 1024 安全余量。
-        let window = contextWindowOverride ?? TokenEstimator.contextWindow(for: model)
+        let rawWindow = contextWindowOverride ?? TokenEstimator.contextWindow(for: model)
+        let window = rawWindow > 0 ? min(max(rawWindow, 1024), 1_000_000) : 0
         var outputBudget = min(max(settings.reservedOutputTokens, 1024), 100_000)
         let configured = settings.inputBudgetTokens
         let inputBudget: Int

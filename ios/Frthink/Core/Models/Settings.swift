@@ -101,6 +101,10 @@ enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
 enum ReasoningOffStyle: String, Codable, CaseIterable, Identifiable, Hashable {
     /// 不发任何字段（原版行为）。
     case none
+    /// OpenAI / DeepSeek / OpenCode 网关：`reasoning_effort: "none"`。
+    case reasoningEffortNone
+    /// DeepSeek / 兼容网关：`thinking: {"type": "disabled"}`。
+    case thinkingDisabled
     /// OpenAI 兼容 / OpenRouter 一族：`reasoning: {"enabled": false}`。
     case reasoningDisabled
     /// vLLM、Qwen 这类本地/自建服务：`enable_thinking: false`。
@@ -111,6 +115,8 @@ enum ReasoningOffStyle: String, Codable, CaseIterable, Identifiable, Hashable {
     var displayName: String {
         switch self {
         case .none: return "不发送（默认）"
+        case .reasoningEffortNone: return "reasoning_effort = none"
+        case .thinkingDisabled: return "thinking.type = disabled"
         case .reasoningDisabled: return "reasoning.enabled = false"
         case .enableThinkingFalse: return "enable_thinking = false"
         }
@@ -127,9 +133,9 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
     var maxTokens: Int
     var stream: Bool
     var enabled: Bool
-    /// 旧版布尔开关，仅用于迁移。
+    /// 兼容用布尔开关（仅迁移回退用）。
     var thinking: Bool?
-    /// 思考档位；nil 时回落到旧版 `thinking`。
+    /// 思考档位；nil 时回落到 `thinking`。
     var thinkingLevel: ThinkingLevel?
     /// 关闭思考时发什么字段；nil 等同 `.none`（原版行为）。
     var reasoningOffStyle: ReasoningOffStyle?
@@ -165,9 +171,14 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         return thinking == true ? .high : .off
     }
 
-    /// 关闭思考时实际要发的字段形态。
+    var isOpenCode: Bool {
+        kind == .openCodeGo || baseURLForDisplay.lowercased().contains("opencode.ai")
+    }
+
+    /// 关闭思考时实际要发的字段形态；OpenCode 默认发 `reasoning_effort = none`。
     var effectiveReasoningOffStyle: ReasoningOffStyle {
-        reasoningOffStyle ?? .none
+        if let reasoningOffStyle { return reasoningOffStyle }
+        return isOpenCode ? .reasoningEffortNone : .none
     }
 
     var baseURLForDisplay: String {
@@ -396,7 +407,7 @@ struct AppSettings: Codable {
         return universeEntries.filter { $0.enabled && selected.contains($0.id) }
     }
 
-    /// 解码旧版本设置文件时补齐新增字段。
+    /// 兼容早期设置文件：缺失字段按默认值回填。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // 存档里没有 providers（Android 备份）时解成空数组，交给
