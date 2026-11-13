@@ -736,6 +736,26 @@ final class ProjectSession {
         scheduleSave()
     }
 
+    /// 撤回一条用户指令：删掉它和它之后的所有消息（含它引出的回复）。
+    ///
+    /// 返回被删掉的那一段，调用方用它做「撤销」——撤回是破坏性动作，
+    /// 至少给一次反悔的机会。
+    @discardableResult
+    func withdraw(from messageID: String) -> [ChatMessage] {
+        guard let index = payload.messages.firstIndex(where: { $0.id == messageID }) else { return [] }
+        let removed = Array(payload.messages[index...])
+        payload.messages.removeSubrange(index...)
+        scheduleSave()
+        return removed
+    }
+
+    /// 把撤回掉的一段接回对话末尾（撤回只能从某条删到结尾，所以顺序天然保持）。
+    func restore(_ messages: [ChatMessage]) {
+        guard !messages.isEmpty else { return }
+        payload.messages.append(contentsOf: messages)
+        scheduleSave()
+    }
+
     /// 多选删除：一次移除多条消息，只发一次保存。
     func deleteMessages(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }

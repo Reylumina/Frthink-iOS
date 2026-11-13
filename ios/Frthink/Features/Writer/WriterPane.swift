@@ -774,12 +774,24 @@ struct WriterPane: View {
             actions: actions
         )
 
+        // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
         if message.role == .user {
             row.contextMenu {
                 Button {
                     copyToClipboard(message.content)
                 } label: {
                     Label("复制", systemImage: "doc.on.doc")
+                }
+                Button(role: .destructive) {
+                    if controller.isBusy {
+                        controller.stop()
+                    }
+                    let removed = session.withdraw(from: message.id)
+                    presentUndoPrompt("已撤回这条指令") {
+                        session.restore(removed)
+                    }
+                } label: {
+                    Label("撤回（连同之后的对话）", systemImage: "arrow.uturn.backward")
                 }
                 Button {
                     beginSelection(message.id)
@@ -795,7 +807,58 @@ struct WriterPane: View {
                 .disabled(controller.isBusy)
             }
         } else {
-            row
+            row.contextMenu {
+                Button {
+                    copyToClipboard(message.content)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                Button {
+                    insertIntoManuscript(message.content)
+                } label: {
+                    Label("插入到光标处", systemImage: "text.insert")
+                }
+                Button {
+                    messageAction = .append(message)
+                } label: {
+                    Label("追加到正文末尾", systemImage: "text.append")
+                }
+                Button {
+                    controller.regenerate(messageID: message.id, session: session, store: store)
+                } label: {
+                    Label("重新生成", systemImage: "arrow.clockwise")
+                }
+                .disabled(controller.isBusy)
+                Button {
+                    rollbackTarget = message
+                    showRollbackDialog = true
+                } label: {
+                    Label("回退到此", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(controller.isBusy)
+                if message.variants.count > 1 {
+                    Button {
+                        messageAction = .cleanup(message)
+                    } label: {
+                        Label("清理历史版本", systemImage: "archivebox")
+                    }
+                }
+                Button(role: .destructive) {
+                    messageAction = .delete(message)
+                } label: {
+                    Label(
+                        message.variants.count > 1 ? "删除当前版本" : "删除气泡",
+                        systemImage: "trash"
+                    )
+                }
+                .disabled(controller.isBusy)
+                Button {
+                    beginSelection(message.id)
+                } label: {
+                    Label("多选", systemImage: "checklist")
+                }
+                .disabled(controller.isBusy)
+            }
         }
     }
 

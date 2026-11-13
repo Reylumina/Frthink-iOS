@@ -65,11 +65,7 @@ struct WriterMessageBubble: View {
         .onTapGesture {
             if isSelecting { actions.toggleSelection() }
         }
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
-                if !isSelecting { actions.beginSelection() }
-            }
-        )
+        // 长按交给外层挂的 contextMenu（复制/撤回/重新生成…），这里不再抢手势。
         .overlay(alignment: .topLeading) {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -116,9 +112,9 @@ struct WriterMessageBubble: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             header
             content
-            if !isSelecting {
-                footer
-                    .padding(.horizontal, Theme.Spacing.xs)
+            if message.hasBranches, !isSelecting {
+                versionSwitcher
+                    .padding(.top, Theme.Spacing.xs)
             }
         }
         // 助手回复不铺底色，正文即气泡（§1.3）。
@@ -177,81 +173,6 @@ struct WriterMessageBubble: View {
         .lineSpacing(bodyLineSpacing)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - 操作条
-
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(spacing: Theme.Spacing.xs) {
-                iconAction("text.insert", "插入到光标处", actions.insert)
-                iconAction("text.append", "追加到正文末尾", actions.append)
-
-                Spacer(minLength: 0)
-
-                iconAction("doc.on.doc", "复制消息", actions.copy)
-                iconAction("arrow.clockwise", "重新生成", actions.regenerate)
-
-                Menu {
-                    Button {
-                        actions.rollback()
-                    } label: {
-                        Label("回退到此", systemImage: "arrow.uturn.backward")
-                    }
-                    if message.variants.count > 1 {
-                        Button {
-                            actions.cleanupVersions()
-                        } label: {
-                            Label("清理历史版本", systemImage: "archivebox")
-                        }
-                    }
-                    Button(role: .destructive) {
-                        actions.deleteVariant()
-                    } label: {
-                        Label(
-                            message.variants.count > 1 ? "删除当前版本" : "删除气泡",
-                            systemImage: "trash"
-                        )
-                    }
-                    Divider()
-                    Button {
-                        actions.beginSelection()
-                    } label: {
-                        Label("多选", systemImage: "checklist")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(Font.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("更多消息操作")
-            }
-
-            if message.hasBranches {
-                versionSwitcher
-            }
-        }
-        .padding(.top, Theme.Spacing.xs)
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.45 : 1)
-    }
-
-    private func iconAction(
-        _ symbol: String,
-        _ label: String,
-        _ action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(Font.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(label)
     }
 
     /// `‹ 2/3 ›`：同一条回复的候选版本，切换只改 selectedVariant，不新增消息。
