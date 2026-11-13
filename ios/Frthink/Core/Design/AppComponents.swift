@@ -153,7 +153,7 @@ struct IconTile: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: effectiveSize * 0.5, weight: .medium))
+            .font(.system(size: effectiveSize * 0.54, weight: .medium))
             .foregroundStyle(filled ? Color.white : tint)
             .frame(width: effectiveSize, height: effectiveSize)
             .background(

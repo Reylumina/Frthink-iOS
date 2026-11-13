@@ -290,7 +290,7 @@ struct WorldCharactersSection: View {
     private var emptyState: some View {
         if session.payload.world.characters.isEmpty {
             EmptyStateView(
-                symbol: "person.2",
+                symbol: "person.text.rectangle",
                 title: "还没有人物卡",
                 actionTitle: "新建人物",
                 action: addCard

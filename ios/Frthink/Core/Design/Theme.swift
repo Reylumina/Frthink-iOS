@@ -73,21 +73,23 @@ enum Theme {
     /// 它不是品牌色，也不用于按钮、开关、状态或页面底——只给「这是哪一本书 /
     /// 哪一类东西」上色。色相拉开、明度有深有浅，深色模式各降一档亮度。
     enum Identity {
-        /// 10 个色相，全部取系统动态色。
+        /// 12 个色相，彩度拉到能一眼分开（浅色 C*≈60–70），深色各降一档。
         ///
-        /// HIG「Color」的 System colors 一节要求：用系统色（会随深浅色、增强对比度和
-        /// 玻璃材质自动适配），不要在代码里写死系统色值。所以这里不出现任何 hex。
+        /// 系统色在白底上偏灰，一排书封看着像褪了色；这里按色相环铺开，同一明度档，
+        /// 白符号对比度都在 4:1 以上。只给书封和封面类身份用。
         static let colors: [Color] = [
-            Color(uiColor: .systemRed),
-            Color(uiColor: .systemOrange),
-            Color(uiColor: .systemBrown),
-            Color(uiColor: .systemGreen),
-            Color(uiColor: .systemTeal),
-            Color(uiColor: .systemBlue),
-            Color(uiColor: .systemIndigo),
-            Color(uiColor: .systemPurple),
-            Color(uiColor: .systemPink),
-            Color(uiColor: .systemGray),
+            dynamic(light: 0xC2352B, dark: 0x8A211A),  // 朱红
+            dynamic(light: 0xC96A0B, dark: 0x93490A),  // 橙
+            dynamic(light: 0xB8890F, dark: 0x856208),  // 琥珀
+            dynamic(light: 0x6B7A22, dark: 0x4B5617),  // 橄榄
+            dynamic(light: 0x1F7A46, dark: 0x145631),  // 绿
+            dynamic(light: 0x0E7C7B, dark: 0x0A5756),  // 青
+            dynamic(light: 0x1668A8, dark: 0x0F4A79),  // 湖蓝
+            dynamic(light: 0x3B4BA0, dark: 0x293572),  // 靛
+            dynamic(light: 0x7A3EA0, dark: 0x572C73),  // 紫
+            dynamic(light: 0xB03060, dark: 0x7E2144),  // 玫
+            dynamic(light: 0x8A5A2B, dark: 0x63401E),  // 赭
+            dynamic(light: 0x3C3A37, dark: 0x2B2926),  // 石墨
         ]
 
         /// 按 id 稳定取色：同一本书、同一个分类永远同一个颜色。

@@ -91,7 +91,7 @@ struct WorldSettingSection: View {
             materialRow(
                 "人物卡",
                 value: "\(session.payload.world.characters.count) 张",
-                symbol: "person.2",
+                symbol: "person.text.rectangle",
                 tint: .blue,
                 tab: .characters
             )
