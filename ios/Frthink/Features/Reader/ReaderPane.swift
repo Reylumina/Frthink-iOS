@@ -293,7 +293,10 @@ struct ReaderPane: View {
         ScrollView {
             LazyVStack(
                 alignment: .leading,
-                spacing: Theme.Layout.paragraphSpacing(fontSize: scaledBodyFontSize)
+                spacing: Theme.Layout.paragraphSpacing(
+                    fontSize: scaledBodyFontSize,
+                    lineHeight: lineHeight
+                )
             ) {
                 if document.blocks.isEmpty {
                     if isLoadingDocument {

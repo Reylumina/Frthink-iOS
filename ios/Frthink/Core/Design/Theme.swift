@@ -190,13 +190,14 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
-        /// 正文段落间距（§2.3）：字号 × 0.7。
+        /// 正文段落间距（§2.3）：额外行距 × 1.4。
         ///
-        /// 和行高同一套基准：行高 1.5 倍字号 → 额外行距 0.5em，段距 0.7em 是它的
-        /// 1.4 倍，段落与折行能区分开，又不至于空出一整行。
-        /// 阅读页、完成态气泡、流式气泡共用这一个换算，不写死绝对值。
-        static func paragraphSpacing(fontSize: CGFloat) -> CGFloat {
-            fontSize * 0.7
+        /// 以额外行距（字号 × (行高 − 1)）为基准而不是固定字号倍数：
+        /// 阅读页把行距调到 1.2 或 2.0 时，段距会跟着变，段落与折行始终是
+        /// 1.4 倍的关系，不会出现「行距调大后段落反而挤在一起」。
+        /// 默认行高 1.5 时等于字号 × 0.7（18pt → 12.6pt）。
+        static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.5) -> CGFloat {
+            fontSize * CGFloat(max(0, lineHeight - 1)) * 1.4
         }
 
         /// 图标方块的基准边长（§2.4）：28pt，全应用只有一个值——分类图标、
