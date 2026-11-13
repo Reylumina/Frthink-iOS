@@ -22,11 +22,11 @@
 
 SSE 增量先进入 `WriterController` 的缓冲，也就是 `displayBuffer` 和 `pendingDelta`，不逐 token 写 SwiftUI 状态。
 
-默认 60ms 合并一次，收到换行立即刷新，避免把段落边界切在时间片里。低电量时降到 100ms，`thermalState` 为 serious 或 critical 时 90ms，fair 时 70ms。滚动跟随同一个 `displayTick`。
+默认 33ms 合并一次（约 30 帧/秒），收到换行立即刷新，避免把段落边界切在时间片里。低电量时降到 100ms，`thermalState` 为 serious 或 critical 时 80ms，fair 时 50ms。滚动跟随同一个 `displayTick`。
 
-流式气泡单独渲染。`WriterStreamingBubble` 只读控制器文本，不触发正文和其他气泡重算。流式文本用 `StreamingTextView`，平时只追加后缀，窗口攒满才重置一次，避免 SwiftUI `Text` 全量重排，生成结束后切回普通 `Text`，可以选中，也没有额外开销。
+流式气泡单独渲染。`WriterStreamingBubble` 只读控制器文本，不触发正文和其他气泡重算。流式文本用 `StreamingTextView`（`UITextView`），每帧先算整段排版再按显示串求公共前缀，只替换尾部差异，窗口攒满才整段重置。生成结束后切到完成态气泡，同样是 TextKit 渲染（`JustifiedText`），气泡内文字不开放选词，整条复制走长按菜单。
 
-生成期间不整份重写 payload。每约 3 秒做一次检查点：把已收增量 `persistPendingDelta` 后只写 `payload.json`（并裁掉其中的整本正文，正文页已独立存在）；离开页面、停止或结束时再全量写一次。流式文本仍只更新 `WriterController.streamingText`，60ms 合并，换行立即刷；气泡用独立的 `WriterStreamingBubble` 订阅控制器，不经过父视图。已完成气泡只在出现 `**`/`__` 时解析行内 Markdown，普通正文保持纯文本；流式期间仍用纯文本。
+生成期间不整份重写 payload。每约 3 秒做一次检查点：把已收增量 `persistPendingDelta` 后只写 `payload.json`（并裁掉其中的整本正文，正文页已独立存在）；离开页面、停止或结束时再全量写一次。流式文本仍只更新 `WriterController.streamingText`，33ms 合并，换行立即刷；气泡用独立的 `WriterStreamingBubble` 订阅控制器，不经过父视图。流式与完成态共用 `MarkdownInline.runs(_:)` 解析行内加粗/斜体；只在文本含 `*` 时才走解析，普通正文保持纯文本。
 
 ### 2.2 主线程与依赖
 

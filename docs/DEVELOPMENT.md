@@ -40,6 +40,7 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 | `.github/workflows/ios.yml` | 未签名 IPA | 手动 |
 | `.github/workflows/ui-screenshots.yml` | 各 Tab 与二、三级页截图（出图前先跑自检） | 手动、push main |
 | `.github/workflows/stream-check.yml` | mock SSE 连跑三次 + 正文行数/段落断言 | 手动 |
+| `.github/workflows/cleanup-runs.yml` | 删除旧的已完成运行（保留最近 N 次） | 每周一 03:00 UTC、手动 |
 
 分支上的改动不会自动跑 CI，用 `gh workflow run self-check.yml --ref <分支>` 手动触发；同 workflow 同 ref 只保留最新一次，重复触发会取消正在排队/运行的那次，别在它跑的时候再发。
 

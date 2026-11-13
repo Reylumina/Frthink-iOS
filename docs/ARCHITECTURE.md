@@ -64,7 +64,9 @@ Core/
 
 世界刷新、事件、文风、长期规则四种任务按书登记在 `AppStore`：`registerWorldTask(_:for:)` 返回一个令牌，任务收尾用同一令牌调 `finishWorldTask(for:token:)`，只会清掉自己那一条；切书、进回收站、彻底删除走 `cancelWorldTask`。没有令牌时旧任务收尾会把同一本书后来新起的任务一起摘掉。
 
-写作台对话列用 `VStack` 而不是 `LazyVStack`：整列本来就按 `visibleMessageCount` 截过，行数有上限，而流式那一行可能有上万字——`LazyVStack` 的估算行高配 60ms 跟随器的 `scrollTo`，在结束换气泡时会落到内容之外，表现为整屏空白（Stream Check 复现过）。
+正文排版统一走 TextKit：阅读页段落与完成态气泡用 `Core/Design/JustifiedText.swift`（`UITextView`，`.justified` + `.pushOut`），流式用 `StreamingTextView`，两者共用 `MarkdownInline.runs(_:)` 与 `Theme.Layout.paragraphSpacing(fontSize:lineHeight:)`。SwiftUI 的 `Text` 没有两端对齐，也没有能承载段落样式的入口，所以正文这一层不用它。
+
+写作台对话列用 `VStack` 而不是 `LazyVStack`：整列本来就按 `visibleMessageCount` 截过，行数有上限，而流式那一行可能有上万字——`LazyVStack` 的估算行高配 33ms 跟随器的 `scrollTo`，在结束换气泡时会落到内容之外，表现为整屏空白（Stream Check 复现过）。
 
 正文编辑的撤销、重做挂窗口 `UndoManager`（`WriterUndo`）：插入/追加正文是一次独立动作，文字编辑由 `UITextView` 自己登记，两边共用同一个栈，所以 ⌘Z、摇一摇和编辑菜单都能用。
 
