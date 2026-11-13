@@ -151,20 +151,15 @@ private final class CoverThumbnailCache {
 /// 和纸色一样按书 id 稳定取，同一本书不会每次打开换一个图标。
 /// 纸色在 Theme.Identity，和一级分类图标共用一套。
 private enum ShelfCoverSymbols {
-    /// 只收纯形状的容器类符号：不带字、不带横线、不带嵌套小图。
+    /// 只用书本本身的形状：不带字、不带横线，也不混进箱子、文件夹这些非书图形。
     ///
-    /// 带「字」或文字行的符号缩到 30pt 就糊成一团，一眼看不出是图标。
+    /// 系统里纯书本轮廓只有这四种，12 种纸色乘上去已经够区分；
+    /// 宁可少而一致，不要多而入错类别。
     private static let symbols: [String] = [
+        "book",
         "book.closed",
         "book.pages",
         "books.vertical",
-        "book",
-        "doc",
-        "square.stack",
-        "rectangle.stack",
-        "folder",
-        "archivebox",
-        "tray",
     ]
 
     static func symbol(for seed: String) -> String {

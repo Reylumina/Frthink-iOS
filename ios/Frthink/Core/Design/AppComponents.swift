@@ -180,7 +180,8 @@ struct ProviderIcon: View {
                 Image(asset)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.14)
+                    // 品牌标留白 8%：14% 时图标看起来比旁边的系统方块小一圈。
+                    .padding(size * 0.08)
             } else {
                 Image(systemName: kind.symbolName)
                     .font(.system(size: size * 0.46, weight: .semibold))
