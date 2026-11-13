@@ -163,7 +163,7 @@ struct WriterMessageBubble: View {
             } else {
                 VStack(alignment: .leading, spacing: WriterTypography.paragraphSpacing(size: bodyFontSize)) {
                     ForEach(paragraphs.indices, id: \.self) { index in
-                        MarkdownInline.text(paragraphs[index])
+                        paragraph(paragraphs[index])
                     }
                 }
             }
@@ -173,6 +173,27 @@ struct WriterMessageBubble: View {
         .lineSpacing(bodyLineSpacing)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 一段正文：一到三级标题按字号和字重区分，其余走行内 Markdown。
+    @ViewBuilder
+    private func paragraph(_ text: String) -> some View {
+        if let level = MarkdownInline.headingLevel(text) {
+            MarkdownInline.text(MarkdownInline.strippingHeadingMarker(text))
+                .font(.system(size: headingSize(level), weight: .semibold))
+                .padding(.top, Theme.Spacing.s)
+        } else {
+            MarkdownInline.text(text)
+        }
+    }
+
+    /// 标题字号按正文字号派生：一/二/三级分别 1.45 / 1.26 / 1.12 倍。
+    private func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return bodyFontSize * 1.45
+        case 2: return bodyFontSize * 1.26
+        default: return bodyFontSize * 1.12
+        }
     }
 
     /// `‹ 2/3 ›`：同一条回复的候选版本，切换只改 selectedVariant，不新增消息。
@@ -277,36 +298,17 @@ struct WriterStreamingBubble: View {
 
     @ViewBuilder
     private var content: some View {
-        if controller.streamingText.isEmpty {
-            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                // 正文还是空的时候，把思考过程的末尾几行铺出来：模型思考几十秒
-                // 时页面不能只挂一个转圈，看起来像卡死。
-                Text(Self.recentLines(reasoning, limit: 6))
-                    .font(Theme.reply)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                // 首帧就有内容：占位也算一行正文，气泡不会是零高度。
-                Text("……")
-                    .font(Theme.reply)
-                    .foregroundStyle(.tertiary)
-            }
-        } else {
-            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                DisclosureGroup(isExpanded: $reasoningExpanded) {
-                    Text(reasoning)
-                        .font(Theme.numeric)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                } label: {
-                    Text("思考过程（\(reasoning.count.formatted()) 字）")
-                        .font(Font.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+        // 思考过程默认收起：只是一行字，点一下展开，不加任何图标。
+        if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+            reasoningBlock(reasoning)
+        }
 
+        if controller.streamingText.isEmpty {
+            // 首帧就有内容：占位也算一行正文，气泡不会是零高度。
+            Text("……")
+                .font(Theme.reply)
+                .foregroundStyle(.tertiary)
+        } else {
             // 生成中用 UITextView 增量排版；字号/行距/宽度与完成态 `Text` 同一套换算。
             StreamingTextView(
                 text: controller.streamingText,
@@ -318,13 +320,32 @@ struct WriterStreamingBubble: View {
         }
     }
 
-    /// 思考过程只显示末尾几行；全文仍留在展开区里。
-    private static func recentLines(_ text: String, limit: Int) -> String {
-        let lines = text.split(whereSeparator: { $0.isNewline })
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        let recent = lines.suffix(limit)
-        return recent.isEmpty ? String(text.suffix(240)) : recent.joined(separator: "\n")
+    /// 思考过程：一行文字按钮，点一下展开全文，再点收起。不用 DisclosureGroup——
+    /// 它自带一个箭头图标，触屏上直接点这一行更好用。
+    private func reasoningBlock(_ reasoning: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Button {
+                reasoningExpanded.toggle()
+            } label: {
+                Text(reasoningExpanded
+                     ? "收起思考过程（\(reasoning.count.formatted()) 字）"
+                     : "思考过程（\(reasoning.count.formatted()) 字）")
+                    .font(Font.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(reasoningExpanded ? "收起思考过程" : "展开思考过程")
+
+            if reasoningExpanded {
+                Text(reasoning)
+                    .font(Theme.numeric)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+        }
     }
 }
 
