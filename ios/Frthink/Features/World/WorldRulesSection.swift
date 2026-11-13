@@ -27,14 +27,6 @@ enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var symbol: String {
-        switch self {
-        case .styleNotes: return "text.magnifyingglass"
-        case .styleTemplate: return "doc.text"
-        case .longTermRules: return "list.bullet"
-        }
-    }
-
     var placeholder: String {
         switch self {
         case .styleNotes:
@@ -138,7 +130,6 @@ struct WorldRulesSection: View {
                 // §2.4：二级页的列表行也用 Label，不加有色方块。
                 SettingsLabelRow(
                     title: kind.title,
-                    symbol: kind.symbol,
                     detail: kind.valueLabel(in: session.payload.world)
                 )
                 Image(systemName: "chevron.right")

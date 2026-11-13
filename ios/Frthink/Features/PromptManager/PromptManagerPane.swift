@@ -189,7 +189,6 @@ struct PromptManagerPane: View {
             } label: {
                 SettingsLabelRow(
                     title: "全局预设",
-                    symbol: "text.alignleft",
                     detail: filledLabel(store.settings.globalPreset)
                 )
             }
@@ -207,7 +206,6 @@ struct PromptManagerPane: View {
             } label: {
                 SettingsLabelRow(
                     title: "去 AI 味规则",
-                    symbol: "wand.and.rays",
                     detail: filledLabel(store.settings.aiFlavorRules)
                 )
             }
@@ -257,7 +255,6 @@ struct PromptManagerPane: View {
                 } label: {
                     SettingsLabelRow(
                         title: "补充指令",
-                        symbol: "square.and.pencil",
                         detail: filledLabel(resolved.payload.assistantSupplement)
                     )
                 }

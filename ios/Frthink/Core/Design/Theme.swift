@@ -66,22 +66,6 @@ enum Theme {
     static let bubbleFill = Color(uiColor: .systemGray5)
     static let bubbleForeground = Color(uiColor: .label)
 
-    // MARK: - 列表图标色
-
-    /// 二级列表行图标的颜色：系统语义色，和一级分类、系统设置同一套。
-    ///
-    /// 不用 Identity 那套手调纸色——那套是书封的内容身份，压过饱和后放在
-    /// 列表里会发灰，和一级分类的亮色块并排像两代设计。
-    enum ListIconColor {
-        static let colors: [Color] = [
-            .blue, .indigo, .purple, .pink, .red, .orange, .teal, .green, .gray,
-        ]
-
-        static func color(for seed: String) -> Color {
-            colors[Int(Identity.stableHash(seed) % UInt64(colors.count))]
-        }
-    }
-
     // MARK: - 内容身份色
 
     /// 内容身份色：书封和一级分类图标共用的一套纸色。

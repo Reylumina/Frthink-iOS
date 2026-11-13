@@ -29,7 +29,6 @@ struct SettingsPromptPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "技能与预设",
-                    symbol: "wand.and.stars",
                     detail: "\(store.settings.skills.count) 个技能"
                 )
             }
@@ -44,7 +43,6 @@ struct SettingsPromptPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "语料收集库",
-                    symbol: "tray.full",
                     detail: "\(store.settings.corpusLibraries.count) 个库"
                 )
             }
@@ -69,7 +67,6 @@ struct SettingsPromptPage: View {
             } label: {
                 SettingsLabelRow(
                     title: "世界建立要求",
-                    symbol: "globe.asia.australia",
                     detail: worldBuildDetail
                 )
             }

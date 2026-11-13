@@ -158,7 +158,8 @@ HIG 的规定是内容层不用 Liquid Glass，玻璃只给导航和控件层。
 - 图标尺寸靠 `.font` 或 `.imageScale` 控制，跟随相邻文字，不用 `.frame` 定尺寸。确实需要固定的控件尺寸时用 `@ScaledMetric`。
 - 字重跟随相邻文字，不单独指定。
 - 默认单色渲染。状态图标可以用 `.symbolRenderingMode(.hierarchical)`。实心变体（`.fill`）只表示「选中 / 当前」或本身就是实心语义的符号（`lock.fill`、`xmark.circle.fill`、`checkmark.circle.fill` 这类），不拿实心做装饰；标签栏由系统处理。
-- 列表行的图标一律用 `IconTile`（实底圆角方块 + 白色符号），和系统设置同一种语法：基准 28pt（`Theme.Layout.iconTileSize`，全应用唯一取值）、圆角 22.6%、字形占 54%、medium 字重，尺寸走 `@ScaledMetric`；`ProviderIcon` 用同一基准并同样缩放。颜色取系统动态色（`.blue`、`.indigo`、`.orange`、`.purple`、`.pink`、`.teal`、`.gray`），同一类资料固定一个色相；没有专属含义的行用中性灰。AI 服务商图标用品牌标，不套方块。
+- 有色方块图标（`IconTile`）只出现在**一级分类列表**（设置首页、世界概览）：基准 28pt（`Theme.Layout.iconTileSize`，全应用唯一取值）、圆角 22.6%、字形占 54%、medium 字重，尺寸走 `@ScaledMetric`；`ProviderIcon` 用同一基准并同样缩放。
+- 二级、三级页不放图标：行里只有标题和值（`SettingsLabelRow`）。动作行（重新计算、导入导出、从正文提炼）也不配图标——标题已经说明动作，符号只会让人猜它和资源行的区别。颜色取系统动态色（`.blue`、`.indigo`、`.orange`、`.purple`、`.pink`、`.teal`、`.gray`），同一类资料固定一个色相；没有专属含义的行用中性灰。AI 服务商图标用品牌标，不套方块。
 - 只有图标的按钮必须设 `accessibilityLabel`。
 - 符号动效（`symbolEffect`）只表达状态，例如生成中用 `.pulse`，不做装饰。
 

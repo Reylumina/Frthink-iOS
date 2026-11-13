@@ -135,7 +135,6 @@ struct CorpusPane: View {
                 HStack(spacing: Theme.Spacing.s) {
                     SettingsLabelRow(
                         title: activeLibrary?.name ?? "还没有语料库",
-                        symbol: "books.vertical",
                         detail: activeLibrary.map { "\($0.entries.count) 条" }
                     )
                     Image(systemName: "chevron.up.chevron.down")
