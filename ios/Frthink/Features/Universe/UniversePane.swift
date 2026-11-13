@@ -112,21 +112,7 @@ struct UniversePane: View {
             .accessibilityLabel("本书启用「\(entry.title)」")
 
             NavigationLink(value: entry) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        Text(entry.title)
-                            .font(Theme.label)
-                        if !entry.enabled {
-                            StatusPill(text: "已停用", tone: .warning)
-                        }
-                    }
-                    if !entry.body.isEmpty {
-                        Text(entry.body)
-                            .font(Theme.labelSmall)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
+                entryLabel(entry)
             }
         }
         .frame(minHeight: Theme.Layout.rowContentHeight)
@@ -136,6 +122,24 @@ struct UniversePane: View {
                 pendingDelete = entry
             } label: {
                 Label("删除", systemImage: "trash")
+            }
+        }
+    }
+
+    private func entryLabel(_ entry: UniverseEntry) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Text(entry.title)
+                    .font(Theme.label)
+                if !entry.enabled {
+                    StatusPill(text: "已停用", tone: .warning)
+                }
+            }
+            if !entry.body.isEmpty {
+                Text(entry.body)
+                    .font(Theme.labelSmall)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
     }

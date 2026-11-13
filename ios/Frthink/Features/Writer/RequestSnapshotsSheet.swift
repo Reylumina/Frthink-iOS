@@ -63,47 +63,51 @@ struct RequestSnapshotsSheet: View {
         }
     }
 
+    private func snapshotRow(_ snapshot: RequestSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(formatted(snapshot.createdAt))
+                    .font(Font.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: Theme.Spacing.s)
+                Text("\(snapshot.messages.count) 条消息")
+                    .font(Font.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                if let label = sourceLabel(for: snapshot) {
+                    StatusPill(text: label)
+                }
+                Text(tokenLine(snapshot))
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if snapshot.omittedHistoryMessages > 0 {
+                Text("丢弃 \(snapshot.omittedHistoryMessages) 条历史消息")
+                    .font(Font.caption)
+                    .foregroundStyle(.orange)
+            }
+            if !snapshot.sourceIds.isEmpty {
+                Text(snapshot.sourceIds.joined(separator: " · "))
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Theme.Spacing.xs)
+        .contentShape(Rectangle())
+    }
+
     private var list: some View {
         List(ordered) { snapshot in
             Button {
                 selected = snapshot
             } label: {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(formatted(snapshot.createdAt))
-                            .font(Font.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Spacer(minLength: Theme.Spacing.s)
-                        Text("\(snapshot.messages.count) 条消息")
-                            .font(Font.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
-                        if let label = sourceLabel(for: snapshot) {
-                            StatusPill(text: label)
-                        }
-                        Text(tokenLine(snapshot))
-                            .font(Theme.numericSmall)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if snapshot.omittedHistoryMessages > 0 {
-                        Text("丢弃 \(snapshot.omittedHistoryMessages) 条历史消息")
-                            .font(Font.caption)
-                            .foregroundStyle(.orange)
-                    }
-                    if !snapshot.sourceIds.isEmpty {
-                        Text(snapshot.sourceIds.joined(separator: " · "))
-                            .font(Theme.numericSmall)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, Theme.Spacing.xs)
-                .contentShape(Rectangle())
+                snapshotRow(snapshot)
             }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {

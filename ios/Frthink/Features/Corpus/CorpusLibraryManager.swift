@@ -15,23 +15,28 @@ struct CorpusLibraryManagerSheet: View {
         store.settings.corpusLibraries
     }
 
+    @ViewBuilder
+    private var librariesSectionContent: some View {
+        if libraries.isEmpty {
+            InlineEmptyState(
+                symbol: "books.vertical",
+                message: "还没有语料库",
+                actionTitle: "新建语料库"
+            ) {
+                nameAction = .create
+            }
+        } else {
+            ForEach(libraries) { library in
+                row(library)
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    if libraries.isEmpty {
-                        InlineEmptyState(
-                            symbol: "books.vertical",
-                            message: "还没有语料库",
-                            actionTitle: "新建语料库"
-                        ) {
-                            nameAction = .create
-                        }
-                    } else {
-                        ForEach(libraries) { library in
-                            row(library)
-                        }
-                    }
+                    librariesSectionContent
                 } header: {
                     AppSectionHeader(title: "语料库（\(libraries.count)）")
                 }
