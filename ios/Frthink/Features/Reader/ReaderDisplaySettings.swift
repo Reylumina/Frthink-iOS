@@ -72,34 +72,28 @@ struct ReaderDisplaySettingsSheet: View {
             Form {
                 Section {
                     AppValueRow(title: "字号", value: "\(Int(fontSize)) pt")
-                    HStack(spacing: Theme.Spacing.m) {
-                        Image(systemName: "textformat.size.smaller")
-                            .font(Font.footnote)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                        Slider(value: $fontSize, in: 13...28, step: 1)
-                            .tint(Theme.accent)
-                        Image(systemName: "textformat.size.larger")
-                            .font(Font.title3)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                    }
+                    IconSliderRow(
+                        value: $fontSize,
+                        range: 13...28,
+                        step: 1,
+                        leadingSymbol: "textformat.size.smaller",
+                        leadingFont: .footnote,
+                        trailingSymbol: "textformat.size.larger",
+                        trailingFont: .title3
+                    )
                 }
 
                 Section {
                     AppValueRow(title: "行距", value: String(format: "%.1f", lineHeight))
-                    HStack(spacing: Theme.Spacing.m) {
-                        Image(systemName: "text.alignleft")
-                            .font(Font.caption)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                        Slider(value: $lineHeight, in: 1.2...2.0, step: 0.1)
-                            .tint(Theme.accent)
-                        Image(systemName: "arrow.up.and.down.text.horizontal")
-                            .font(Font.footnote)
-                            .foregroundStyle(.tertiary)
-                            .accessibilityHidden(true)
-                    }
+                    IconSliderRow(
+                        value: $lineHeight,
+                        range: 1.2...2.0,
+                        step: 0.1,
+                        leadingSymbol: "text.alignleft",
+                        leadingFont: .caption,
+                        trailingSymbol: "arrow.up.and.down.text.horizontal",
+                        trailingFont: .footnote
+                    )
                 }
 
                 Section {
@@ -166,5 +160,30 @@ struct ReaderDisplaySettingsSheet: View {
         fontSize = 18
         lineHeight = 1.5
         darkPage = false
+    }
+}
+
+private struct IconSliderRow: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let leadingSymbol: String
+    let leadingFont: Font
+    let trailingSymbol: String
+    let trailingFont: Font
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: leadingSymbol)
+                .font(leadingFont)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Slider(value: $value, in: range, step: step)
+                .tint(Theme.accent)
+            Image(systemName: trailingSymbol)
+                .font(trailingFont)
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
     }
 }

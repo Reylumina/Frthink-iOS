@@ -79,24 +79,7 @@ struct ManuscriptReaderSheet: View {
                     // 编辑器的逐字撤销登记在 UITextView 自己的栈上；没有聚焦输入框
                     // 时摇一摇和 ⌘Z 不一定能触发，所以给一个看得见的入口（§5.8）。
                     ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Button {
-                                undoState.undo()
-                            } label: {
-                                Label(undoState.undoTitle, systemImage: "arrow.uturn.backward")
-                            }
-                            .disabled(!undoState.canUndo)
-
-                            Button {
-                                undoState.redo()
-                            } label: {
-                                Label(undoState.redoTitle, systemImage: "arrow.uturn.forward")
-                            }
-                            .disabled(!undoState.canRedo)
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        .accessibilityLabel("撤销与重做")
+                        undoMenu(undoState)
                     }
                 }
             }
@@ -134,6 +117,27 @@ struct ManuscriptReaderSheet: View {
             }
             .sensoryFeedback(.selection, trigger: editing)
         }
+    }
+
+    private func undoMenu(_ undoState: WriterTextUndoState) -> some View {
+        Menu {
+            Button {
+                undoState.undo()
+            } label: {
+                Label(undoState.undoTitle, systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!undoState.canUndo)
+
+            Button {
+                undoState.redo()
+            } label: {
+                Label(undoState.redoTitle, systemImage: "arrow.uturn.forward")
+            }
+            .disabled(!undoState.canRedo)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("撤销与重做")
     }
 
     // MARK: - 窗口提示

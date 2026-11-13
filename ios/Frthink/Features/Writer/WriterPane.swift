@@ -457,26 +457,28 @@ struct WriterPane: View {
                 }
                 // 对话列宽上限 720（§5.3）；正文栏在行内再按「字号 × 36」收窄。
                 .frame(maxWidth: Theme.Layout.chatMaxWidth)
-                .background { columnWidthReader }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.width
+                } action: { width in
+                    updateColumnWidth(width)
+                }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.vertical, Theme.Spacing.m)
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear
-                            .task(id: proxy.size.height) { contentHeight = proxy.size.height }
-                    }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    contentHeight = height
                 }
             }
             // 首帧用 defaultScrollAnchor 落在底部，避免布局前按估算行高定位；
             // 用户手动滚开后锚点撤掉，不会被内容变高拽回去（§5.9）；
             // 空对话不给锚点，空态按默认从顶部排。
             .defaultScrollAnchor(scrollAnchor)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .task(id: proxy.size.height) { viewportHeight = proxy.size.height }
-                }
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { height in
+                viewportHeight = height
             }
             // 键盘弹起时右侧浮一个圆形 X：点一下收起，和系统搜索的关闭键同形状。
             // 滚动收起由下面的 .scrollDismissesKeyboard 负责（§5.9）。
@@ -569,34 +571,7 @@ struct WriterPane: View {
                 settleAtBottom(proxy)
             }
             .overlay(alignment: .bottomTrailing) {
-                // 只在离开底部时出现；浮在内容上的玻璃按钮（§1.6、§5.4）。
-                ZStack {
-                    if !isAtBottom {
-                        // 带文字的胶囊，不和一个圆形的发送键抢同一种形态（§5.11）。
-                        FloatingGlassButton(
-                            symbol: "chevron.down",
-                            label: "回到最新",
-                            title: "最新"
-                        ) {
-                            isAtBottom = true
-                            scrollToBottom(
-                                proxy,
-                                animation: Theme.motion(
-                                    Theme.motionLayout,
-                                    reduceMotion: reduceMotion
-                                )
-                            )
-                        }
-                        .padding(.trailing, Theme.Spacing.l)
-                        .padding(.bottom, Theme.Spacing.s)
-                        .transition(
-                            reduceMotion
-                                ? .opacity
-                                : .move(edge: .bottom).combined(with: .opacity)
-                        )
-                    }
-                }
-                .themeAnimation(Theme.motionLayout, value: isAtBottom)
+                jumpToLatestOverlay(proxy)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -604,15 +579,33 @@ struct WriterPane: View {
         .onTapGesture { dismissKeyboard() }
     }
 
-    /// 对话列的实际宽度。用户气泡的 80% 上限按它算（§5.3），不写设备断点。
-    private var columnWidthReader: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onAppear { updateColumnWidth(proxy.size.width) }
-                .onChange(of: proxy.size.width) { _, width in
-                    updateColumnWidth(width)
+    @ViewBuilder
+    private func jumpToLatestOverlay(_ proxy: ScrollViewProxy) -> some View {
+        // 只在离开底部时出现；浮在内容上的玻璃按钮（§1.6、§5.4）。
+        ZStack {
+            if !isAtBottom {
+                // 带文字的胶囊，不和一个圆形的发送键抢同一种形态（§5.11）。
+                FloatingGlassButton(
+                    symbol: "chevron.down",
+                    label: "回到最新",
+                    title: "最新"
+                ) {
+                    isAtBottom = true
+                    scrollToBottom(
+                        proxy,
+                        animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+                    )
                 }
+                .padding(.trailing, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.s)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .move(edge: .bottom).combined(with: .opacity)
+                )
+            }
         }
+        .themeAnimation(Theme.motionLayout, value: isAtBottom)
     }
 
     private func updateColumnWidth(_ width: CGFloat) {

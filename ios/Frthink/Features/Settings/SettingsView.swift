@@ -49,50 +49,40 @@ struct SettingsView: View {
                     NavigationLink(value: SettingsCategory.connection) {
                         connectionRow
                     }
-                    NavigationLink(value: SettingsCategory.prompts) {
-                        AppSettingsRow(
-                            title: "提示词与资料",
-                            symbol: "text.book.closed",
-                            symbolTint: .purple,
-                            symbolFilled: true,
-                            detail: "\(store.settings.skills.count) 个技能"
-                        )
-                    }
-                    NavigationLink(value: SettingsCategory.archive) {
-                        AppSettingsRow(
-                            title: "存档与备份",
-                            symbol: "externaldrive",
-                            symbolTint: .indigo,
-                            symbolFilled: true,
-                            detail: "\(store.projects.count) 本"
-                        )
-                    }
-                    NavigationLink(value: SettingsCategory.storage) {
-                        AppSettingsRow(
-                            title: "存储与用量",
-                            symbol: "chart.bar",
-                            symbolTint: .orange,
-                            symbolFilled: true
-                        )
-                    }
-                    NavigationLink(value: SettingsCategory.appearance) {
-                        AppSettingsRow(
-                            title: "外观与交互",
-                            symbol: "paintbrush",
-                            symbolTint: .pink,
-                            symbolFilled: true,
-                            detail: store.settings.theme.displayName
-                        )
-                    }
-                    NavigationLink(value: SettingsCategory.about) {
-                        AppSettingsRow(
-                            title: "关于",
-                            symbol: "info.circle",
-                            symbolTint: .green,
-                            symbolFilled: true,
-                            detail: Attribution.versionLine
-                        )
-                    }
+                    categoryLink(
+                        .prompts,
+                        title: "提示词与资料",
+                        symbol: "text.book.closed",
+                        tint: .purple,
+                        detail: "\(store.settings.skills.count) 个技能"
+                    )
+                    categoryLink(
+                        .archive,
+                        title: "存档与备份",
+                        symbol: "externaldrive",
+                        tint: .indigo,
+                        detail: "\(store.projects.count) 本"
+                    )
+                    categoryLink(
+                        .storage,
+                        title: "存储与用量",
+                        symbol: "chart.bar",
+                        tint: .orange
+                    )
+                    categoryLink(
+                        .appearance,
+                        title: "外观与交互",
+                        symbol: "paintbrush",
+                        tint: .pink,
+                        detail: store.settings.theme.displayName
+                    )
+                    categoryLink(
+                        .about,
+                        title: "关于",
+                        symbol: "info.circle",
+                        tint: .green,
+                        detail: Attribution.versionLine
+                    )
                 }
             }
             .listStyle(.insetGrouped)
@@ -127,6 +117,24 @@ struct SettingsView: View {
             } else if let launch = SettingsView.launchCategory {
                 path.append(launch)
             }
+        }
+    }
+
+    private func categoryLink(
+        _ category: SettingsCategory,
+        title: String,
+        symbol: String,
+        tint: Color,
+        detail: String = ""
+    ) -> some View {
+        NavigationLink(value: category) {
+            AppSettingsRow(
+                title: title,
+                symbol: symbol,
+                symbolTint: tint,
+                symbolFilled: true,
+                detail: detail
+            )
         }
     }
 

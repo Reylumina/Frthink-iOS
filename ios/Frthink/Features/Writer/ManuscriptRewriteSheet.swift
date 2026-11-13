@@ -60,15 +60,7 @@ struct ManuscriptRewriteSheet: View {
                         maxLines: 4
                     )
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: Theme.Spacing.s) {
-                            quickChip("更简洁", "在不删信息的前提下压缩句子，去掉空泛修饰。")
-                            quickChip("更有画面感", "把抽象概括改成可感知的动作、声音和细节，不要堆形容词。")
-                            quickChip("更像对话", "让对话更口语、更有潜台词，不要解释情绪。")
-                            quickChip("只修病句", "只修语病、错别字和指代不清，尽量保留原句。")
-                        }
-                        .padding(.vertical, Theme.Spacing.xs)
-                    }
+                    quickChipsStrip
                 } header: {
                     AppSectionHeader(title: "改写要求")
                 }
@@ -88,14 +80,7 @@ struct ManuscriptRewriteSheet: View {
                     Button("取消") { cancelTapped() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if isRunning {
-                        Button("停止") { stop() }
-                    } else if trimmedResult.isEmpty {
-                        Button("开始改写") { start() }
-                            .disabled(selectedText.isEmpty)
-                    } else {
-                        Button("替换选区") { apply() }
-                    }
+                    toolbarConfirmButton
                 }
             }
             // 有未保存的指令或已经有生成结果时，下滑关闭会被半路丢掉；
@@ -112,6 +97,30 @@ struct ManuscriptRewriteSheet: View {
             .onDisappear {
                 task?.cancel()
             }
+        }
+    }
+
+    private var quickChipsStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Theme.Spacing.s) {
+                quickChip("更简洁", "在不删信息的前提下压缩句子，去掉空泛修饰。")
+                quickChip("更有画面感", "把抽象概括改成可感知的动作、声音和细节，不要堆形容词。")
+                quickChip("更像对话", "让对话更口语、更有潜台词，不要解释情绪。")
+                quickChip("只修病句", "只修语病、错别字和指代不清，尽量保留原句。")
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarConfirmButton: some View {
+        if isRunning {
+            Button("停止") { stop() }
+        } else if trimmedResult.isEmpty {
+            Button("开始改写") { start() }
+                .disabled(selectedText.isEmpty)
+        } else {
+            Button("替换选区") { apply() }
         }
     }
 
@@ -197,14 +206,12 @@ struct ManuscriptRewriteSheet: View {
                     for try await event in client.stream(request) {
                         try Task.checkCancellation()
                         guard runID == thisRun else { return }
-                        if case .delta(let text) = event {
-                            streamBuffer += text
-                            let now = Date()
-                            if now.timeIntervalSince(lastFlush) >= 0.06 {
-                                result = streamBuffer
-                                lastFlush = now
-                            }
-                        }
+                        guard case .delta(let text) = event else { continue }
+                        streamBuffer += text
+                        let now = Date()
+                        guard now.timeIntervalSince(lastFlush) >= 0.06 else { continue }
+                        result = streamBuffer
+                        lastFlush = now
                     }
                     guard runID == thisRun else { return }
                     if result != streamBuffer {

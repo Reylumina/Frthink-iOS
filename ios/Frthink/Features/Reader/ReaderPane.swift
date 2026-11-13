@@ -390,13 +390,11 @@ struct ReaderPane: View {
 
     /// 读到哪儿了：一条两像素的进度条，不抢正文的注意力。
     private var readingProgressBar: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.separator)
-                Capsule()
-                    .fill(Theme.accent)
-                    .frame(width: proxy.size.width * readingProgress)
-            }
+        ZStack(alignment: .leading) {
+            Capsule().fill(Theme.separator)
+            Capsule()
+                .fill(Theme.accent)
+                .scaleEffect(x: max(0, min(1, readingProgress)), y: 1, anchor: .leading)
         }
         .frame(height: Theme.Layout.progressBarHeight)
         .accessibilityHidden(true)
