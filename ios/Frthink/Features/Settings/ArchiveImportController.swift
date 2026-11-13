@@ -203,7 +203,7 @@ final class ArchiveImportController {
         }
     }
 
-    func confirmFullRestore(_ overrideBackup: FrthinkArchive.DecodedFullBackup? = nil) {
+    func confirmFullRestore(_ overrideBackup: FrthinkArchive.FullBackupPayload? = nil) {
         guard let backup = overrideBackup ?? pendingFullRestore else { return }
         pendingFullRestore = nil
         runConfirmTask { controller in
