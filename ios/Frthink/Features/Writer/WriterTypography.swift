@@ -19,7 +19,10 @@ enum WriterTypography {
     }
 
     /// 行距换算与阅读页共用 `ReaderStyle`，不另写数值。
-    static func lineSpacing(size: CGFloat) -> CGFloat {
+    ///
+    /// `lineHeight` 默认取阅读页那档 1.6；调用方传用户调过的值，创作页就和
+    /// 阅读页完全同节奏。
+    static func lineSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
         ReaderStyle.lineSpacing(size: size, lineHeight: lineHeight)
     }
 
@@ -36,10 +39,9 @@ enum WriterTypography {
     /// 段距跟着字号走：行距是 0.6 倍字号，段距要比它明显大一截，
     /// 否则段落和折行看起来一样（0.9 倍在默认字号下约 16pt）。
     static func paragraphSpacing(size: CGFloat) -> CGFloat {
-        // 0.7 倍字号：默认 18pt 时约 12.6pt，和阅读页原本那档（12pt）基本一致——
-        // 「看得出是分段，但不会把一屏的字拆散」。流式期间单独取 0：内容还在长，
-        // 段距会把已上屏的字反复往下推。
-        max(Theme.Spacing.m, size * 0.7)
+        // 和阅读页同一个值（12pt），不按字号缩放：三处段落节奏一致，
+        // 换页面不会觉得段落忽然变松或变紧。
+        ReaderStyle.paragraphSpacing
     }
 
     /// 把正文拆成段落：按行拆、丢掉空行、去掉首尾空白。

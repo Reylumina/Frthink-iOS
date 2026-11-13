@@ -39,6 +39,8 @@ struct WriterMessageBubble: View {
 
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// 阅读页调过的行距，创作页跟着用同一个值。
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.6
 
     /// 与流式视图、正文编辑器同一套字号。
     private var bodyFontSize: CGFloat {
@@ -47,7 +49,7 @@ struct WriterMessageBubble: View {
 
     /// 行高固定 1.6；流式气泡用同一个值，生成结束换气泡不会变高。
     private var bodyLineSpacing: CGFloat {
-        WriterTypography.lineSpacing(size: bodyFontSize)
+        WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight)
     }
 
     var body: some View {
@@ -255,7 +257,7 @@ struct WriterAssistantBadge: View {
 
 /// 流式生成中的气泡，只订阅控制器里的实时文本。
 ///
-/// 文本按 `displayInterval`（60ms）合帧后写进 `streamingText`；这里只渲染
+/// 文本按 `displayInterval`（33ms）合帧后写进 `streamingText`；这里只渲染
 /// 控制器给的当前值，不自己定时，也不逐 token 触发外层列表重算。
 struct WriterStreamingBubble: View {
     let controller: WriterController
@@ -264,6 +266,8 @@ struct WriterStreamingBubble: View {
 
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// 阅读页调过的行距，流式气泡跟着用同一个值。
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.6
     @State private var reasoningExpanded = false
 
     private var bodyFontSize: CGFloat {
@@ -314,7 +318,7 @@ struct WriterStreamingBubble: View {
             StreamingTextView(
                 text: controller.streamingText,
                 fontSize: bodyFontSize,
-                lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize)
+                lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight)
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)

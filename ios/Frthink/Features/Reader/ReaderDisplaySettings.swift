@@ -40,6 +40,10 @@ enum ReaderStyle {
         max(0, size * CGFloat(lineHeight - 1))
     }
 
+    /// 段落间距：12pt。阅读页、创作页气泡、流式气泡共用这一个值，
+    /// 三处段落节奏一致，换页面不会觉得换了字号。
+    static let paragraphSpacing: CGFloat = Theme.Spacing.m
+
     /// 正文栏最大宽度：每行不超过 36 个汉字（DESIGN §2.3、§5.3）。
     static func bodyMaxWidth(size: CGFloat) -> CGFloat {
         size * 36

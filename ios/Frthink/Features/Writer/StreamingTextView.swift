@@ -134,7 +134,8 @@ struct StreamingTextView: UIViewRepresentable {
     ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
-        paragraph.paragraphSpacing = 0
+        // 和阅读页、完成态气泡同一个段距：流式期间也保持同一节奏。
+        paragraph.paragraphSpacing = ReaderStyle.paragraphSpacing
 
         let body: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
