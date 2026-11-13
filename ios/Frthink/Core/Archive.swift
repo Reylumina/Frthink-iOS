@@ -702,7 +702,7 @@ enum FrthinkArchive {
         try encodeAny(characters, key: .characterCards, into: &c)
 
         let books = world.worldbookEntries.map {
-            Self.androidWorldbookJSON(id: $0.id, title: $0.title, content: $0.body, enabled: $0.enabled)
+            FrthinkArchive.androidWorldbookJSON(id: $0.id, title: $0.title, content: $0.body, enabled: $0.enabled)
         }
         try encodeAny(books, key: .worldbooks, into: &c)
 
