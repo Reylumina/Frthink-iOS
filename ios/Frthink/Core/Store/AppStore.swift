@@ -43,7 +43,7 @@ final class AppStore {
         if !loadedSettings.providers.contains(where: { $0.kind == .anthropic }) {
             let insertAt = min(2, loadedSettings.providers.count)
             loadedSettings.providers.insert(ProviderSetting(kind: .anthropic), at: insertAt)
-            fileStore.saveSettings(loadedSettings)
+            try? fileStore.saveSettings(loadedSettings)
         }
         self.settings = loadedSettings
         reload()
