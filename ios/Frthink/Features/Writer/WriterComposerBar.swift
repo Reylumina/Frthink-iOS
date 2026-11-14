@@ -49,8 +49,7 @@ struct WriterComposerBar: View {
                     .focused($focused)
                 primaryControl
             }
-            .padding(.leading, Theme.Spacing.s)
-            .padding(.trailing, Theme.Spacing.xs)
+            .padding(.horizontal, Theme.Spacing.xs)
             .padding(.vertical, Theme.Spacing.xs)
             .frame(minHeight: controlSize)
             .modifier(WriterComposerFieldSurface())
@@ -75,30 +74,26 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 续写入口：浅灰淡圆底包裹图标，和右侧实心圆发送键形成对称但主次分明的结构。
+    /// 续写入口：与右侧发送按钮等径的浅灰圆钮，保持左右对称与主次分明。
     private var continuationButton: some View {
         Button {
             sendContinuation()
         } label: {
             Image(systemName: "wand.and.stars")
-                .font(Font.subheadline.weight(.medium))
+                .font(Font.subheadline.weight(.semibold))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
-                .frame(width: glyph, height: glyph)
-                .background(Theme.field, in: Circle())
-                // 可视尺寸 28pt，热区补回 44pt；负内边距把多出来的占位让回去，
-                // 胶囊不会因此被撑高（§5.1）。
-                .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                .contentShape(Rectangle())
-                .padding(.horizontal, -(Theme.Layout.hitTarget - glyph) / 2)
-                .padding(.vertical, -(Theme.Layout.hitTarget - glyph) / 2)
+                .frame(width: controlSize, height: controlSize)
+                .background(Circle().fill(Theme.field))
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(controller.isGenerating || controller.isPreparing)
         .accessibilityLabel("续写")
     }
-
-    /// 续写图标的可视边长。
-    private var glyph: CGFloat { controlSize * 0.82 }
 
     /// 行尾主操作：生成中是停止，准备中是转圈，其余是发送（§5.7）。
     @ViewBuilder

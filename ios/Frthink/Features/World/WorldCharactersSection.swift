@@ -246,26 +246,26 @@ struct WorldCharactersSection: View {
             return Theme.Identity.color(for: seed.isEmpty ? card.id : seed)
         }
 
-        private var avatarInitial: String? {
-            let trimmed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.first.map(String.init)
-        }
-
         var body: some View {
             HStack(alignment: .center, spacing: Theme.Spacing.m) {
-                Group {
-                    if let initial = avatarInitial {
-                        Text(initial)
-                            .font(Font.headline.weight(.semibold))
-                    } else {
-                        Image(systemName: "person")
-                            .font(Theme.label)
-                    }
-                }
-                .foregroundStyle(avatarColor)
-                .frame(width: avatarSize, height: avatarSize)
-                .background(Circle().fill(avatarColor.opacity(Theme.tintedFillOpacity)))
-                .accessibilityHidden(true)
+                Image(systemName: "person.fill")
+                    .font(Font.body.weight(.medium))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(avatarColor)
+                    .frame(width: avatarSize, height: avatarSize)
+                    .background(
+                        Circle().fill(
+                            LinearGradient(
+                                colors: [avatarColor.opacity(0.22), avatarColor.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    )
+                    .overlay(
+                        Circle().strokeBorder(avatarColor.opacity(0.18), lineWidth: 0.5)
+                    )
+                    .accessibilityHidden(true)
 
                 summaryColumn
 
