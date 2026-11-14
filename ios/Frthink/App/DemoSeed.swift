@@ -2,18 +2,18 @@ import Foundation
 
 /// 演示数据。
 ///
-/// 只在 CI 截图流水线里用（启动参数 `-seedDemo`），正常启动不会跑。
-/// 目的很单纯：空状态截不出东西，看不到排版、层级和真实文本下的观感。
+/// 仅用于 CI 截图流水线（启动参数 `-seedDemo`），正常启动时不执行。
+/// 空状态无法展示界面的排版、层级与真实文本视觉效果。
 enum DemoSeed {
 
-    /// 截图流水线要打开的那本书；其余演示项目只用来撑书架。
+    /// 截图流水线指定打开的书稿；其余演示项目仅用于填充书架展示。
     static let primaryTitle = "雨夜之后"
 
     static var isRequested: Bool {
         LaunchArguments.seedsDemo
     }
 
-    /// 已经播过种就不再重复。
+    /// 已注入演示数据则不再重复注入。
     @MainActor
     static func seedIfNeeded(store: AppStore) {
         guard isRequested, store.projects.isEmpty else { return }
@@ -143,7 +143,7 @@ enum DemoSeed {
         session.payload.composerDraft = "让沈默说出他真正在找什么。"
         session.saveNow()
 
-        // 书架截图需要不止一本书：再补两本进行中、一条分支和一本回收站里的旧稿。
+        // 书架截图需要多部作品展示：补充两部进行中作品、一个分支项目及回收站草稿。
         if let second = store.createProject(title: "长夜将尽") {
             store.setSynopsis(second, to: "民国背景的悬疑长篇，双线叙事。")
         }

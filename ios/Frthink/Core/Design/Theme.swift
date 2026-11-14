@@ -181,9 +181,9 @@ enum Theme {
 
         /// 正文段落间距（§2.3）：额外行距 × 1.4。
         ///
-        /// 以额外行距（字号 × (行高 − 1)）为基准而不是固定字号倍数：
-        /// 阅读页把行距调到 1.2 或 2.0 时，段距会跟着变，段落与折行始终是
-        /// 1.4 倍的关系，不会出现「行距调大后段落反而挤在一起」。
+        /// 以额外行距（字号 × (行高 − 1)）为计算基准而非固定字号倍数：
+        /// 当阅读页行距调整为 1.2 或 2.0 时，段间距动态联动，保持段距与折行间距恒定为
+        /// 1.4 倍比例，避免出现行距加大后段间距相对过窄的不协调现象。
         /// 默认行高 1.5 时等于字号 × 0.7（18pt → 12.6pt）。
         static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.5) -> CGFloat {
             fontSize * CGFloat(max(0, lineHeight - 1)) * 1.4
@@ -193,18 +193,18 @@ enum Theme {
         /// 行首图标、AI 服务商品牌标都用它。
         static let iconTileSize: CGFloat = 28
 
-        /// 阅读页页脚进度条的高度（§2.3）：两像素，够看见又不抢正文。
+        /// 阅读页页脚进度条高度（§2.3）：2 像素，兼顾清晰识别度与避免干扰正文阅读。
         static let progressBarHeight: CGFloat = 2
 
         /// 列表行的最小内容高度（§5.1）。
         ///
-        /// 行高 = 这个高度 + 系统的上下内边距。不要写成 44：系统在 iOS 26 上
-        /// 加了 22–30pt 内边距，44 的行会撑到 66–74pt，设置页六行就多占一屏。
-        /// 28 让带图标印章的行落在 50pt 上下，整行可点，热区仍然够。
+        /// 行高 = 内容基准高度 + 系统上下内边距。避免直接指定为 44：系统在 iOS 26 上
+        /// 增加了 22–30pt 内边距，若设为 44 会撑大至 66–74pt，导致列表项垂直占用空间过大。
+        /// 设定为 28 可使带图标徽章的行高维持在 50pt 左右，整行响应且点击热区充足。
         static let rowContentHeight: CGFloat = 28
 
         /// 输入条里控件的行内高度：发送/停止圆、续写图标（§5.9）。
-        /// 比 `controlHeight` 小一点：这一条浮在正文上，多一像素都在压字。
+        /// 略小于 `controlHeight`：因该控件悬浮于正文上方，紧凑设计可减少对正文的遮挡。
         static let inlineControl: CGFloat = 34
     }
 
@@ -267,8 +267,8 @@ extension View {
 
     /// 任意形状的玻璃表面，用于胶囊类的浮层。
     ///
-    /// `interactive` 打开系统给玻璃的触摸反馈：iOS 26 上可点的玻璃要声明成
-    /// interactive，否则点下去没有形变，看起来像一张静态贴纸（§1.6）。
+    /// `interactive` 启用系统的玻璃触觉交互反馈：iOS 26 下可点击的玻璃材质需声明为
+    /// interactive，否则按下时缺失形变动画与交互反馈（§1.6）。
     /// 只给真正可点的元素开：输入框、可点的胶囊。
     func glassSurface<S: Shape>(_ shape: S, interactive: Bool = false) -> some View {
         modifier(GlassShapeModifier(shape: shape, interactive: interactive))
@@ -372,8 +372,8 @@ extension UIColor {
 // MARK: - 玻璃分组
 
 extension View {
-    /// 内容层上成组浮起的玻璃。iOS 26 交给 `GlassEffectContainer` 统一渲染，
-    /// 多个玻璃元素才会相互感知、边缘与光感不打架；更早的系统原样返回。
+    /// 内容层上方成组悬浮的玻璃材质。iOS 26 由 `GlassEffectContainer` 统一渲染，
+    /// 确保多玻璃元素之间产生正确的边缘与光感协同效果；更早的系统版本直接原样返回。
     @ViewBuilder
     func glassStack() -> some View {
         if #available(iOS 26.0, *) {
@@ -395,7 +395,7 @@ struct EmptyStateView: View {
     let title: String
     var message: String = ""
     var actionTitle: String? = nil
-    /// 这一屏除了它没有别的可做时，才用实底主操作（书架首启）。
+    /// 仅当当前屏幕无其他可操作项时，采用实底主操作按钮（如书架首次启动场景）。
     var isPrimaryAction: Bool = false
     var action: (() -> Void)? = nil
 
@@ -415,10 +415,10 @@ struct EmptyStateView: View {
         }
     }
 
-    /// 默认用次操作按钮，和世界页两栏的空态保持一致；整页只有一个动作时
-    /// 传 isPrimaryAction 换成实底（§5.4、§5.7）。
+    /// 默认采用次操作按钮样式，与世界页两栏空状态保持一致；当页面仅有单一动作时
+    /// 传入 isPrimaryAction 切换为主操作实底样式（§5.4、§5.7）。
     ///
-    /// 两种按钮样式是不同类型，不能写成三元表达式，只能分支分别修饰。
+    /// 两种按钮样式属于不同类型，无法使用三元运算符统一返回，需按条件分支分别修饰。
     @ViewBuilder
     private func actionButton(title: String, action: @escaping () -> Void) -> some View {
         let base = Button(title, action: action)

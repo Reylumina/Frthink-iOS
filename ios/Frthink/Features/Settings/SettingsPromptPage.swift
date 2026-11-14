@@ -1,6 +1,6 @@
-// 本文件负责：设置二级页「提示词与资料」，以及三级页「世界建立要求」。
+// 设置二级页「提示词与资料」及三级页「世界建立要求」。
 //
-// 二级页只做入口与开关；长文编辑进三级页，避免把整段提示词塞在设置列表里。
+// 二级页面承载设置入口与开关，长文本编辑收拢至三级子页面，避免在列表中直接展开长文本。
 
 import SwiftUI
 import UIKit
@@ -35,8 +35,7 @@ struct SettingsPromptPage: View {
 
             NavigationLink {
                 CorpusPane(store: store) { entry in
-                    // 设置页只是管理入口，没有「拿去写作」的落点；
-                    // 点取用就把原句放进剪贴板，比一个空动作清楚。
+                    // 设置页为配置管理入口，取用操作将原句直接写入剪贴板。
                     UIPasteboard.general.string = entry.text
                     store.toast = "已复制原句"
                 }
@@ -118,7 +117,7 @@ struct SettingsPromptPage: View {
 
 /// 三级页：世界建立要求（P18）正文。
 ///
-/// 每 600ms 合并落盘一次，离开页面强制保存，避免逐字重写整份 settings.json。
+/// 采用 600ms 防抖合并持久化，页面离开时强制保存，避免高频写入 settings.json。
 struct WorldBuildEditorPage: View {
     let store: AppStore
 
@@ -209,7 +208,7 @@ struct WorldBuildEditorPage: View {
     }
 }
 
-/// 只读出厂要求，避免在编辑框里放一整段长占位文字。
+/// 读取预设初始规则，避免在编辑区域展示长篇占位符。
 struct WorldBuildDefaultSheet: View {
     let text: String
 

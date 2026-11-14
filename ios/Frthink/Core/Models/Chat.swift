@@ -17,7 +17,7 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var variants: [String]
     var selectedVariant: Int
     var createdAt: Date
-    /// 生成这条回复时用的模型，便于回看。
+    /// 生成该回复所使用的模型名称，便于历史回溯。
     var model: String?
 
     var content: String {
@@ -78,8 +78,8 @@ struct TranslationSegment: Identifiable, Codable, Hashable {
         case index, text
     }
 
-    /// 存档导出与 Android 共用一份 JSON：对方可能不写 `updatedAt`，
-    /// 缺省时按当前时间补，不能让一条时间戳把整段译文丢掉。
+    /// 存档导出与 Android 端共用数据格式：外部数据可能缺失 `updatedAt` 字段，
+    /// 缺失时使用当前时间填充，避免因单条时间戳缺失导致整段译文丢失。
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString

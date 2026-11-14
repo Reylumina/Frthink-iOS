@@ -4,7 +4,7 @@
 import SwiftUI
 import UIKit
 
-/// 气泡上的用户动作。集中成一组，调用方不用在 init 里排十几行闭包。
+/// 气泡交互动作聚合结构体。
 struct WriterMessageActions {
     var copy: () -> Void = {}
     var insert: () -> Void = {}
@@ -26,7 +26,7 @@ struct WriterMessageBubble: View {
     /// 多选态：整条气泡可点选。
     let isSelecting: Bool
     let isSelected: Bool
-    /// 上次生成被系统中断；状态属于这条消息，不再由外层挂 overlay。
+    /// 标记上次生成是否被系统中断。
     var isInterrupted = false
     /// 正文栏宽度上限（字号 × 36，§2.3）。超出时居中（§5.3）。
     var bodyMaxWidth: CGFloat = .infinity
@@ -64,7 +64,7 @@ struct WriterMessageBubble: View {
         .onTapGesture {
             if isSelecting { actions.toggleSelection() }
         }
-        // 长按交给外层挂的 contextMenu，这里不抢手势。
+        // 长按交互由外层 contextMenu 统一承载。
         .overlay(alignment: .topLeading) {
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -320,8 +320,7 @@ struct WriterStreamingBubble: View {
         }
     }
 
-    /// 思考过程：一行文字按钮，点一下展开全文，再点收起。不用 DisclosureGroup——
-    /// 它自带一个箭头图标，触屏上直接点这一行更好用。
+    /// 思考过程展开/收起按钮及内容视图。
     private func reasoningBlock(_ reasoning: String, characterCount: Int) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Button {
@@ -349,7 +348,7 @@ struct WriterStreamingBubble: View {
     }
 }
 
-/// 复制到系统剪贴板。单独放一处，页面里不用为了 `UIPasteboard` 再 import UIKit。
+/// 系统剪贴板操作封装。
 enum WriterClipboard {
     static func copy(_ text: String) {
         guard !text.isEmpty else { return }

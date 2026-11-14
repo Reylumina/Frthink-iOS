@@ -1,19 +1,18 @@
-// 本文件负责：阅读页的搜索面板 —— 关键词输入、命中列表与上下跳转。
+// 阅读页搜索面板：提供关键词输入、匹配结果列表及上下导航。
 
 import Foundation
 import SwiftUI
 
-/// 搜索面板。搜的是当前模式显示的那一篇，所以占位符跟着模式走。
+/// 搜索面板：检索当前阅读模式下的文本内容，占位提示跟随模式切换。
 ///
-/// 面板由 `ReaderPane` 放在正文的 overlay 里：打开时正文不下推，只有顶部这一层
-/// 发生变化，键盘也只在面板自己的输入框里。搜索没出结果前先显示加载态，
-/// 有结果或确认为空之后再切内容，避免先闪一下空白。
+/// 面板以覆盖层形式展示于正文上方，不改变正文布局。检索进行中展示加载态，
+/// 结果就绪或确认为空后再切换内容，避免界面闪烁。
 struct ReaderSearchPanel: View {
     let mode: ReaderMode
     @Binding var query: String
     let matches: [ReaderMatch]
     let currentIndex: Int
-    /// 全文还在扫。为 true 时先显示一行加载态。
+    /// 全文检索进行中状态；为 true 时显示加载提示。
     let isSearching: Bool
     let onSubmit: () -> Void
     let onPrevious: () -> Void
@@ -21,11 +20,11 @@ struct ReaderSearchPanel: View {
     let onSelect: (Int) -> Void
     let onClose: () -> Void
 
-    /// 命中列表最多摆这么多行，剩下的用上下跳转走。
+    /// 匹配结果列表最大展示行数，其余项通过翻页导航浏览。
     private static let visibleRows = 60
 
     @FocusState private var focused: Bool
-    /// 列表高度跟着 Dynamic Type 缩放；大字号时不会只露出半行。
+    /// 列表高度支持 Dynamic Type 动态缩放，确保大字号下完整展示。
     @ScaledMetric(relativeTo: .body) private var resultListHeight: CGFloat = 160
 
     var body: some View {

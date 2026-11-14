@@ -2,9 +2,9 @@ import Foundation
 
 /// Token 估算与上下文预算。
 ///
-/// 公式照抄原版 `L1/e3.java:253-271` 与 `22-55`——**不是估个大概**，是同一套
-/// 权重和同一个预算推导。两边算出来的数不一样，裁剪点就不一样，发出去的
-/// 提示词就不一样。
+/// 计算公式严格对齐原版 `L1/e3.java:253-271` 与 `22-55`，采用完全相同的
+/// 权重定义与预算推导逻辑。计算数值的一致性直接决定上下文裁剪边界与最终
+/// 发送的提示词内容。
 enum TokenEstimator {
 
     // MARK: - 逐码点权重（`L1/e3.java:253-271`）
@@ -73,9 +73,9 @@ enum TokenEstimator {
         messages.reduce(0) { $0 + estimate($1.content) }
     }
 
-    /// 常见模型的上下文窗。表里没有的按 64k 保守估计。
+    /// 常见模型的上下文窗口大小。未列入的模型默认采用 64k 保守估计。
     static func contextWindow(for model: String) -> Int {
-        // 目录里有确切值的先用（deepseek 系列 1M）。
+        // 优先使用模型目录中声明的精确数值（如 DeepSeek 系列为 1M）。
         if let known = ModelCatalog.contextWindow(for: model) { return known }
         let m = model.lowercased()
         if m.contains("deepseek") { return 64_000 }
@@ -87,7 +87,7 @@ enum TokenEstimator {
         return 64_000
     }
 
-    /// 把正文裁到指定 token 预算内，从末尾保留。二分找最长可行后缀。
+    /// 将正文截断至指定 token 预算范围内，从文本末尾向前保留。通过二分查找确定最长有效后缀。
     static func trimTail(_ text: String, toTokens budget: Int) -> String {
         guard budget > 0 else { return "" }
         guard estimate(text) > budget else { return text }
@@ -128,7 +128,7 @@ struct PromptBudget {
         model: String,
         contextWindowOverride: Int? = nil
     ) throws -> PromptBudget {
-        // 输入预算 0 = 跟随模型：用窗口减输出与 1024 安全余量。
+        // 输入预算为 0 表示跟随模型默认值：以总窗口容量减去输出上限与 1024 安全余量进行计算。
         let rawWindow = contextWindowOverride ?? TokenEstimator.contextWindow(for: model)
         let window = rawWindow > 0 ? min(max(rawWindow, 1024), 1_000_000) : 0
         var outputBudget = min(max(settings.reservedOutputTokens, 1024), 100_000)

@@ -51,7 +51,7 @@ struct WorldbookEntryEditor: View {
                         AppTextArea(
                             title: "内容",
                             text: $bodyText,
-                            placeholder: "这条设定具体是什么",
+                            placeholder: "输入设定内容或规则说明",
                             minLines: 6,
                             maxLines: 14
                         )

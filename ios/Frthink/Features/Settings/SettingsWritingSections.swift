@@ -1,4 +1,4 @@
-// 设置三级页：生成参数、外观与交互。每个文件只放一类页面，参数不再堆在二级页里。
+// 设置三级子页面：模型生成参数、外观与交互配置。
 
 import Foundation
 import SwiftUI
@@ -97,7 +97,7 @@ struct SettingsModelResponsePage: View {
 
 /// 三级页：输入预算、单轮输出上限、由此算出的提示词预算。
 ///
-/// 上下文窗口由模型决定，不在这里手调。
+/// 上下文窗口大小由模型定义，此处不支持手动调整。
 struct SettingsContextBudgetPage: View {
     let store: AppStore
     @State private var inputBudget = 0

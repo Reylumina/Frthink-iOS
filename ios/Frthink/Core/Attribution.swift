@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 原版 Android 应用设置页底部的两行字面量：
 /// `"Frthink v0.8.210"` 与 `"Power by Fr33"`（DEX 字符串表 str:3052、str:9804）。
-/// 移植版在所有展示版本号的地方都带上原作者，不要只写自己的名字。
+/// 移植版本在所有展示版本信息的界面均需标注原作者，保持致谢完整。
 enum Attribution {
     /// 原应用名。
     static let appName = "Frthink"

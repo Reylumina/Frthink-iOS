@@ -15,10 +15,10 @@ struct CorpusEntryEditor: View {
     @State private var source: String
     @State private var confirmingDiscard = false
 
-    /// 提示词要求每条 2–3000 字；手填时给 UI 一个上限提示。
+    /// 提示词要求每条 2–3000 字；手动输入时提供 UI 上限提示。
     static let maxTextLength = 3000
 
-    /// 常用分类建议，减少手打（也可自由输入）。
+    /// 常用分类建议，减少手动输入（亦支持自由输入）。
     static let suggestedCategories = [
         "环境描写", "人物描写", "动作", "对白", "心理", "比喻", "叙事", "其他",
     ]

@@ -12,7 +12,7 @@ enum WorldTab: String, CaseIterable, Identifiable, Hashable {
 
     var id: String { rawValue }
 
-    /// 分栏控件上的短标签：五个中文全称并排会挤成一团。
+    /// 分栏控件紧凑标签文本。
     var shortTitle: String {
         switch self {
         case .setting: return "概览"
@@ -42,9 +42,7 @@ enum WorldBusy: Equatable {
 
 /// 世界任务登记令牌的持有盒。
 ///
-/// 令牌来自「登记这个任务之后」，而任务闭包要读它，所以用引用盒子在
-/// 「登记」与「收尾」之间传递；闭包捕获的是盒子本身（`let`），不是可变局部变量。
-/// 只在主线程读写。
+/// 用于在任务注册与生命周期结束间传递令牌，避免闭包捕获局部可变状态。
 private final class WorldTaskToken {
     var value: UUID?
 }
@@ -121,7 +119,7 @@ struct WorldPane: View {
                     onRefreshFull: { startWorldRefresh(forceFull: true) }
                 )
             case .worldbook:
-                // 世界书词条是独立的键值清单，和「世界设定」那一整段正文不是一回事。
+                // 世界书词条为结构化清单配置，独立于世界设定正文。
                 WorldbookPane(session: session)
             case .events:
                 WorldEventsSection(
@@ -154,7 +152,7 @@ struct WorldPane: View {
     /// 有任务、有回执或能看原始响应时才占位；空闲时不预留空白行。
     @ViewBuilder
     private var statusArea: some View {
-        // 概览页的刷新行自带进度与停止；其余分栏只由这一行报进度，避免同时出现两处转圈。
+        // 概览分栏内建刷新与终止控制；其余分栏由该状态行统一展示进度。
         if isWorldRefreshing, tab == .setting {
             EmptyView()
         } else if busy != nil || statusMessage != nil || lastRawResponse != nil {
@@ -241,7 +239,7 @@ struct WorldPane: View {
     }
 
     private var statusText: String {
-        // 任务进行中被拒绝的操作也要有反馈，优先显示刚写入的状态文案。
+        // 优先显示最新的状态提示文本。
         if let statusMessage, !statusMessage.isEmpty { return statusMessage }
         if let busy { return progressText.isEmpty ? busy.label : progressText }
         return ""
@@ -251,11 +249,8 @@ struct WorldPane: View {
 
     /// 启动一个可在切书时统一取消的世界任务。
     ///
-    /// 任务登记到 `AppStore`，切书时由根视图取消；只靠视图 `@State` 的话，
-    /// 视图销毁后任务还在对已经被驱逐的会话落盘。
-    ///
-    /// 登记返回令牌，收尾时用同一个令牌调用 `finishWorldTask(for:token:)`：
-    /// 切书后同一本书可能已经由新页面登记了另一个任务，旧任务只清自己那一条。
+    /// 任务注册至 `AppStore` 集中调度，切换项目时支持全局统一取消，防止视图销毁后残留后台写入。
+    /// 注册生成的专属令牌用于任务注销校验，保证多任务并发时状态隔离。
     private func startTrackedTask(_ work: @escaping @MainActor () async -> Void) {
         // 令牌要在任务闭包里读，而它来自「登记这个任务之后」；用一个引用盒子
         // 传递，避免闭包捕获可变的局部变量。
@@ -274,7 +269,7 @@ struct WorldPane: View {
         token.value = store.registerWorldTask(task, for: session.project.id)
     }
 
-    /// 四类世界任务共用的入口：占位、进度、取消文案、错误上屏收在一处。
+    /// 统一的世界任务调度入口：集中管理运行状态、进度反馈、取消处理与异常展示。
     private func startWorldTask(
         kind: WorldBusy,
         cancelled: String,
@@ -291,7 +286,7 @@ struct WorldPane: View {
             do {
                 self.statusMessage = try await operation()
             } catch {
-                // 取消有三种形状（结构化并发 / URLSession / LLMError），统一判。
+                // 统一判定各类取消异常（结构化并发、网络层与模型客户端取消）。
                 if error.isLLMCancellation {
                     self.statusMessage = cancelled
                 } else {

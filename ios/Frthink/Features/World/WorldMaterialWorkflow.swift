@@ -49,8 +49,7 @@ enum WorldMaterialWorkflow {
             return EventOutcome(added: 0, updated: 0, total: session.payload.world.events.count)
         }
         let context = try WorldRequestContext.make(store: store)
-        // 预算推不出来（模型窗口比输出预留还小）时不拦抽取：本轮正文才是要抽取的
-        // 对象，P53 只是只读基线，退化成不带已有事件即可。
+        // 无法解析预算时仍允许抽取：P53 仅作为只读基线，缺省时降级为不附加既有事件上下文。
         let budget = try? PromptBudget.make(
             settings: store.settings,
             model: context.provider.resolvedModel
@@ -78,7 +77,7 @@ enum WorldMaterialWorkflow {
         for chunk in chunks {
             try Task.checkCancellation()
             let messages = PromptComposer.eventMessages(
-                // P53 带全部已有事件会随段数线性增长；按输入预算只保留最近的卡。
+                // 根据输入预算仅保留最近的事件卡，避免提示词线性膨胀。
                 existingEvents: Self.promptEvents(
                     session.payload.world.events,
                     budget: Self.eventBaselineBudget(budget: budget, digest: chunk)
@@ -160,8 +159,7 @@ enum WorldMaterialWorkflow {
         guard !chunks.isEmpty else {
             return NotesOutcome(updated: false)
         }
-        // 合并基准取本轮开始前的笔记：循环里逐段追加只是中途兜底，
-        // 最终结果要从旧内容出发，否则合成稿会把已追加的原段落再叠一遍。
+        // 合并基准使用本轮执行前的原始笔记，防止合成结果重复叠加中间阶段追加的内容。
         let before = session.payload.world.styleNotes
         var notes: [String] = []
         var consumed = 0
@@ -247,12 +245,9 @@ enum WorldMaterialWorkflow {
 
     // MARK: - 公共
 
-    /// 素材归纳从上次偏移继续；前缀哈希对不上说明正文改过，从头再来。
+    /// 素材归纳基于上次处理偏移增量继续；前缀哈希失配则判定正文已修改并重置进度。
     ///
-    /// 存档里的 `promptHash` 只写不读：跨端哈希算法与拼接口径都没有验证，
-    /// 拿它判定「提示词变了」会让导入的 APK 书在第一次点击时把整本重新归纳
-    /// （最多 256 段 × 3000 token）。收益只有应用升级改了 P40/P41 这一种情况，
-    /// 不值得冒这笔成本；确认 APK 的算法后再补。
+    /// 存档中的 `promptHash` 仅保留兼容性写入，暂不作为失效判定依据，避免跨端哈希口径差异引发非预期重跑。
     static func materialStart(
         _ manuscript: String,
         key: String,
@@ -268,9 +263,7 @@ enum WorldMaterialWorkflow {
 
     /// P53「已有剧情梗概（只读）」能占多少输入 token。
     ///
-    /// 输入预算里先扣掉本段正文与系统侧指令，剩下的才是已有事件的量；
-    /// 留 1024 token 余量给块标题和估算误差。预算推不出来时按 0 处理
-    /// （不带已有事件，仍按增量契约发请求）。
+    /// 计算既有事件可占用的上下文预算：扣除分段正文与指令开销，并预留 1024 token 安全余量。
     static func eventBaselineBudget(budget: PromptBudget?, digest: String) -> Int {
         guard let budget else { return 0 }
         let digestTokens = TokenEstimator.estimate(digest)
@@ -283,9 +276,7 @@ enum WorldMaterialWorkflow {
 
     /// 按预算裁剪进 P53 的已有事件。
     ///
-    /// 每段请求都带全部已有事件，事件会随段数线性增长，大书后段能把上下文顶满。
-    /// 事件卡按追加顺序保存，越靠后越新：从最新往回装，装不下就不带；
-    /// 一张都装不下时返回空数组，调用方仍按增量契约发请求（`incremental` 单独传）。
+    /// 按预算约束逆序选取最新的事件卡并按原序返回；若预算不足以容纳单张卡片则返回空数组。
     static func promptEvents(_ events: [EventCard], budget: Int) -> [EventCard] {
         guard budget > 0, !events.isEmpty else { return [] }
         var kept: [EventCard] = []

@@ -34,7 +34,7 @@ enum ReaderStyle {
         Font.system(size: size, weight: .regular)
     }
 
-    /// 行距倍数换成额外行距。
+    /// 将行距倍数转换为额外行间距。
     static func lineSpacing(size: CGFloat, lineHeight: Double) -> CGFloat {
         max(0, size * CGFloat(lineHeight - 1))
     }

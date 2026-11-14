@@ -75,7 +75,7 @@ struct PromptAssembly {
 
     /// 项目 ID，只用于第 1 块的键 `assistant:project:<projectId>`。
     var projectID: String = ""
-    /// 第 1 块：项目级补充指令（P02）。**不是**全局预设。
+    /// 第 1 块：项目级补充指令（P02）。区别于全局预设。
     var projectAssistantInstruction: String = ""
     /// 第 2 块：全局预设（P03），正文即用户填写原文，不加前后缀。
     var globalPreset: String = ""

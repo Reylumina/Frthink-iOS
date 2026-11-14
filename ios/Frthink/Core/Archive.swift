@@ -12,14 +12,14 @@ import Foundation
 ///   "payload": "<base64(gzip(utf8(json)))>"
 /// }
 /// ```
-/// gzip 容器在 `FrthinkGzip` 里手写：`Compression` 框架的 `COMPRESSION_ZLIB` 只
-/// 吐裸 DEFLATE（RFC 1951），`NSData.compressed(using: .zlib)` 吐的是 zlib
-/// （RFC 1950），两者都不能直接当 gzip（RFC 1952）用。Android 侧导入走
-/// `GZIPInputStream`、导出走 `GZIPOutputStream`，所以头尾必须按 RFC 1952 补齐。
+/// gzip 容器由 `FrthinkGzip` 自行实现：`Compression` 框架的 `COMPRESSION_ZLIB` 仅
+/// 输出裸 DEFLATE 流（RFC 1951），`NSData.compressed(using: .zlib)` 输出的是 zlib 格式
+/// （RFC 1950），两者均不可直接作为 gzip（RFC 1952）使用。Android 端导入依赖
+/// `GZIPInputStream`、导出依赖 `GZIPOutputStream`，因此头部与尾部必须按 RFC 1952 规范补齐。
 ///
-/// 内层载荷是 iOS 自己的结构：Android 的 `ProjectSnapshot` 是 56 字段的库内
-/// 结构，和 `ProjectPayload` 没有一一对应（见 spec 03 §5.1），这里按能对上的
-/// 键名对齐（`ArchivedSnapshot`），跨端只保证「信封 + gzip + 正文」读得回来。
+/// 内层载荷为 iOS 本地数据结构：Android 的 `ProjectSnapshot` 为包含 56 个字段的内部
+/// 结构，与 `ProjectPayload` 并非一一对应（参见 spec 03 §5.1），此处针对可对应的数据
+/// 字段进行映射（`ArchivedSnapshot`），跨端兼容仅保证「信封 + gzip + 正文」可完整读回。
 enum FrthinkArchive {
 
     // MARK: - 常量
@@ -59,7 +59,7 @@ enum FrthinkArchive {
 
     // MARK: - 信封
 
-    /// 最外层信封，字段名照抄原版（`I1\M`）。
+    /// 最外层信封，字段命名严格对齐原版（`I1\M`）。
     struct Envelope: Codable {
         var format: String
         var version: Int
@@ -95,8 +95,8 @@ enum FrthinkArchive {
 
     /// 单本书的存档内容（字段对齐 `I1\O0`）。
     ///
-    /// iOS 多一个 `sourceText`：Android 的原文放在 source blob 里按哈希去重，
-    /// 这边直接内联整段原文，省掉 blob 表。
+    /// iOS 增加 `sourceText` 字段：Android 端原文存储于 source blob 中按哈希去重，
+    /// iOS 端直接内联完整原文，省略 blob 表结构。
     struct ProjectBackup: Codable {
         var formatVersion: Int
         var createdAt: Int64
@@ -144,8 +144,8 @@ enum FrthinkArchive {
             } ?? 0
         }
 
-        /// 宽容解码：缺字段按默认值补，坏字段（例如 Android 的译文记录结构不同）
-        /// 只丢那一项，不整份失败。
+        /// 容错解码：缺失字段使用默认值补充，异常字段（例如 Android 端译文记录结构差异）
+        /// 仅忽略该项，避免整体解码失败。
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             formatVersion = (try? c.decode(Int.self, forKey: .formatVersion)) ?? 1
@@ -154,8 +154,8 @@ enum FrthinkArchive {
             projectId = backupProjectId
             title = (try? c.decode(String.self, forKey: .title)) ?? ""
             synopsis = (try? c.decode(String.self, forKey: .synopsis)) ?? ""
-            // snapshot 是书稿本体：解不出来必须整本失败，不能静默换成空快照，
-            // 否则覆盖导入会用空书替换掉本机同名书。
+            // snapshot 为书稿核心数据：解码失败必须终止整部作品导入，禁止静默替换为空快照，
+            // 避免覆盖导入时以空内容覆盖本地同名书稿。
             guard let decodedSnapshot = try? c.decode(
                 ArchivedSnapshot.self,
                 forKey: .snapshot
@@ -294,7 +294,7 @@ enum FrthinkArchive {
         var messages: [ChatMessage]
         var world: WorldBook
         var continuationAnchor: Int?
-        /// 项目级补充指令（P02）。不带它的话存档往返会把这个字段丢掉。
+        /// 项目级补充指令（P02）。若未包含该字段，存档往返将导致配置丢失。
         var assistantSupplement: String
         /// 原文（翻译源）。Android 放在 `localSourceDocuments[0]` 里。
         var sourceText: String
@@ -780,7 +780,7 @@ enum FrthinkArchive {
         ]
         try encodeAny(summary, key: .conversationSummary, into: &c)
 
-        // 世界分析断点：原版按段保存，刷新断点续跑和「世界刷新」历史都靠它。
+        // 世界分析断点：原版按分段保存，用于刷新断点续跑与世界刷新历史回溯。
         let hasCheckpoint = !world.analysisSourceHash.isEmpty
             || world.analysisSourceCodePointCount > 0
             || !world.analysisSegments.isEmpty
@@ -1318,7 +1318,7 @@ enum FrthinkArchive {
         /// 存档 `settings` 对象里实际出现的键（iOS 属性名与 Android 原版键名都算）。
         ///
         /// 只给 `mergeSettings` 用：Android 备份没有 iOS 独有的流式开关、上下文
-        /// 窗口、累计用量等键，解出来是出厂默认值；合并时缺键保留本机值，
+        /// 窗口、累计用量等键，解出的数据为默认值；合并时缺失键保留本地配置，
         /// 不能拿这些默认值把用户设置重置。不写进存档（不在 CodingKeys 里）。
         var settingsKeyNames: Set<String> = []
 
@@ -1720,7 +1720,7 @@ enum FrthinkArchive {
     }
 
     /// 导出前统一译文归属。译文主键是 `(owner, project, target, segment)`，
-    /// 分支复制或旧数据可能留下别的 project id，导出的备份会被导入校验判重复。
+    /// 分支复制或遗留数据可能包含其他 project id，导出备份时可能触发导入端的重复校验。
     private static func normalizedTranslations(
         _ backups: [ProjectBackup]
     ) -> [ProjectBackup] {
@@ -1735,7 +1735,7 @@ enum FrthinkArchive {
         }
     }
 
-    /// JSON → gzip → base64 塞进信封。任何一步失败都按「无法创建存档」处理。
+    /// 经由 JSON 序列化、gzip 压缩及 base64 编码后封装至信封结构。任一步骤失败均归类为「无法创建存档」。
     private static func makeEnvelope<T: Encodable>(format: String, payload: T) throws -> Data {
         let json: Data
         do {
@@ -1820,7 +1820,7 @@ enum FrthinkArchive {
         )
 
         // 先按信封里的 format 走对应读取器；失败则记住它的错误，
-        // 两个都失败时把最有信息量的那条抛出去——「不是有效文件」太笼统。
+        // 两项均失败时抛出包含具体细节的错误原因，避免提示过于宽泛。
         var lastError: Error?
         if looksFull {
             do { return .full(try decodeFullBackup(json)) } catch { lastError = error }
@@ -1857,7 +1857,7 @@ enum FrthinkArchive {
             payload = try jsonDecoder.decode(FullBackupPayload.self, from: json)
         } catch DecodingError.keyNotFound(let key, _) where key.stringValue == "settings" {
             // 书项目存档的 format 也在全量白名单里，但它没有 settings：
-            // 按「不是有效的全量 .frthink 文件」处理，别把本机设置清空。
+            // 按「不是有效的全量 .frthink 文件」处理，避免清空本地配置。
             throw FrthinkArchiveError.notAnArchive(isFull: true)
         } catch {
             throw FrthinkArchiveError.corruptedDetail(
@@ -1869,11 +1869,11 @@ enum FrthinkArchive {
         return payload
     }
 
-    /// 校验顺序照抄原版（spec 03 §9.3）：大小 → JSON → format/version →
+    /// 校验顺序严格对齐原版（spec 03 §9.3）：文件体积 → JSON 结构 → format/version →
     /// compression → base64/gzip → 载荷。
     ///
-    /// `decoded` 只给 `openAny` 用：它为了判断格式已经解过信封，这里复用，
-    /// 避免同一份文件把 base64 payload 再构造一遍。其它入口传 nil 自行解码。
+    /// `decoded` 仅供 `openAny` 使用：其判定格式时已完成信封解析，此处直接复用，
+    /// 避免对同一文件重复执行 base64 payload 解析。其他调用方传入 nil 自行解码。
     private static func openEnvelope(
         _ data: Data,
         kind: Kind,
@@ -1980,8 +1980,8 @@ enum FrthinkArchive {
         try validateTranslations(projects)
     }
 
-    /// 项目 id 直接当目录名用。只挡住真正的路径问题，不限制 id 的字符集：
-    /// 旧存档里可能有非 UUID 的 id，字符集收紧会把能导入的备份判死。
+    /// 项目 id 直接用作目录名。仅拦截路径遍历等安全风险，不限制 id 的字符集：
+    /// 历史存档可能包含非 UUID 格式 id，收紧字符集会导致有效备份无法导入。
     private static func isSafeProjectID(_ id: String) -> Bool {
         guard !id.isEmpty, id.count <= 128 else { return false }
         guard id != ".", id != ".." else { return false }
@@ -2053,13 +2053,13 @@ enum FrthinkArchive {
             )
 
             var payload = backup.snapshot.projectPayload
-            // 锚点是 UTF-16 偏移，存档来自别的版本时可能越界，直接丢掉。
+            // 锚点为 UTF-16 偏移量，若存档来自其他版本可能出现越界，此时直接丢弃。
             if let anchor = payload.continuationAnchor,
                anchor < 0 || anchor > payload.manuscript.utf16.count {
                 payload.continuationAnchor = nil
             }
-            // 原版存档不带 iOS 的章节索引（章节是扫出来的派生数据）。不补这一步，
-            // 导入后写作台的章节条与阅读页目录都是空的，直到用户手动改一次正文。
+            // 原版存档未包含 iOS 端章节索引（章节为扫描正文生成的派生数据）。若不执行此项补充，
+            // 导入后创作台章节栏与阅读页目录将显示为空，直至用户手动编辑正文。
             if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
                 payload.chapters = ChapterScanner.scan(payload.manuscript)
             }
@@ -2084,8 +2084,8 @@ enum FrthinkArchive {
                 try stagedFiles.saveSource(backup.sourceText, projectID: project.id)
                 try stagedFiles.saveTranslations(translations, projectID: project.id)
                 try beforeCommit?()
-                // 一本书的所有文件写成功后才整体换进正式目录。失败或取消时
-                // 暂存目录被清掉，旧稿原样保留，不会出现「一半新一半旧」。
+                // 仅在单本书稿全部文件写入成功后，才原子替换至正式目录。发生失败或取消时，
+                // 暂存目录将被清理并保留原始书稿，避免出现数据不一致。
                 try files.commitStagedProject(projectID: project.id, stagingRoot: stagingRoot)
             } catch {
                 throw FrthinkArchiveError.writeFailed(error.localizedDescription)
@@ -2099,9 +2099,9 @@ enum FrthinkArchive {
     ///
     /// 规则：
     /// - 本机身份（译文 `owner`）不换；
-    /// - 存档没有供应方（Android 备份只有 `credentials`）时保留本机供应方，
-    ///   API Key 存在 Keychain、按供应方 id 取，换 id 等于把 Key 弄丢；
-    /// - 存档没选当前供应方（或选了本机不存在的）时保留本机选中项，再退列表第一个；
+    /// - 存档未包含供应方信息（Android 备份仅包含 `credentials`）时保留本地供应方，
+    ///   API Key 存储于 Keychain 并通过供应方 id 索引，替换 id 会导致凭据丢失；
+    /// - 存档未指定当前供应方（或指定了本地不存在的项）时保留本地选中项，兜底采用列表首项；
     /// - 宇宙条目按 id 合并，不删本机条目；
     /// - 外观类本机偏好（主题、正文字号、动效、触感）保留本机值；
     /// - 存档里没有写出的字段保留本机值：Android 备份没有 iOS 的流式开关、
@@ -2119,8 +2119,8 @@ enum FrthinkArchive {
         if result.providers.isEmpty {
             result.providers = local.providers
         }
-        // 存档里没有 activeProviderID（Android 备份）时保留本机选中的供应方；
-        // 不能退化成 providers.first，否则用户可能被切到没填 Key 的那条。
+        // 存档未包含 activeProviderID（如 Android 备份）时保留本地选中的供应方；
+        // 禁止直接回退至 providers.first，避免切换至未配置 API Key 的供应方。
         if !result.providers.contains(where: { $0.id == result.activeProviderID }) {
             result.activeProviderID = result.providers.contains(where: { $0.id == local.activeProviderID })
                 ? local.activeProviderID
@@ -2142,10 +2142,10 @@ enum FrthinkArchive {
         if !archived("streamByDefault", "streamingResponses") {
             result.streamByDefault = local.streamByDefault
         }
-        // 语料库按「有没有条目」判断，而不是按键存在：Android 备份的顶层
-        // `corpusLibrary` 是 `CorpusLibrary?`、默认 null（spec 03 §5.1），仓库
-        // fixture 里也只有没有条目的空库节点。键在但没有任何条目时不算存档
-        // 提供了这个字段，否则全量导入会把本机语料清空并立刻落盘。
+        // 语料库依据「是否存在条目」判定，而非仅检查键名是否存在：Android 备份顶层
+        // `corpusLibrary` 字段类型为 `CorpusLibrary?` 且默认为 null（spec 03 §5.1），仓库
+        // fixture 中亦仅包含无条目的空节点。若键存在但无任何条目，不视为存档提供了该字段，
+        // 避免全量导入时清空本地语料库并直接持久化。
         let hasCorpusContent = imported.corpusLibraries.contains { !$0.entries.isEmpty }
         if !hasCorpusContent {
             result.corpusLibraries = local.corpusLibraries
@@ -2238,7 +2238,7 @@ enum FrthinkArchive {
         return decoder
     }
 
-    /// 把 `DecodingError` 翻成能上屏的一句话：缺哪个键、哪个键类型不对。
+    /// 将 `DecodingError` 转换为用户可读的提示信息：明确指出缺失的具体键名或类型不匹配的字段。
     ///
     /// 导入失败时避免只报「备份内容损坏」导致用户无法排查，供 `corruptedDetail` 拼接具体字段原因。
     static func decodeDetail(_ error: Error) -> String {

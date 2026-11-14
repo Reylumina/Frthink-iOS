@@ -1,7 +1,7 @@
 // 技能编辑页：技能名、内容、启用开关；编辑已有技能时可以在底部删除。
 //
-// 长文编辑使用推入页而非 sheet。这一页只有「保存」没有「取消」，
-// 左滑返回时自动存下非空改动，删除走底部独立一节并二次确认。
+// 详细编辑使用导航推入页面而非弹窗。当前页面仅提供保存操作，
+// 左滑返回时自动持久化非空修改，删除操作置于底部独立分组并需二次确认。
 
 import SwiftUI
 
@@ -37,7 +37,7 @@ struct PromptSkillEditor: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 有未保存的改动时返回要自动保存，交给 `onDisappear`。
+    /// 存在未保存的修改时由 `onDisappear` 触发自动保存。
     private var hasChanges: Bool {
         trimmedName != skill.name || content != skill.content || enabled != skill.enabled
     }
@@ -104,14 +104,14 @@ struct PromptSkillEditor: View {
         .alert(deleteTitle, isPresented: $confirmingDelete) {
             Button("删除", role: .destructive) {
                 onDelete?()
-                // 删除即结束这一页：置位避免 onDisappear 又把改动存回去。
+                // 执行删除后退出页面：设置状态位防止 onDisappear 再次触发保存。
                 saved = true
                 dismiss()
             }
             Button("取消", role: .cancel) {}
         }
         .onDisappear {
-            // 只有「保存」没有「取消」：左滑返回时存下非空改动，别静默丢。
+            // 仅提供保存操作：左滑返回时持久化非空修改，防止编辑内容丢失。
             guard !saved, hasChanges, !trimmedName.isEmpty else { return }
             save()
         }

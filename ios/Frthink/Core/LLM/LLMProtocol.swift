@@ -1,7 +1,7 @@
 import Foundation
 
-/// 发给 LLM 的一条消息。与 `ChatMessage` 分开：`ChatMessage` 是 UI 的
-/// 编辑单元（带分支），这里只带最终要发出去的 role/content。
+/// 发送给 LLM 的消息结构。与 `ChatMessage` 区分：`ChatMessage` 为 UI 层
+/// 编辑实体（包含多分支），此处仅包含实际发送所需的 role 与 content。
 struct LLMMessage: Codable, Hashable {
     var role: String
     var content: String
@@ -27,8 +27,8 @@ struct LLMToolCall: Equatable, Sendable {
 
 /// 一次请求。
 ///
-/// 默认请求体保持原版 7 键；只有用户把思考档位调到非关闭时，
-/// 才按AI服务商追加 reasoning 字段。
+/// 默认请求体保持原版 7 个核心键；仅当用户将思考档位配置为非关闭状态时，
+/// 才按 AI 服务商协议追加 reasoning 相关字段。
 struct LLMRequest {
     var model: String
     var messages: [LLMMessage]
@@ -42,7 +42,7 @@ struct LLMRequest {
     /// 幂等键，进 `Idempotency-Key` 头。非空才发。
     var attemptId: String?
     /// 输出因 `finish_reason=length` 被截断时是否直接报错。
-    /// 世界刷新这类结构化任务必须整段 JSON，截断不能当正常结果解析。
+    /// 世界刷新等结构化任务要求完整 JSON 输出，截断内容禁止作为有效结果解析。
     var failOnLength: Bool
     /// 工具定义；非空时序列化 `tools`。
     var tools: [LLMToolDefinition]?
@@ -115,8 +115,8 @@ struct LLMRequest {
                 if isDeepSeek {
                     body["thinking"] = ["type": "disabled"]
                 } else {
-                    // 关闭思考默认什么都不发（原版行为）；用户按供应方挑了字段才追加，
-                    // 否则默认开推理的服务端根本关不掉。
+                    // 关闭思考模式下默认不传递额外字段（与原版行为一致）；仅当用户为特定供应方指定字段时才追加，
+                    // 防止服务端默认启用推理导致无法关闭。
                     switch offStyle {
                     case .none:
                         break
@@ -187,8 +187,8 @@ struct LLMRequest {
     }
 }
 
-/// 流式事件。除了正文增量，还要能把「思考过程」和「结束原因」带出来：
-/// DeepSeek 的 reasoning 模型会先吐 `reasoning_content`。
+/// 流式事件枚举。除正文增量外，支持携带「思考过程」与「结束原因」：
+/// DeepSeek 等推理模型会优先输出 `reasoning_content`。
 enum LLMStreamEvent: Equatable {
     case delta(String)
     case reasoning(String)
@@ -202,7 +202,7 @@ enum LLMError: LocalizedError, Equatable {
     case http(status: Int, body: String)
     case decoding(String)
     case cancelled
-    /// 空响应。带上服务端原始返回，否则「空响应」三个字什么也说明不了。
+    /// 空响应错误。附带服务端原始响应内容，便于明确具体错误原因。
     case emptyResponse(detail: String)
     /// 命中输出上限，响应被截断。结构化 JSON 任务不能继续解析。
     case truncated(detail: String)
@@ -212,9 +212,9 @@ enum LLMError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "还没有可用的AI服务商，请先到设置里填写服务地址和 API Key。"
+            return "暂无可用的 AI 服务商，请先在设置中填写服务地址与 API Key。"
         case .missingAPIKey(let name):
-            return "\(name) 的 API Key 还没填写。"
+            return "尚未填写 \(name) 的 API Key。"
         case .badURL(let url):
             return "服务地址不合法：\(url)"
         case .http(let status, let body):
@@ -238,8 +238,8 @@ enum LLMError: LocalizedError, Equatable {
 }
 
 extension Error {
-    /// 取消有三种形状：结构化并发、URLSession，以及客户端归一后的 `LLMError`。
-    /// 世界/事件/摘要这些流程都靠它区分「用户点了停止」与「请求真的失败」。
+    /// 取消操作包含三种形态：结构化并发取消、URLSession 错误及客户端统一映射后的 `LLMError`。
+    /// 世界、事件、摘要等流程均依赖此判定区分「用户主动停止」与「请求实际失败」。
     var isLLMCancellation: Bool {
         if self is CancellationError { return true }
         if let llm = self as? LLMError { return llm == .cancelled }

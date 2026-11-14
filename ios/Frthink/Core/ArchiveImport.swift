@@ -1,7 +1,7 @@
-// 本文件负责：导入结果的摘要数据 —— 每本书的规模数字、整份备份里带了哪些设置。
+// 本文件负责：导入结果的摘要数据，包括各书稿的统计规模及整份备份中包含的配置项。
 //
-// 只做展示用的派生值，不参与解码与落盘。导入完成页和自检都读这里，保证
-// 「界面上报的数字」与「真正写进去的数据」是同一份。
+// 仅提供展示用途的派生数据，不参与解码与写盘流程。导入完成页与自检模块均读取此处，确保
+// 界面展示数值与实际持久化数据一致。
 
 import Foundation
 
@@ -21,7 +21,7 @@ struct ArchiveBookSummary: Identifiable, Hashable {
 }
 
 extension FrthinkArchive.ProjectBackup {
-    /// 从已解码的存档条目算出上屏数字。
+    /// 根据已解码的存档条目计算展示数据。
     var importSummary: ArchiveBookSummary {
         let payload = snapshot.projectPayload
         return ArchiveBookSummary(
@@ -41,7 +41,7 @@ extension FrthinkArchive.ProjectBackup {
 }
 
 extension FrthinkArchive.FullBackupPayload {
-    /// 备份里实际带了哪些全局设置。空备份不该在完成页显示一堆「0 项」。
+    /// 备份中实际包含的全局设置项。空备份在完成页避免展示冗余的「0 项」指标。
     var settingsHighlights: [String] {
         var lines: [String] = []
         if !settings.globalPreset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

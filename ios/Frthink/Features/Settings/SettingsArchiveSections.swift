@@ -75,8 +75,7 @@ struct SettingsProjectArchiveSection: View {
             return
         }
         isPreparingExport = true
-        // 挂起的编辑先落盘，并等真正的写盘结束，再从磁盘读全文：
-        // 不在主线程拼几十万字，也不丢最近一笔改动。
+        // 先将挂起的编辑变更同步落盘，再从磁盘读取全文，避免阻塞主线程并确保获取最新改动。
         let session = store.cachedSession(for: project.id)
         let files = store.fileStore
         let universeEntries = store.settings.universeEntries
@@ -161,8 +160,7 @@ struct SettingsFullArchiveSection: View {
         }
         isPreparingExport = true
         let projects = store.projects
-        // 全量导出走磁盘：先落盘并等写盘结束，避免把所有项目常驻内存，
-        // 也避免导出读到上一版内容。
+        // 全量导出采用流式读取已落盘文件，避免全量项目驻留内存，确保导出数据的一致性。
         let sessions = projects.compactMap { store.cachedSession(for: $0.id) }
         let files = store.fileStore
         let settings = store.settings

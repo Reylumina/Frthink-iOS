@@ -135,16 +135,16 @@ extension PromptComposer {
     /// system：P48（初次）或 P49（增量）+ P50 或 P51 的 JSON 契约。
     /// user：P52 正文剧情事实 → P53 已有剧情梗概（只读）这两块只读数据。
     ///
-    /// 规格 §7 没有定义 user 指令，所以 user 消息只放数据块，不自拟指令。
+    /// 规格 §7 未定义 user 指令，因此 user 消息仅包含数据块，不构造额外指令。
     static func eventMessages(
         existingEvents: [EventCard],
         digest: String,
         instruction: String? = nil,
         incremental: Bool? = nil
     ) -> [LLMMessage] {
-        // 已有事件可能因为输入预算被裁掉，但契约仍要走增量版（P49/P51）：
-        // 本轮正文不是全书开头，模型不该按「初次归纳」重写已有事件。
-        // 调用方不传时按「有没有事件」推断。
+        // 已有事件可能因输入预算限制被裁剪，但协议契约仍需遵循增量模式（P49/P51）：
+        // 当前正文非作品起始段落，模型不应按「初次归纳」重写历史事件。
+        // 调用方未显式传递时依据「是否存在已有事件」进行推断。
         let usesIncremental = incremental ?? !existingEvents.isEmpty
         let taskKey = "task:world-plot-outline:" + shortHash(digest)
 
@@ -188,7 +188,7 @@ extension PromptComposer {
             ))
         }
 
-        // 正文为空时只发系统侧的指令与契约：不发一个正文为空的「正文剧情事实」块。
+        // 正文为空时仅发送系统侧指令与契约，避免生成正文为空的「正文剧情事实」块。
         guard !digest.isEmpty else { return [.system(systemPrompt(from: systemBlocks))] }
 
         return [

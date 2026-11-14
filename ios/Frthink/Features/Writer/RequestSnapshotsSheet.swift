@@ -43,7 +43,7 @@ struct RequestSnapshotsSheet: View {
             .deleteConfirmationDialog("清空回看记录？", isPresented: $confirmingClear, actionTitle: "清空") {
                 session.clearRequestSnapshots()
             }
-            .deleteConfirmationDialog({ _ in "删除这条回看记录？" }, item: $pendingDelete) { snapshot in
+            .deleteConfirmationDialog({ _ in "删除此回看记录？" }, item: $pendingDelete) { snapshot in
                 session.deleteRequestSnapshots([snapshot.id])
             }
             .sheet(item: $selected) { snapshot in
@@ -120,8 +120,7 @@ struct RequestSnapshotsSheet: View {
             + " · 窗口 \(snapshot.modelContextWindowTokens)"
     }
 
-    /// 从已记录的 `sourceIds` 里取一个用户看得懂的来源标签。
-    /// 没有记录就返回 nil，不凭时间或字数猜请求类型。
+    /// 解析 `sourceIds` 生成来源描述标签，无记录时返回 nil。
     private func sourceLabel(for snapshot: RequestSnapshot) -> String? {
         guard let first = snapshot.sourceIds.first else { return nil }
         let prefix = first.split(separator: ":", maxSplits: 1).first.map(String.init) ?? first
@@ -138,7 +137,7 @@ struct RequestSnapshotsSheet: View {
         return "来源 · \(name)"
     }
 
-    /// DateFormatter 创建很贵；列表每行都 new 一个会明显拖慢滚动。
+    /// 静态缓存 DateFormatter 实例，避免重复创建产生开销。
     private static let formatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
@@ -151,8 +150,7 @@ private struct RequestSnapshotDetail: View {
     let snapshot: RequestSnapshot
 
     @Environment(\.dismiss) private var dismiss
-    /// 默认只渲染每条消息的前 400 字；展开才铺全文。一次生成可能带十几万字
-    /// 的上下文，全部文本 + textSelection 一次性铺出来会卡住主线程。
+    /// 默认仅渲染前 400 字符预览，展开后加载全文，防止超长上下文渲染阻塞主线程。
     @State private var expandedIndices: Set<Int> = []
 
     private static let previewCharacters = 400

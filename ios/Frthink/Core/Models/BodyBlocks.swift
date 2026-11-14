@@ -65,7 +65,7 @@ enum BodyBlockIndex {
         }
     }
 
-    /// 在 `limit` 之前找一个标点后的断点，找不到就硬切。
+    /// 在 `limit` 之前寻找位于标点后的分割点，若不存在合适标点则强制截断。
     private static func breakPoint(_ ns: NSString, from start: Int, limit: Int) -> Int {
         let floor = start + maxBlockLength / 2
         var probe = limit

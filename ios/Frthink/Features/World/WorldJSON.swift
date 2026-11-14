@@ -1,12 +1,11 @@
-// 世界资料的 JSON 提取与解析：剥掉 ``` 围栏、截出完整括号、容错读取字段。
+// 世界设定 JSON 提取与解析：去除 Markdown 代码块包裹、提取闭合括号、容错读取字段。
 
 import Foundation
 
 /// 世界刷新 / 事件卡的响应解析。
 ///
-/// 模型经常在 JSON 外面套 ```json 围栏或写一段解释，字段取值也不总是严格的
-/// 字符串数组；所以这里先扫描出第一个完整的 JSON 对象/数组，再用
-/// `JSONSerialization` 逐字段宽容读取，而不是直接用 `Codable` 一把解到底。
+/// 兼容处理模型输出的 Markdown 围栏或解释性前缀，定位首个有效闭合的 JSON 对象或数组，
+/// 并通过 `JSONSerialization` 进行多类型容错解析。
 enum WorldJSON {
 
     // MARK: - 结果
@@ -30,10 +29,8 @@ enum WorldJSON {
     /// 括号配对时会跳过字符串内部的内容和反斜杠转义，所以 `style_notes`
     /// 里出现 `{`、`}` 或 ``` 不会截错。
     ///
-    /// 不能只认第一个 `{`/`[`：模型常在 JSON 前写一句带括号的说明（如
-    /// 「（[别名] 也要写全）」），从那里截出来的是说明而不是结果。这里按起点
-    /// 逐个试到 `JSONSerialization` 认可为止；对象优先，标量数组（说明里的
-    /// `[别名]`）跳过，空数组留作兜底。
+    /// 顺序尝试各候选开括号起点，由 `JSONSerialization` 校验有效性；
+    /// 优先选取对象或对象数组，跳过前置文本中的标量括号片段，空数组作为回退候选。
     static func extractJSON(from raw: String) -> String? {
         var emptyArrayFallback: String?
         var attempts = 0
@@ -58,8 +55,7 @@ enum WorldJSON {
         return emptyArrayFallback
     }
 
-    /// 起点尝试上限。正常响应第一个起点就命中；说明文字里最多几十个括号，
-    /// 加个上限避免在超长响应上做平方级扫描。
+    /// 括号起点搜索次数上限，防止在超长异常响应中产生性能瓶颈。
     private static let maxStartAttempts = 128
 
     /// 从 `start` 起做括号配对，返回第一个完整的对象/数组；括号不配对返回 nil。
@@ -118,8 +114,7 @@ enum WorldJSON {
 
     /// 解析 `{"characters":[...],"style_notes":"...","plot_events":"..."}`。
     ///
-    /// 顶层偶尔会直接返回人物数组，也一并接受；只有完全没有可识别字段时才抛错，
-    /// 抛错时调用方负责把原始响应展示给用户。
+    /// 兼容直接返回人物数组的顶层结构；无任何有效数据字段时抛出异常交由外层处理。
     static func parseWorldRefresh(_ raw: String) throws -> WorldRefreshPayload {
         // 整个响应只有增量标记（不是 JSON）也算正常收尾。
         if raw.trimmingCharacters(in: .whitespacesAndNewlines) == PromptLibrary.noAdditionsMarker {
@@ -170,8 +165,7 @@ enum WorldJSON {
         let plot = string(field(rootObject, ["plot_events", "plotEvents"]))
         payload.plotEvents = isNoAdditions(plot) ? "" : plot
 
-        // 有 characters 条目却一张都没解析出来，通常是字段名/类型全错，
-        // 不能当成「本轮没有新增」悄悄吞掉。
+        // 存在 characters 原始列表但未能解析出任何有效卡片，判定为解析失败抛出异常。
         if !characterItems.isEmpty, payload.characters.isEmpty, payload.isEmpty {
             throw WorldJSONError.invalidJSON(
                 "characters 有 \(characterItems.count) 项，但都没有可用的 name"
@@ -198,8 +192,7 @@ enum WorldJSON {
 
     /// 解析事件卡 JSON 数组；也接受 `{"events":[...]}` 或单个事件对象。
     ///
-    /// 要求 `events` / `plot_events` 两个键最多出现一个：模型同时给出两份
-    /// 数组时无法判断哪份是准的，直接报错而不是悄悄挑一个。
+    /// 要求 `events` 与 `plot_events` 键仅出现其一，避免并发同类字段造成数据二义性。
     static func parseEvents(_ raw: String) throws -> [EventCard] {
         let root = try decodeRoot(raw)
 
@@ -239,8 +232,7 @@ enum WorldJSON {
                 continue
             }
             let scene = prose(field(object, ["scene"]))
-            // 人物只接受数组或分隔字符串；对象数组（`[{"name":"…"}]`）或数字
-            // 会导致静默得到「没有人物」，直接报错。
+            // 人物字段仅支持字符串或字符串数组；格式不合法时抛出异常。
             let characterValue = field(object, ["characters", "casts"])
             if let characterValue, !isValidEventCharacters(characterValue) {
                 throw WorldJSONError.invalidJSON("事件卡人物格式无效")
@@ -285,8 +277,7 @@ enum WorldJSON {
 
     /// 逐项解析人物卡，并在别称类型不对时报错。
     ///
-    /// `aliases` 只接受字符串、字符串数组或空值；数字、对象、混合数组都会
-    /// 抛「人物别称格式无效」。静默丢掉会让同一人物下次刷新时重复建卡。
+    /// `aliases` 仅接受字符串、字符串数组或空值；类型非法时抛出异常以防后续去重失效。
     private static func characterCards(from items: [Any]) throws -> [CharacterCard] {
         var cards: [CharacterCard] = []
         for item in items {
@@ -389,11 +380,8 @@ enum WorldJSON {
         }
     }
 
-    /// 事件卡文本字段是叙述段落。模型可能一句一行、漏标点或写半角标点，
-    /// 这里并段并补最小标点：行间缺分隔补「，」，段末补「。」，半角转全角。
-    /// 纯英文段落按空格并段，不套中文标点。标题和人物不走这里。
-    ///
-    /// 空行作为段落分隔保留（段间保留一个换行），避免长「经过」被压成一整块。
+    /// 事件卡叙述文本段落规范化：合并换行、转换全半角标点并补齐句读；
+    /// 保留空行作为自然段落分隔符，英文文本采用空格合并。
     static func prose(_ value: Any?) -> String {
         let lines = string(value)
             .components(separatedBy: .newlines)
@@ -413,8 +401,7 @@ enum WorldJSON {
         }
         if !current.isEmpty { paragraphs.append(current) }
 
-        // 段间留一个空行：编辑区是 TextEditor，单个换行和折行分不出来，
-        // 只有空行才看得出「这是一段新的」。
+        // 多个自然段间以空行分隔，保持文本编辑器内的段落层级清晰。
         return paragraphs
             .map(mergedParagraph)
             .filter { !$0.isEmpty }
@@ -450,7 +437,7 @@ enum WorldJSON {
         return result
     }
 
-    /// 事件标题是短语，去掉末尾句读；模型偶尔把整句塞进标题。
+    /// 规范化事件标题：去除首尾多余标点与列表编号标记。
     static func eventTitle(_ raw: String) -> String {
         stripListMarker(raw)
             .trimmingCharacters(in: CharacterSet(charactersIn: "。！？；，、："))
@@ -463,7 +450,7 @@ enum WorldJSON {
         text.contains { isHan($0) }
     }
 
-    /// 去掉模型顺手加的列表符号；它们不是正文。
+    /// 去除模型输出的前置列表标记或序号前缀。
     private static func stripListMarker(_ line: String) -> String {
         line
             .replacingOccurrences(
@@ -480,8 +467,7 @@ enum WorldJSON {
 
     /// 中文行里的半角标点转全角；数字小数、英文缩写不动。
     ///
-    /// 宽度变换交给 Foundation 的 `fullwidthToHalfwidth` 反向执行，不再手写映射表；
-    /// 省略号先统一，避免三个半角句点被逐个转成句号。
+    /// 规范化标点符号：连续句点规范为标准省略号，汉字相邻处的半角标点转为全角标点。
     private static func normalizePunctuation(_ text: String) -> String {
         let prepared = text.replacingOccurrences(of: "...", with: "……")
         let chars = Array(prepared)

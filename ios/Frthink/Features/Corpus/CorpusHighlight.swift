@@ -1,13 +1,13 @@
-// 语料搜索结果的高亮：把命中关键词的片段标成强调色。
+// 语料搜索结果高亮：将匹配关键词的文本片段标记为强调色。
 //
-// 在内存里计算命中区间，列表行统一走这一份渲染，保证「搜到的」和「标亮的」一致。
+// 在内存中计算匹配区间，列表项统一使用该渲染逻辑，确保搜索结果与高亮显示一致。
 
 import SwiftUI
 
 enum CorpusHighlight {
-    /// 把 `text` 里所有命中 `tokens` 的片段标成强调色。
+    /// 将 `text` 中所有匹配 `tokens` 的片段标记为强调色。
     ///
-    /// 多个词条重叠时按区间合并，避免同一段被拆成碎片。
+    /// 多个词条重叠时合并区间，避免分段过度离散。
     static func attributed(_ text: String, tokens: [String]) -> AttributedString {
         let ranges = matchRanges(in: text, tokens: tokens)
         guard !ranges.isEmpty else { return AttributedString(text) }

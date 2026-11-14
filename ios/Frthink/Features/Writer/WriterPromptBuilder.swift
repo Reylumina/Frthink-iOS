@@ -1,8 +1,6 @@
 // 本文件负责：写作台请求组装 —— 把值类型快照变成要发给模型的消息。
 //
-// 组装要读整本正文、世界资料与全部历史。56 万字时这些工作在 2–5 秒的
-// 主线程任务里跑，发送按钮会像卡住一样。这里只接收快照，可在后台执行；
-// 控制器负责拍快照、显示「正在整理提示词」并提交结果。
+// 提示词组装基于不可变快照在后台执行，避免长篇正文与历史记录处理阻塞主线程。
 
 import Foundation
 
@@ -58,8 +56,7 @@ enum WriterPromptBuilder {
 
     /// 可取消的组装：每个耗时阶段前检查任务取消。
     ///
-    /// 56 万字时一次组装要几秒，用户点「停止」或改发别的内容后必须立刻退出，
-    /// 否则旧组装还在后台跑，新请求又起一份，两份同时读整本书。
+    /// 阶段间执行取消检查，确保在任务取消时及时中断计算。
     static func prepareCancellable(_ snapshot: WriterPromptSnapshot) throws -> WriterPreparedPrompt {
         try build(snapshot) {
             try Task.checkCancellation()
@@ -150,8 +147,7 @@ enum WriterPromptBuilder {
         )
     }
 
-    /// 预算不足时把正文裁到末尾再组装。原逻辑在控制器里同步跑两遍组装，
-    /// 长书上点一次「裁剪后重试」会冻住界面；这里整体放后台，并且可以被打断。
+    /// 预算超限时裁剪正文尾部并重新组装，支持异步取消。
     static func retryAfterTrimming(_ snapshot: WriterPromptSnapshot) throws -> WriterPromptRetryResult {
         try Task.checkCancellation()
         var full = snapshot
@@ -159,8 +155,7 @@ enum WriterPromptBuilder {
         let preparedFull = try prepareCancellable(full)
         try Task.checkCancellation()
 
-        // 预算基数必须用这次真正会发出去的正文片段：默认只发末尾 5000 码点，
-        // 拿整本正文的估算去裁会把 50 万字的书裁到 55 万字，仍然超窗。
+        // 预算基数基于实际待发送正文片段计算，避免全量正文干扰裁剪口径。
         let body = effectiveBody(snapshot)
         let excess = preparedFull.estimatedInputTokens - snapshot.inputBudget
         let manuscriptBudget = max(
@@ -191,8 +186,7 @@ enum WriterPromptBuilder {
 
     /// 按原版 `bodyPrompt*` 决定这次发哪一段正文。
     ///
-    /// 原版实测 `bodyPromptSendWhole = false`、`bodyPromptTailCodePoints = 5000`：
-    /// **续写只把正文末尾 5000 码点发过去**，不是全文。
+    /// 默认采用局部截取策略，发送末尾预设码点数的正文片段。
     private static func effectiveBody(
         _ snapshot: WriterPromptSnapshot
     ) -> (text: String, range: PromptLibrary.BodyRange) {
@@ -272,10 +266,7 @@ enum WriterPromptBuilder {
 
 /// 把正文裁到 token 预算内，保留末尾。
 ///
-/// `TokenEstimator.trimTail` 的字符数是从预算出发向上收敛（`chars * 3 / 2`），
-/// 中文差不多 1 字 1 token，起点就等于预算，估算永远超一点，于是一路放大到原文，
-/// 等于没裁。这里改从「预算字符数的九成」起手、放不下再折半，能放下的尾部再交给
-/// `trimTail` 收口。
+/// 基于预算九成字符量初始化探测窗口并二分折半，最后由 `TokenEstimator.trimTail` 进行精确收口截断。
 enum WriterBudgeting {
     static func trimTail(_ text: String, toTokens budget: Int) throws -> String {
         guard budget > 0 else { return "" }
@@ -283,7 +274,7 @@ enum WriterBudgeting {
 
         var chars = min(text.count, max(64, budget * 9 / 10))
         while chars >= 64 {
-            // 每次折半都要重跑一次二分估算，长正文上这一步最贵，先看有没有被取消。
+            // 循环内校验任务取消状态。
             try Task.checkCancellation()
             let start = text.index(text.endIndex, offsetBy: -chars)
             let slice = String(text[start...])

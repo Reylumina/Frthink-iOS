@@ -118,7 +118,7 @@ struct CorpusQuery: Equatable {
             .filter { !$0.isEmpty }
     }
 
-    /// 一次准备好关键词再过滤整批，避免每条语料重复 split/lowercase。
+    /// 预先处理关键词后再统一执行批量过滤，避免对每条语料重复执行 split 与 lowercase 操作。
     func filtered(_ entries: [CorpusEntry]) -> [CorpusEntry] {
         let words = tokens.map { $0.lowercased() }
         return entries.filter { entry in

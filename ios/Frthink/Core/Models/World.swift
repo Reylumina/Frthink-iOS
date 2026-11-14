@@ -36,15 +36,15 @@ struct WorldBook: Codable {
     var characterSummaries: [String]
     /// 世界材料的正文分块哈希，原版 `world.materialChunkHashes`，用于判断材料是否变化。
     var materialChunkHashes: [String: String]
-    /// 世界材料的分段处理进度，原版 `world.materialSourceProgress`，刷新断点续跑用。
+    /// 世界材料分段处理进度，对齐原版 `world.materialSourceProgress`，用于断点续跑。
     var materialSourceProgress: [String: MaterialSourceProgress]
     var lastRefreshedAt: Date?
     /// 上次刷新覆盖到的正文长度，用于增量刷新。
     var refreshedUpTo: Int
-    /// 世界分析断点：正文哈希。与 `analysisSourceHash` 不一致时说明正文变过，
-    /// 分段进度要重置。原版 `characterAnalysisCheckpoint.sourceSha256`。
+    /// 世界分析断点：正文哈希。与 `analysisSourceHash` 不一致表明正文发生变更，
+    /// 分段处理进度需重置。对齐原版 `characterAnalysisCheckpoint.sourceSha256`。
     var analysisSourceHash: String
-    /// 正文一共切成多少段（原版 `totalSegments`，实测 141）。
+    /// 正文分段总数（对齐原版 `totalSegments`）。
     var analysisSegmentCount: Int
     /// 已完成的段序号（原版 `completedSegments[].index`）。
     var completedAnalysisSegments: [Int]
@@ -225,7 +225,7 @@ struct WorldBook: Codable {
         }
     }
 
-    /// 把一次摘要更新写回元数据。
+    /// 将单次摘要更新持久化至元数据。
     ///
     /// 规则来自原版 `C0402j0.a(...)`：旧内容进 `previousRevisions`（最多 10 条），
     /// 键只保留 `user:` 前缀，`sourceHash` 按排序去重后的键重算，`rulesVersion` 固定 1。
@@ -272,8 +272,8 @@ struct WorldBook: Codable {
 
     /// 恢复上一版摘要。
     ///
-    /// 原版 `E/e0` 的恢复动作：取 `previousRevisions` 最后一条，套回内容与源键，
-    /// 把这条历史弹出，`updatedAt` 记为当前时间；当前内容不回收，恢复是单向的。
+    /// 原版 `E/e0` 的回滚逻辑：获取 `previousRevisions` 末尾记录，还原内容与源键，
+    /// 弹出该历史条目并将 `updatedAt` 标记为当前时间；当前内容不作回收，恢复为单向操作。
     @discardableResult
     mutating func restorePreviousSummary(now: Int64) -> Bool {
         guard let revision = summaryPreviousRevisions.popLast() else { return false }
@@ -290,8 +290,8 @@ struct WorldBook: Codable {
     }
 }
 
-/// 世界材料的分段处理进度。原版 `world.materialSourceProgress` 的值，
-/// 刷新中断后靠它判断从哪一段接着跑。
+/// 世界材料的分段处理进度。对应原版 `world.materialSourceProgress`，
+/// 用于刷新中断后确定恢复处理的起始分段。
 struct MaterialSourceProgress: Codable, Hashable {
     var processedUtf16: Int
     var prefixHash: String
@@ -455,7 +455,7 @@ struct CharacterCard: Identifiable, Codable, Hashable {
     }
 }
 
-/// 人物分组：原版人物卡编组，组关掉时组内卡片不进入提示词。
+/// 人物分组：对齐原版人物卡编组，分组禁用时其内卡片不注入提示词。
 struct CharacterGroup: Identifiable, Codable, Hashable {
     var id: String
     var name: String

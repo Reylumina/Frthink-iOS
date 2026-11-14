@@ -54,7 +54,7 @@ final class AnthropicClient: LLMClient {
 
     // MARK: - 请求体组装
 
-    /// 把通用 `LLMRequest` 转成 Anthropic `/v1/messages` 请求体。
+    /// 将通用 `LLMRequest` 转换为 Anthropic `/v1/messages` 请求体。
     static func requestBody(
         for request: LLMRequest,
         providerLevel: ThinkingLevel
@@ -189,7 +189,7 @@ final class AnthropicClient: LLMClient {
             )
             let (bytes, response) = try await session.bytes(for: urlRequest)
             guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("拿不到 HTTP 状态码")
+                throw LLMError.decoding("未获取到 HTTP 状态码")
             }
             guard (200..<300).contains(http.statusCode) else {
                 let body = try await OpenAICompatibleClient.drain(bytes)
@@ -259,7 +259,7 @@ final class AnthropicClient: LLMClient {
 
         if emittedAnything, undecodableLines > 0, stopReason == nil, !sawStop {
             throw LLMError.streamError(
-                detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
+                detail: "流中有 \(undecodableLines) 行无法解析，且未收到结束标记；本次回复可能不完整。"
             )
         }
 
@@ -378,7 +378,7 @@ final class AnthropicClient: LLMClient {
         do {
             let (data, response) = try await session.data(for: urlRequest)
             guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("拿不到 HTTP 状态码")
+                throw LLMError.decoding("未获取到 HTTP 状态码")
             }
             guard (200..<300).contains(http.statusCode) else {
                 let body = String(data: data, encoding: .utf8) ?? ""
@@ -441,7 +441,7 @@ final class AnthropicClient: LLMClient {
     }
 }
 
-/// 轻量 JSON 值包装，用于把 Anthropic `tool_use.input` 还原为 JSON 字符串。
+/// 轻量 JSON 值包装，用于将 Anthropic `tool_use.input` 还原为 JSON 字符串。
 private enum AnyCodableValue: Decodable {
     case string(String)
     case number(Double)

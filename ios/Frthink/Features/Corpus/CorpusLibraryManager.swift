@@ -237,7 +237,7 @@ struct CorpusLibraryManagerSheet: View {
     }
 }
 
-/// 语料库名称输入页。新建和重命名共用，在管理器自己的导航栈里推进来。
+/// 语料库名称输入页：新建与重命名共用，在管理器自身导航栈中推入展示。
 struct CorpusLibraryNameEditor: View {
     let heading: String
     let initialName: String
@@ -283,7 +283,7 @@ struct CorpusLibraryNameEditor: View {
             }
         }
         .onDisappear {
-            // 这页只有「保存」没有「取消」：左滑返回时存下改名，别静默丢。
+            // 当前页面仅提供保存操作：左滑返回时保存重命名结果，防止修改丢失。
             guard !saved, !trimmedName.isEmpty, trimmedName != initialName else { return }
             onSave(trimmedName)
         }

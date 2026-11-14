@@ -30,7 +30,7 @@ struct RootView: View {
     @State private var libraryVisible = false
     @State private var translationVisible = false
 
-    /// 书已选中但会话还没解码完。此时不能先闪空态，否则每开一本书都像被清空。
+    /// 书稿已选中但会话尚未解码完成。此时不显示空状态，避免切换书稿时产生界面闪烁。
     private var openingBook: Bool {
         activeProject != nil && session == nil
     }
@@ -89,7 +89,7 @@ struct RootView: View {
         .tint(Theme.accent)
         .minimizeTabBarOnScroll()
         .onAppear {
-            // 截图流水线会带 -seedDemo：铺一份演示数据，否则截出来全是空状态。
+            // 截图流水线传入 -seedDemo 参数以填充演示数据，避免呈现空状态。
             if DemoSeed.isRequested {
                 DemoSeed.seedIfNeeded(store: store)
                 if activeProjectID == nil {
@@ -116,8 +116,8 @@ struct RootView: View {
         .task(id: activeProjectID) {
             guard let project = activeProject else {
                 session = nil
-                // 没有当前书时把这个键清掉：它同时被创作页用来判断「是否换了书」，
-                // 留着旧 id 会让旧 Pane 以为还在同一本，停不下来。
+                // 没有当前书稿时清除该键：创作页依赖此键判断书稿切换，
+                // 保留旧 id 会导致原面板误判为同一书稿而未能停止后台任务。
                 UserDefaults.standard.removeObject(forKey: Self.activeProjectKey)
                 await store.trimSessionCache(keeping: [])
                 // 上次打开的书被删除或放进回收站：落到最近一本，不留空白页。
@@ -139,7 +139,7 @@ struct RootView: View {
             await store.trimSessionCache(keeping: [project.id])
         }
         .onChange(of: activeProjectID) { oldValue, newValue in
-            // 切书：旧书在跑的世界任务必须停，否则它会继续对已被驱逐的会话落盘。
+            // 切换书稿：必须终止旧书稿正在执行的世界任务，防止其向已驱逐的会话写盘。
             if let oldValue, oldValue != newValue {
                 store.cancelWorldTask(for: oldValue)
             }
@@ -152,14 +152,14 @@ struct RootView: View {
         }
         .preferredColorScheme(store.settings.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
-            // 切后台、控制中心下拉、来电都会先变 inactive；这时先把挂起编辑写盘，
-            // 并向系统申请后台额度，避免写到一半被挂起。
+            // 应用进入非活跃状态（切换后台、下拉控制中心、来电等）时，先将挂起的编辑内容写盘，
+            // 并向系统申请后台执行时间，避免写盘过程中被挂起。
             if phase != .active {
                 Task { await store.flushDirtySessionsInBackground() }
             }
         }
-        // 「界面动画帧率」开关：关掉后这次事务里的所有动画都不播，
-        // 对应原版「界面动画帧率」那一项的实际效果。
+        // 「界面动画帧率」设置：关闭后该事务中的所有动画均不执行，
+        // 对齐原版「界面动画帧率」项的实际效果。
         .transaction { transaction in
             if store.settings.limitAnimationFrameRate {
                 transaction.disablesAnimations = true
@@ -173,7 +173,7 @@ struct RootView: View {
                     onOpen: { project in
                         activeProjectID = project.id
                         libraryVisible = false
-                        // 从书架点开一本书，自然落到「创作」。
+                        // 从书架打开书稿时，默认导航至「创作」页。
                         destination = .compose
                     },
                     onOpenSettings: {
@@ -238,7 +238,7 @@ struct RootView: View {
     private var composeScreen: some View {
         if let session, activeProject != nil {
             WriterPane(session: session)
-                // 切书时重置创作页状态，避免沿用上一本的可见窗口/输入态。
+                // 切换书稿时重置创作页状态，避免沿用上一书稿的可见窗口与输入状态。
                 .id(session.project.id)
         } else if openingBook {
             openingPlaceholder
@@ -254,7 +254,7 @@ struct RootView: View {
     private var readerScreen: some View {
         if let session, activeProject != nil {
             ReaderPane(session: session)
-                // 切书重置阅读页状态，避免沿用上一本的滚动位置与面板。
+                // 切换书稿时重置阅读页状态，避免沿用上一书稿的滚动位置与面板。
                 .id(session.project.id)
         } else if openingBook {
             openingPlaceholder
@@ -282,7 +282,7 @@ struct RootView: View {
     private var worldScreen: some View {
         if let session, activeProject != nil {
             WorldPane(session: session)
-                // 切书重置世界页状态：刷新任务、状态行、打开的编辑器都属于上一本。
+                // 切换书稿时重置世界页状态：刷新任务、状态行及打开的编辑器均属于上一书稿。
                 .id(session.project.id)
         } else if openingBook {
             openingPlaceholder
@@ -294,7 +294,7 @@ struct RootView: View {
         }
     }
 
-    /// 选中书稿后、会话解码完成前的占位：先显示加载，不先闪空态。
+    /// 选中书稿后、会话解码完成前的占位展示：显示加载状态，避免出现空状态闪烁。
     private var openingPlaceholder: some View {
         VStack(spacing: Theme.Spacing.s) {
             ProgressView()
@@ -313,8 +313,8 @@ struct RootView: View {
             Button {
                 libraryVisible = true
             } label: {
-                // 这里只放「去书架」这个动作。书名已经在 navigationTitle 上，
-                // 在同一个导航栏里再写一遍等于白占一行。
+                // 工具栏仅放置「返回书架」操作。书名已显示于 navigationTitle，
+                // 无需在导航栏重复展示。
                 Label("书架", systemImage: "books.vertical")
                     .font(Font.subheadline)
             }

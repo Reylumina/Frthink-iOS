@@ -7,8 +7,8 @@ import Foundation
 /// - 键格式 `user:<messageID>:<sha256(content)>`
 /// - `sourceHash` = 去重、排序后的键用 `\n` 拼接，再取 SHA-256
 ///
-/// U2 在把摘要注入提示词前会用同一规则校验 `sourceHash` 和 user 前缀，
-/// 所以导出和工作区更新都必须走这里，不能各写一套。
+/// 系统在将摘要注入提示词前按相同规则校验 `sourceHash` 与 user 前缀，
+/// 导出与工作区更新统一依赖此逻辑，避免实现分支不一致。
 enum SummaryKey {
     static func messageKey(id: String, content: String) -> String {
         "user:\(id):\(sha256Hex(content))"

@@ -1,9 +1,8 @@
 import Foundation
 
-/// 流式文本的滑动窗口：只保留末尾一段，但不要每来一个字就整体平移。
+/// 流式文本滑动窗口：维持末尾可见范围，避免逐字符平移引发全量重排。
 ///
-/// 窗口满了之后继续追加，直到超过 `maxCharacters + trimStep` 才一次性
-/// 丢掉开头一段。这样绝大多数更新仍是纯 append，`UITextView` 不用整段重排。
+/// 达到 `maxCharacters + trimStep` 阈值时批量裁剪头部文本，保持以追加模式更新 `UITextView`。
 struct StreamingTextWindow {
     let maxCharacters: Int
     let trimStep: Int

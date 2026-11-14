@@ -1,9 +1,9 @@
 # 03 · 领域模型与持久化结构
 
-> 目标读者：照着这份文档写 Swift 端 model 与存储层的人。
+> 目标读者：依据本文档实现 Swift 端模型层与持久化存储模块的工程师。
 > 所有结论都带证据（类名 / 文件 / 字符串原文）。R8 混淆后类名是 `I1.j2` 这种，文档里同时给出
 > **原始全限定名**（来自 kotlinx.serialization 的 `PluginGeneratedSerialDescriptor`）和**混淆类名**。
-> 字段名一律用代码里的真实拼写。拿不准的标「未验证」。
+> 字段命名严格依循代码实际拼写；尚未确证的项均标记为「未验证」。
 
 > v0.8.213 复核：关键结构与差异汇总见 [`../APK-NOTES.md`](../APK-NOTES.md)；本文保留数据字段规格。
 
@@ -24,9 +24,9 @@
 | 时间戳 | 一律 `Long` epoch millis（`System.currentTimeMillis()`），**不是** ISO 字符串 |
 | 排序/版本 | `revision: Long` 单调递增；`schemaVersion` 当前 **20** |
 
-**给 Swift 端最重要的一句**：`projects` / `project_snapshots` / `project_manuscripts` /
-`project_source_documents` / `source_blobs` / `translation_segments` 的 `payload` 列**不是 JSON**，
-是 `"sealed-editor-v1:" + Base64(AES-GCM(...))`。想直接解析 JSON 必须先解密，见 §4。
+**Swift 端开发关键提示**：`projects` / `project_snapshots` / `project_manuscripts` /
+`project_source_documents` / `source_blobs` / `translation_segments` 中的 `payload` 列**并非明文 JSON**，
+而是结构为 `"sealed-editor-v1:" + Base64(AES-GCM(...))` 的加密数据。如需获取 JSON 结构必须先完成解密，参见 §4。
 `projects` 表的其它列（`title`/`synopsis`/`updatedAt`/`revision`/`branchRootId`/`branchOrder`/`trashedAt`）
 是明文。
 
@@ -388,7 +388,7 @@ contentHash = Base64(SHA-256(projectId ‖ 0x00 ‖ authoritativeBody))
 `译文原文关联校验失败` / `译文编辑关联校验失败`。
 读出后还要比对 `target/sourceHash/index` 与行值，不符抛 `译文身份校验失败`（`I1\M3.java:75-77`）。
 
-### 5.5 存档 / 备份三件套
+### 5.5 存档与备份核心载荷
 
 #### `FrthinkArchiveEnvelope`（`I1\O`，serializer `I1\M`）—— `.frthink` 文件的最外层
 
@@ -501,7 +501,7 @@ contentHash = Base64(SHA-256(projectId ‖ 0x00 ‖ authoritativeBody))
 
 | 类 | 混淆类 | 字段 |
 |---|---|---|
-| `model.ChatMessage` | `J1\U` | `id: String`=UUID / `kind: ChatMessageKind`（required）/ `title: String?`=null / `content: String`（required）/ `isAccepted: Boolean`= (`kind == DRAFT`) / `tokenUsage: TokenUsage?`=null / `segments: List<AgentTurnUi>`=[]（字段名叫 segments，元素类型确实是 `AgentTurnUi`，按代码原样照抄）/ `versions: List<ChatMessageVersion>`=[] / `activeVersionId: String`=`""` |
+| `model.ChatMessage` | `J1\U` | `id: String`=UUID / `kind: ChatMessageKind`（required）/ `title: String?`=null / `content: String`（required）/ `isAccepted: Boolean`= (`kind == DRAFT`) / `tokenUsage: TokenUsage?`=null / `segments: List<AgentTurnUi>`=[]（字段名为 segments，元素类型为 `AgentTurnUi`，依代码原样对齐）/ `versions: List<ChatMessageVersion>`=[] / `activeVersionId: String`=`""` |
 | `model.ChatMessageVersion` | `J1\X` | `id: String`、`content: String`、`source: String`、`requestId: String`、`status: String`、`tokenUsage: TokenUsage?`、`createdAt: Long` |
 | `model.TokenUsage` | `J1\r1` | `promptTokens: Long`、`completionTokens: Long`、`totalTokens: Long`、`estimated: Boolean`、`promptCacheHitTokens: Long?`、`promptCacheMissTokens: Long?`、`cacheMetricsRequests: Long` |
 | `model.TokenUsageRecord` | `J1\w1` | `requestId: String`、`occurredAtMillis: Long`、`attemptCount: Int`、`credentialId: String`、`credentialName: String`、`provider: String`、`modelId: String`、`promptTokens/completionTokens: Long`、`promptCacheHitTokens/promptCacheMissTokens: Long?`、`estimated: Boolean` |
@@ -1067,7 +1067,7 @@ CorpusLibrary（递归树，落 universe-corpus-v1.enc）
 ```json
 ["default","proj-1","body","ab12cd34…64hex","0"]
 ```
-> 紧凑 JSON（`Json.encodeToString(List<String>)` 默认无空格）。移植时若 AAD 不一致，老数据全部解不开。
+> 紧凑 JSON 格式（`Json.encodeToString(List<String>)` 默认无空格）。移植时若 AAD 不一致，历史加密数据将无法成功解密。
 
 ---
 
@@ -1090,17 +1090,17 @@ CorpusLibrary（递归树，落 universe-corpus-v1.enc）
 
 ---
 
-## 14. 给 Swift 端的落地建议（基于以上事实）
+## 14. Swift 端实现建议（基于既有事实）
 
-1. **模型层**：直接照 §5/§6 建 `struct`，字段名保持原拼写，全部 `var` + 默认值。
-   `Codable` 用 `init(from:)` 做「缺字段回落默认值」，因为老数据可能没有 `encodeDefaults` 之后新增的键。
+1. **模型层**：严格依据 §5 与 §6 构建 `struct`，字段名保持原始拼写，均采用 `var` 并赋予默认值。
+   `Codable` 实现 `init(from:)` 以支持「缺失字段回退默认值」，兼容未包含 `encodeDefaults` 新增键的历史数据。
 2. **存储层**：
-   - 新写的数据建议**明文 JSON** 或使用 CryptoKit AES-GCM，**不要**试图复刻 `sealed-editor-v1` 的
-     AndroidKeyStore 密钥（无法导出）。
-   - 若要读旧数据：只能走「在 Android 端导出 `.frthink`」→ iOS 导入的迁移路径，
-     因为 `.frthink` 的 `payload` 是**明文 JSON**（只有字段内容本身不含密钥材料）。
-3. **表结构**：`projects` 的 9 列 + 3 个 DEFAULT 要照抄（尤其 `branchRootId DEFAULT ''`、
-   `branchOrder DEFAULT 0`、`trashedAt DEFAULT 0`），否则旧库迁移会对不上。
-4. **时间戳**：全部 `Long` epoch millis，别用 `Date` 直存。
+   - 新写入数据推荐采用**明文 JSON** 或基于 CryptoKit 的 AES-GCM 加密，**切勿**尝试复刻 `sealed-editor-v1` 绑定的
+     AndroidKeyStore 密钥（硬件密钥无法导出）。
+   - 如需读取历史数据：建议通过「Android 端导出 `.frthink`」再由 iOS 端导入的迁移链路，
+     因 `.frthink` 归档中的 `payload` 均为**明文 JSON**（仅包含业务数据，不含加密密钥材料）。
+3. **表结构**：`projects` 表的 9 个列定义及 3 个 DEFAULT 约束需严格对齐（尤其 `branchRootId DEFAULT ''`、
+   `branchOrder DEFAULT 0`、`trashedAt DEFAULT 0`），以确保数据库迁移与结构兼容。
+4. **时间戳**：一律采用 `Long` 类型的毫秒级时间戳（epoch millis），避免直接存储为 `Date` 类型。
 5. **集合语义**：`Set<String>` 在 JSON 里是数组（`encodeDefaults` 下空集合也会输出 `[]`）。
 6. **枚举**：JSON 里是**枚举的显示名/中文名**（见 §6.5 表），不是大写常量名。

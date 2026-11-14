@@ -1,6 +1,6 @@
 # 规格 B：LLM 协议与网络层
 
-> 目标读者：要照着这份文档在 Swift 端重写 LLM 客户端的工程师。
+> 目标读者：依据本文档在 Swift 端实现 LLM 客户端模块的工程师。
 > 所有结论后跟证据。`out/jadx/sources/` 下的路径省略前缀；`out/apktool/smali/` 下的路径带 `smali:` 前缀。
 > jadx 有 185 个类反编译失败，其中 **`L1/T`（主聊天流式协程，3474 条指令）** 只能用 smali 读，本文已补。
 > 标注「未验证」的是从代码推得出、但缺少直接执行证据的部分。
@@ -112,8 +112,8 @@ public static final boolean i(String baseUrl) {
 ```
 
 即 `URI(baseUrl.trim()).host` 与 `"api.deepseek.com"` **忽略大小写相等**。主机名不匹配（含 `getHost()` 返回 null 的
-无 scheme 地址）一律当非 DeepSeek。注意：这是**字符串比较主机名**，所以自建反代到 `api.deepseek.com` 的域名
-不会被识别成 DeepSeek。Swift 端照抄这一条。
+无 scheme 地址）一律判定为非 DeepSeek。注意：此处采用**严格的主机名字符串比对**，若使用自建反向代理转发至 `api.deepseek.com`，该域名
+不会被判定为 DeepSeek。Swift 端需保持相同的判定逻辑。
 
 **关于 OpenRouter 的 `HTTP-Referer` / `X-Title`：不发。** 证据：`out/dex-stringtable.txt` 全表 18580 条里
 不存在 `HTTP-Referer`、`X-Title`、`X-Api-Key`（只有 OkHttp 内部的 `User-Agent` / `referer` 小写条目，
@@ -132,7 +132,7 @@ else                                          名称 = "OpenAI 兼容";
 ```
 
 它**只影响文案**，不影响协议分支（`thinking` / `stream_options` 只认 §2.4 的 `X.i`）。
-Swift 端做设置页展示时照抄这段，做请求时用 §2.4。
+Swift 端实现设置页面文案展示时需与此逻辑保持一致，网络请求分支则依据 §2.4 执行。
 
 ---
 
@@ -239,7 +239,7 @@ put("messages", JsonArray([ JsonObject{ "role": r, "content": c } for each ]));
 - `temperature` 的省略条件：`L1/U.java:104-106`（`if (!zA)`，`zA = (bool2 == Boolean.TRUE)`）
 - `thinking` 的出现条件：`L1/U.java:111-115`（`if (zI && bool2 != null)`）
 
-**可以直接照抄的 JSON（stream = true，DeepSeek，thinking 关）**
+**标准请求 JSON 示例（stream = true，DeepSeek，thinking 关闭）**
 
 ```json
 {
@@ -312,7 +312,7 @@ put("messages", JsonArray([ JsonObject{ "role": r, "content": c } for each ]));
 同一套字段，额外加 `tools` / `tool_choice` / `parallel_tool_calls`，`max_tokens` 固定 8192。
 **首次请求不带 `thinking` 字段**（`p6 = false`）；仅当返回 `400` 且报错同时含 `thinking mode` 与 `tool[_\s-]?choice` 时，才在重试请求中无条件附带 `"thinking": {"type": "disabled"}`（不检查 `isDeepSeek`）。
 
-**可以直接照抄的 JSON（含 400 重试时的 `thinking` 字段）**
+**标准请求 JSON 示例（含 400 重试时的 `thinking` 字段）**
 
 ```json
 {
@@ -515,8 +515,7 @@ root.response.incomplete_details.reason
 | `type == "response.incomplete"` 且 reason 为空 | `"length"` |
 | 其它 | reason 原值（空则 null） |
 
-> jadx 把这段的局部变量合并得比较乱（`L1/X.java:322-344` 有重复赋值），但映射表本身在
-> `L1/X.java:323-338` 是清楚的。**这张映射表可照抄。**
+> 尽管反编译时局部变量存在合并混淆（`L1/X.java:322-344` 出现重复赋值），但 `L1/X.java:323-338` 中的映射关系逻辑明确，Swift 端应保持该映射表一致。
 
 `b3/d.java:647-655` 另有一层白名单归一：`{stop, end_turn, completed, length, content_filter, tool_calls, cancelled, other}`
 里命中才保留，否则 null。
@@ -714,7 +713,7 @@ UI 文案（`M1/C0773s3.java:116-118`）：
   - 其它 → `"先测试连接以读取模型。"`
 - 列表非空时标题为 `"全部模型"`，否则 `"模型"`
 
-> Swift 端：这两个字符串是「列表为空」和「没有凭证」两种状态，别混。
+> Swift 端实现提示时需注意区分：「列表为空」与「没有凭证」属于两种独立状态，文案不应混同。
 
 ---
 
@@ -758,7 +757,7 @@ Pattern.compile("(?:服务返回\\s*|HTTP[ _])([1-5][0-9]{2})", CASE_INSENSITIVE
 ```
 
 匹配不到时，若串里含 `HTTP_5XX`（忽略大小写）→ 500，否则 null。
-**所以 §7.1 的格式不能改**，Swift 端要照抄这个正则才能保持分类一致。
+因此 §7.1 中的格式定义必须严格遵守，Swift 端应直接复用该正则表达式以保证分类行为一致。
 
 ### 7.3 状态码 → 错误码 → 中文（`b3/d.java:562-618`）
 
@@ -846,7 +845,7 @@ effectiveInputBudget = min(inputBudget, avail ?: inputBudget)
 tokens(text) = ceil(sum(weights) * 1.2) + 6
 ```
 
-`+6` 是每条消息的固定开销，`*1.2` 是安全系数。**这条公式可以直接照抄，Swift 端结果会完全一致。**
+`+6` 是每条消息的固定开销，`*1.2` 是安全系数。Swift 端直接实现该计算公式即可保证与原版 token 估算完全一致。
 
 ### 8.3 装配顺序（`L1/e3.java:56-251`）
 
@@ -996,13 +995,13 @@ unrecognizedChunks, finish
 - `taskKind`：见 §9.4
 - `failure`：见 §7.3 的错误码
 
-`compatibilityRetry` 就是 §9.1/§9.2/§9.3 的兼容重试标记。Swift 端如果做诊断导出，字段名照抄即可。
+`compatibilityRetry` 即 §9.1/§9.2/§9.3 中定义的兼容重试标记。Swift 端实现诊断导出时直接沿用该字段名即可。
 
 ---
 
 ## 11. Swift 端实现清单
 
-必须逐字照抄的常量/格式：
+必须严格保持一致的常量与格式：
 
 1. `Authorization: Bearer {key}`、`Content-Type: application/json; charset=utf-8`
 2. `Accept`：流式 `text/event-stream`，非流式 `application/json`
@@ -1018,7 +1017,7 @@ unrecognizedChunks, finish
 可以简化的：
 
 - `Accept` 两处写法不同 → 统一成 `text/event-stream`
-- `reasoning_content` 等 6 个别名 → 只留 `reasoning_content` 也能跑，但会少统计
+- `reasoning_content` 等 6 个别名 → 若仅保留 `reasoning_content` 仍可运行，但会遗漏部分第三方格式的统计数据
 - `candidates[0].content`（Gemini 形状）与 `response.output`（Responses API 形状）→ 不用 OpenAI 兼容端点就可以删
 
 **不要实现**：`top_p` / `stop` / `response_format` / 重试退避 / 代理 / OpenRouter 额外头。
@@ -1027,7 +1026,7 @@ unrecognizedChunks, finish
 
 ## 12. 未验证清单
 
-以下是我**没能从静态代码确证**的点，实现时按注释处理：
+以下为未能从静态代码确证的事项，实现时可参考注释说明处理：
 
 1. `parameters` JSON Schema 的**嵌套层级**（§4.2）。键名、字符串原文、`required` 列表内容已验证；
    但 `properties` 下每个字段是 `{"type":"string"}` 还是别的包装，是从 jadx 骨架重建的，

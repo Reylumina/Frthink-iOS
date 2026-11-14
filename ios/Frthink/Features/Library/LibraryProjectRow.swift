@@ -1,11 +1,11 @@
 // 书架上的书稿行：书脊 + 书名 + 一行元数据，右侧只有一套「⋯」菜单。
 //
-// 简介不进书架：一行简介会把行撑成三行，把「最近编辑时间」挤出视线。
-// 简介在 ⋯ →「改简介」里编辑，列表只做索引。
+// 简介不展示在书架列表行中，避免高度增加并遮挡编辑时间等关键元数据。
+// 简介在 ⋯ →「改简介」中编辑，列表仅作为索引导航。
 
 import SwiftUI
 
-/// 顶部「继续写作」：当前书稿的快速回访入口；下面的「全部书稿」仍保留它。
+/// 顶部「继续写作」：当前书稿的快速访问入口；下方「全部书稿」仍保留该项。
 struct LibraryContinueRow: View {
     let project: Project
     let onOpen: () -> Void
@@ -81,7 +81,7 @@ struct LibraryProjectRow: View {
                     metadata
                 }
 
-                // 给行尾的 ⋯ 菜单留出完整热区，文字不能伸到按钮下面。
+                // 为行尾操作菜单预留完整交互热区，文本避免与按钮重叠。
                 Spacer(minLength: Theme.Layout.hitTarget)
             }
             .frame(minHeight: Theme.Layout.hitTarget)
@@ -105,7 +105,7 @@ struct LibraryProjectRow: View {
         }
     }
 
-    /// 时间、字数、分支数合成一行：三项都是会冒出来的数字，统一用元信息的字号。
+    /// 时间、字数与分支数合并展示，统一使用辅助元数据字号。
     private var metadata: some View {
         HStack(spacing: Theme.Spacing.s) {
             Text(LibraryFormat.updatedText(project.updatedAt))
@@ -122,7 +122,7 @@ struct LibraryProjectRow: View {
         .truncationMode(.tail)
     }
 
-    /// 行尾 ⋯：书架只有这一套菜单入口，不再另挂长按菜单。
+    /// 行尾操作菜单：书架列表的统一操作入口，不额外挂载长按上下文菜单。
     private var menu: some View {
         Menu {
             Button { onOpen() } label: {

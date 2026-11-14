@@ -3,8 +3,8 @@
 // 读文件、解压、解码与写盘均放在 Task.detached 中执行，避免大备份阻塞主线程；
 // 主线程只更新进度和结果。
 //
-// 流程页由「存档与备份」页推进导航栈，不用 fullScreenCover：文件面板收起和
-// 自定义弹层同时发生转场时，系统会静默丢掉后者，表现就是选完文件什么都没发生。
+// 流程页由「存档与备份」页推进导航栈，不用 fullScreenCover：文件选取器收起与
+// 自定义弹窗转场并发时，后者可能被系统丢弃导致无响应。
 
 import Foundation
 import Observation
@@ -21,11 +21,11 @@ struct ArchiveImportRequest: Identifiable, Hashable {
     let url: URL
 }
 
-/// 导入进度。文案直接上屏，不用再翻译。
+/// 导入进度：提供可直接展示的进度文本。
 enum ArchiveImportStage: Equatable {
-    /// `size` 为 0 表示还没读到文件大小。
+    /// `size` 为 0 表示尚未获取到文件大小。
     case reading(size: Int)
-    /// 文件在 iCloud 里还没下载到本机；直接读会长时间无响应。
+    /// 文件在 iCloud 中尚未下载至本地；直接读取可能导致主线程长时间阻塞。
     case downloading
     case decoding
     case restoring(index: Int, total: Int, title: String)
@@ -86,16 +86,16 @@ final class ArchiveImportController {
     private(set) var pendingProjectImport: PendingProjectImport?
     private(set) var pendingFullRestore: FrthinkArchive.FullBackupPayload?
 
-    /// 导入前书架里已有项目的 id，用来判断这次是新增还是覆盖。
+    /// 导入前书架中已有项目 ID 集合，用于判断本次操作属于新增还是覆盖。
     private var existingIDs: Set<String> = []
-    /// 当前这一段读盘/写盘任务；用户退出导入页时取消，避免后台继续写。
+    /// 当前磁盘读写任务；用户退出导入页面时取消，防止后台继续写入。
     private var runTask: Task<Void, Never>?
 
     init(store: AppStore) {
         self.store = store
     }
 
-    /// 展示导入流程页。确认弹窗与结果都在这一页里，避免「一个弹层接一个弹层」。
+    /// 统一承载导入流程中的确认弹窗与结果展示，避免层叠弹出多个模态层。
     var isFlowPresented: Bool {
         stage != nil
             || outcome != nil
@@ -118,7 +118,7 @@ final class ArchiveImportController {
         }
     }
 
-    /// 「书项目存档」入口。给全量备份也照书项目导入：只写书，不动本机设置。
+    /// 单书项目导入入口：导入全量备份时亦仅还原书籍项目，保留本地设置。
     func beginProjectImport(from url: URL) {
         start { controller in
             let archive = try await controller.load(url: url)
@@ -138,7 +138,7 @@ final class ArchiveImportController {
         }
     }
 
-    /// 「全量存档」入口。解码后先问一次，再写盘并合并设置。
+    /// 全量存档导入入口：解析后提示二次确认，确认后写入磁盘并合并设置项。
     func beginFullImport(from url: URL) {
         start { controller in
             let archive = try await controller.load(url: url)
@@ -147,7 +147,7 @@ final class ArchiveImportController {
                 controller.stage = nil
                 controller.pendingFullRestore = backup
             case .projects(let payload):
-                // 只有书项目、没有设置：按项目导入处理，别清空本机设置。
+                // 仅包含书项目而无设置项时：按单项目导入逻辑处理，保留本地既有设置。
                 let overrides = payload.projects
                     .filter { controller.existingIDs.contains($0.projectId) }
                     .map { $0.title.isEmpty ? Project.untitledTitle : $0.title }
@@ -164,14 +164,14 @@ final class ArchiveImportController {
         }
     }
 
-    /// 用户退出导入页：停掉读盘/写盘。已完整写入的书项目保留，不会写半个。
+    /// 用户退出导入页：终止当前读写任务，已完整落盘的项目予以保留，确保原子性。
     func cancel() {
         runTask?.cancel()
         runTask = nil
         reset()
     }
 
-    /// 统一的任务外壳：主线程置进度、后台读盘，出错落到错误页。
+    /// 统一的异步任务封装：主线程更新进度、后台读取磁盘，发生异常时跳转至错误页。
     private func start(
         _ work: @escaping @MainActor (ArchiveImportController) async throws -> Void
     ) {
@@ -262,8 +262,8 @@ final class ArchiveImportController {
 
     /// 读文件 + 解码。两段之间切一次进度文案。
     ///
-    /// 文件可能在 iCloud 里还没下载，直接 `Data(contentsOf:)` 会卡几分钟且没有任何
-    /// 反馈；这里先确保本地可用，再用 `NSFileCoordinator` 读，避免和 iCloud 同步打架。
+    /// 针对 iCloud 未下载文件，先确保本地可用再通过 `NSFileCoordinator` 读取，
+    /// 防止直接读取导致界面挂起或与同步进程冲突。
     private func load(url: URL) async throws -> FrthinkArchive.AnyArchive {
         stage = .reading(size: 0)
         let accessed = url.startAccessingSecurityScopedResource()
@@ -310,20 +310,19 @@ final class ArchiveImportController {
         )
     }
 
-    /// 逐本写盘。每本之间在主线程刷一次进度。
+    /// 逐本写入磁盘，每本完成后在主线程刷新进度。
     ///
-    /// 每本书先写进 UUID 暂存目录，全部写成功后才整体换进正式目录：
-    /// - 写盘失败或取消不会把旧稿换成半个新项目；
-    /// - 覆盖同名项目前先让旧会话停手（等当前写盘结束、暂停防抖保存），
-    ///   写成功后立刻把内存会话换成新内容，旧会话不会再把旧稿写回去；
-    /// - 取消时已经完整写进去的书保留，书架立即刷新。
+    /// 采用暂存目录原子写入机制：
+    /// - 写入失败或取消时不会损坏原有项目；
+    /// - 覆盖同名项目前暂停旧会话保存逻辑，写入成功后同步刷新内存会话；
+    /// - 取消操作时已完整落盘的项目予以保留并刷新书架。
     private func restore(_ backups: [FrthinkArchive.ProjectBackup]) async throws {
         guard !backups.isEmpty else {
             throw FrthinkArchiveError.emptyProjectArchive
         }
         let files = store.fileStore
         let ownerID = store.settings.ownerID
-        // 成功、失败、取消都要刷新书架：已完整写入的书不能等下次启动才出现。
+        // 流程结束（成功/失败/取消）均触发书架刷新，确保已写入数据即时可见。
         defer { store.reload() }
         for (index, backup) in backups.enumerated() {
             try Task.checkCancellation()
@@ -346,14 +345,12 @@ final class ArchiveImportController {
             }
 
             if let project = restoredProject {
-                // 磁盘已经是新稿：内存会话必须跟着换，否则它还显示旧稿，
-                // 下一次编辑会把旧内容盖回导入结果。
+                // 磁盘已写入新数据：需同步更新内存会话，防止后续编辑将旧数据回写。
                 existingSession?.replaceLoadedState(project: project, fileStore: files)
             } else {
                 existingSession?.resumeSaving()
             }
-            // 取消发生在写盘中途时，这本书要么完整换上了（上一段已处理），
-            // 要么根本没动；两种状态都不会留下半个项目。
+            // 写入中途取消时，确保当前项目状态处于已完全替换或未改动状态，避免产生不完整数据。
             try Task.checkCancellation()
         }
         stage = .mergingSettings
@@ -400,9 +397,8 @@ final class ArchiveImportController {
 
 /// 读文件面板给的安全作用域 URL。
 ///
-/// 走 `NSFileCoordinator`：文件提供方（iCloud、第三方网盘）靠它把「正在下载/正在
-/// 写入」的状态协调给读取方，直接 `Data(contentsOf:)` 在这些文件上可能永久等待。
-/// 不支持协调的提供方退回直接读取。
+/// 使用 `NSFileCoordinator` 协调文件读取，避免直接读取云盘或外部提供方文件时发生死锁或无响应；
+/// 不支持协调的提供方降级为直接读取。
 private enum ArchiveFileReader {
     private static let maxArchiveBytes = 200 * SecurityScopedFileReader.bytesPerMiB
 

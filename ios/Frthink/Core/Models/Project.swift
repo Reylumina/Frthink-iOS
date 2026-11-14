@@ -96,7 +96,7 @@ struct RequestSnapshot: Identifiable, Codable, Hashable {
     var inputBudgetTokens: Int
     var modelContextWindowTokens: Int
     var outputReserveTokens: Int
-    /// 为了让预算塞得下而丢掉的历史消息条数。
+    /// 为满足上下文预算限制而裁剪的历史消息条数。
     var omittedHistoryMessages: Int
 
     init(
@@ -170,8 +170,8 @@ struct ProjectPayload: Codable {
     var enabledUniverseEntryIDs: [String]
     /// 输入框里没发出去的草稿。原版 `composerDraft`。
     var composerDraft: String
-    /// 已删除消息的墓碑 id。原版 `deletedChatMessageIds`：用来防止
-    /// 重新导入或同步时把删掉的消息复活。
+    /// 已删除消息的墓碑 id。对齐原版 `deletedChatMessageIds`：用于防止
+    /// 重新导入或同步时已删除的消息被恢复。
     var deletedChatMessageIDs: [String]
     /// 历史请求快照。原版 `requestSnapshots`：每次生成都把**当时发出去的
     /// 完整 messages 和 token 预算**存一份，用于「提示词回看」。
@@ -180,7 +180,7 @@ struct ProjectPayload: Codable {
     var bodyAppendReceipts: [BodyAppendReceipt]
     /// 上一次撤销掉的凭据（原版 `lastBodyAppendUndo`）。
     var lastBodyAppendUndo: BodyAppendReceipt?
-    /// 正在流式生成的消息 id。进程被杀后，下次启动据此把消息标成中断。
+    /// 正在流式生成的消息 id。应用进程异常终止后，下次启动据此将消息标记为中断状态。
     /// iOS 本地状态，不参与原版存档导出。
     var generatingMessageID: String?
     /// 已经中断的消息 id 列表。同样是 iOS 本地状态。
@@ -263,7 +263,7 @@ struct ProjectPayload: Codable {
             try? c.decodeIfPresent([String].self, forKey: .interruptedMessageIDs)
     }
 
-    /// 上次进程在生成中被杀：把 `generatingMessageID` 转成中断标记。
+    /// 上次进程在生成过程中异常终止：将 `generatingMessageID` 转换为中断标记。
     /// 返回被标记的消息 id；没有未完成的生成时返回 nil。
     @discardableResult
     mutating func recoverInterruptedGeneration() -> String? {

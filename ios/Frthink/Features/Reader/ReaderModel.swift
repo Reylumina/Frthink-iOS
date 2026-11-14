@@ -1,8 +1,8 @@
-// 本文件负责：阅读页的纯数据层 —— 原文/译文取文、按段切块、偏移定位与全文搜索。
+// 阅读页数据层：处理原文/译文获取、分段切块、偏移定位与全文搜索。
 
 import Foundation
 
-/// 阅读页显示的正文来源。原文是书稿本身，译文是把分段按顺序拼起来的那一篇。
+/// 阅读页显示的正文来源：包含书稿原文与按序拼接的译文。
 enum ReaderMode: String, CaseIterable, Identifiable {
     case source
     case translation
@@ -18,7 +18,7 @@ enum ReaderMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 搜索框占位符，跟着当前模式走（原版文案「搜索正文」/「搜索译文」）。
+    /// 搜索框占位符，跟随当前阅读模式动态变化。
     var searchPlaceholder: String {
         switch self {
         case .source:
@@ -32,8 +32,7 @@ enum ReaderMode: String, CaseIterable, Identifiable {
 enum ReaderText {
     /// 译文 = `translations` 按 `segment` 升序拼接。
     ///
-    /// 同一段号可能留有多条记录（重译、换目标语言、换设备），取 `updatedAt` 最新的
-    /// 那条，段与段之间空一行 —— 拼出来要像一篇散文，而不是一堆碎块。
+    /// 同一段号可能存在多条历史记录，选取 `updatedAt` 最新的记录并保留段落间距拼接。
     static func translation(_ segments: [TranslationSegment]) -> String {
         var newest: [Int: TranslationSegment] = [:]
         for segment in segments where !segment.payload.isEmpty {
@@ -49,10 +48,10 @@ enum ReaderText {
     }
 }
 
-/// 正文里的一块。主切法是空行，超长段落再按句末切。
+/// 正文分块：优先按空行分割，超长段落按句末标点细分。
 ///
-/// `start` 同时是块在全文里的 UTF-16 偏移和它作为滚动锚点的稳定 id ——
-/// 章节、命中、书签都换算成「哪一块的 start」，滚过去就完事了。
+/// `start` 为块在全文中的 UTF-16 偏移，兼作稳定滚动锚点；
+/// 章节、搜索命中与书签均映射至对应块起点进行定位。
 struct ReaderBlock: Identifiable, Equatable {
     let start: Int
     let length: Int
@@ -61,14 +60,14 @@ struct ReaderBlock: Identifiable, Equatable {
     var range: NSRange { NSRange(location: start, length: length) }
 }
 
-/// 一篇切好块的正文。块索引来自保存时的 `body.meta`，阅读时不拼全文。
+/// 已分块正文数据：分块索引读取自 `body.meta`，阅读模式无需拼接全文。
 ///
-/// `fullText` 只在导出等必须全文的路径调用；搜索逐页扫描，普通滚动按块取页。
+/// `fullText` 仅在导出等需全量文本场景调用；搜索采用分页扫描，滚动时按块读取对应页。
 struct ReaderDocument {
     let blocks: [ReaderBlock]
-    /// 全文 UTF-16 长度。边界夹取用它。
+    /// 全文 UTF-16 长度，用于边界约束。
     let length: Int
-    /// 全文可见字符数，只用于页脚「多少字」。
+    /// 全文可见字符数，用于页脚字数统计。
     let characterCount: Int
     private let plainText: String
     private let pageSource: ReaderPageSource?
@@ -98,7 +97,7 @@ struct ReaderDocument {
         self.pageSource = pageSource
     }
 
-    /// 整本正文。只在导出这类必须全文的路径调用；搜索不要用它。
+    /// 全量正文文本。仅供导出等必要场景调用，搜索应避免使用。
     var text: String {
         pageSource?.fullText ?? plainText
     }
@@ -111,7 +110,7 @@ struct ReaderDocument {
         return (plainText as NSString).substring(with: block.range)
     }
 
-    /// 搜全文。分页文档逐页扫描，只保留相邻两页，避免先拼出整本书。
+    /// 全文检索：分页文档逐页扫描并维持窗口缓存，避免全量载入内存。
     func searchMatches(query: String) async -> [ReaderMatch] {
         if let pageSource {
             return await pageSource.searchMatches(query: query)
@@ -155,7 +154,7 @@ final class ReaderPageSource {
         (0..<pageCount).map(page).joined()
     }
 
-    /// 逐页扫描；跨页命中用上一页尾部 256 字的滚动窗口兜住。
+    /// 逐页扫描，跨页匹配通过保留前一页末尾 256 字符窗口衔接。
     func searchMatches(query: String) async -> [ReaderMatch] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty, pageCount > 0 else { return [] }
@@ -170,7 +169,7 @@ final class ReaderPageSource {
             let pageBase = base - prefixLength
             for match in ReaderSearch.matches(in: combined, query: needle) {
                 let global = match.offset + pageBase
-                // 完全落在上一页尾部的内容已经报过，只收触及本页的命中。
+                // 排除完全落在前一页末尾的重复匹配项，仅收集覆盖当前页的结果。
                 guard global + match.length > base else { continue }
                 results.append(ReaderMatch(
                     offset: global,
@@ -248,7 +247,7 @@ struct ReaderMatch: Identifiable, Equatable {
 }
 
 enum ReaderSearch {
-    /// 一次最多收这么多命中。列表再长也没人翻，还拖慢搜索。
+    /// 单次检索的最大匹配数限制，防止大结果集影响检索性能。
     static let limit = 400
 
     static func matches(in text: String, query: String) -> [ReaderMatch] {
@@ -279,7 +278,7 @@ enum ReaderSearch {
         return results
     }
 
-    /// 把命中按所在块分组，段落渲染时只查自己那一段的区间，不用全文扫。
+    /// 将匹配项按块分组，段落渲染时仅检索当前段落区间。
     static func grouped(_ matches: [ReaderMatch], by blocks: [ReaderBlock]) -> [Int: [NSRange]] {
         var result: [Int: [NSRange]] = [:]
         guard !blocks.isEmpty else { return result }
@@ -297,7 +296,7 @@ enum ReaderSearch {
         return result
     }
 
-    /// 命中片段：前后各带一点上下文，换行压成空格，列表里一行放得下。
+    /// 匹配片段：提取前后上下文并将换行符转换为空格，适配列表单行展示。
     private static func snippet(in ns: NSString, around range: NSRange) -> String {
         let before = 12
         let after = 18

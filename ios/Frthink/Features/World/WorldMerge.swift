@@ -26,11 +26,10 @@ enum WorldMerge {
 
     // MARK: - 人物
 
-    /// 同名或同别称的人物更新已有卡；匹配到多张时用第一张并在状态里提一句，
-    /// 不抛错——手动建重卡不应该让整轮刷新失败。
-    /// 按姓名/别称交集对候选卡做连通分量合并（对应 APK `L1.r.b` / `q0`）。
+    /// 匹配同名或相同别称的人物卡并更新既有卡片；若匹配到多张则选取首张记录并记录提示日志。
+    /// 基于姓名与别称交集构建连通图执行候选卡片合并。
     ///
-    /// 例如 A(林昭), B(小昭), C(林昭/别称小昭) 三张卡会合并为一张，避免后续去重出现孤立碎片。
+    /// 例如 A(林昭)、B(小昭)、C(林昭/别称小昭) 存在重叠关系时合并为单一卡片，防止碎片化。
     static func consolidateConnected(_ cards: [CharacterCard]) -> [CharacterCard] {
         guard cards.count >= 2 else { return cards }
         var parent = Array(0..<cards.count)

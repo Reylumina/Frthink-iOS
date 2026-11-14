@@ -1,4 +1,4 @@
-// 本文件负责：写作台的生成状态机 —— 组装请求、检查上下文预算、流式写入消息、取消与重跑。
+// 写作台生成状态机：负责请求组装、上下文预算校验、流式增量写入、取消与重试调度。
 
 import Foundation
 import Observation
@@ -6,12 +6,9 @@ import UIKit
 
 /// 码字机一次生成的完整流程。
 ///
-/// 生成状态放在 `@Observable` 类里而不是视图的局部状态：一次流式响应要挂起很久，
-/// 视图在挂起期间可能被重建，只有类能保证「同一时刻只有一个请求在跑」且取消按钮
-/// 拿得到那个 Task。
+/// 生成状态由 `@Observable` 类管理，生命周期脱离视图局部渲染，确保单请求约束与取消句柄的有效持有。
 ///
-/// 流式循环直接跑在 MainActor 上（`Task {}` 继承当前 actor），不碰 `Task.detached`：
-/// `ProjectSession` 是 `@MainActor` 的，增量写入必须在主线程。
+/// 流式回调调度于 MainActor 执行，确保对 `ProjectSession` 状态的增量更新处于主线程。
 @MainActor
 @Observable
 final class WriterController {
@@ -47,8 +44,7 @@ final class WriterController {
 
     /// 准备阶段的 Task；点停止或切页时取消。
     private var prepareTask: Task<Void, Never>?
-    /// 后台组装本身。`Task.detached` 不继承调用方取消，取消必须打到这个句柄上，
-    /// 否则停止后旧组装还在跑，立刻重发就会有两份 56 万字组装并发。
+    /// 后台组装任务句柄；取消操作显式触发该句柄以防止旧任务并发运行。
     private var prepareAssemblyTask: Task<WriterPromptRetryResult, Error>?
     /// 每次开始准备 +1。旧任务晚一步收尾时靠它认出自己已经过期，
     /// 不去改新一轮的 `isPreparing` / `prepareTask`。
@@ -57,7 +53,7 @@ final class WriterController {
     /// 非 nil 时弹上下文预算提示；由视图观察后弹 alert。
     private(set) var budgetAlert: BudgetAlert?
 
-    /// 「裁剪后重试」失败时把用户指令放回输入框，不要求重打。
+    /// 裁剪重试失败时保留用户输入指令，便于输入框还原。
     private(set) var instructionToRestore: String?
 
     /// 视图取走指令后清空，避免重复回填。
@@ -209,7 +205,7 @@ final class WriterController {
         guard !isGenerating, !isPreparing else { return }
         guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID }),
               session.payload.messages[index].role == .assistant else {
-            store.toast = "这条助手消息已经不存在了"
+            store.toast = "该助手消息已不存在"
             return
         }
         session.clearInterrupted(messageID)
@@ -233,7 +229,7 @@ final class WriterController {
             prepareGeneration &+= 1
             prepareTask?.cancel()
             prepareTask = nil
-            // detached 组装不继承取消，必须显式取消，否则停完立刻重发会并排跑两份。
+            // 显式取消后台组装任务，防止重发请求时出现并发执行。
             prepareAssemblyTask?.cancel()
             prepareAssemblyTask = nil
             isPreparing = false
@@ -364,9 +360,8 @@ final class WriterController {
                 provider: provider,
                 excludingMessageID: preparedUserMessageID
             )
-            // 先把用户气泡落盘：组装在 56 万字书上要几秒，这期间被杀掉不能让
-            // 指令只活在一个 Task 里。历史快照已经取过，不会把这条重复带进去。
-            // 预算重试复用弹窗前已经落盘的那一条，不再加第二遍。
+            // 提前将用户指令消息持久化，防止后台准备阶段进程退出丢失内容；
+            // 历史快照已排重，重试场景复用既有记录。
             var userMessageID = preparedUserMessageID
             if userMessageID == nil, case .send(let instruction) = action {
                 userMessageID = session.addUserMessage(instruction).id
@@ -385,7 +380,7 @@ final class WriterController {
             let generation = prepareGeneration
             prepareTask?.cancel()
             prepareAssemblyTask?.cancel()
-            // 组装是同步重活，放后台；取消必须显式打到这个任务的句柄上。
+            // 提示词组装在后台线程执行，取消需显式调用对应句柄。
             let assembly = Task.detached(priority: .userInitiated) { () throws in
                 if retry == nil {
                     return WriterPromptRetryResult.prepared(
@@ -400,7 +395,7 @@ final class WriterController {
                 do {
                     result = try await assembly.value
                 } catch {
-                    // 旧一轮的准备晚一步收尾时不要碰新一轮的状态。
+                    // 忽略过期批次的准备回调，防止状态竞争。
                     guard let self, self.prepareGeneration == generation else { return }
                     self.prepareAssemblyTask = nil
                     self.isPreparing = false
@@ -437,8 +432,7 @@ final class WriterController {
 
     /// 主线程拍值类型快照；组装工作不碰会话对象。
     ///
-    /// 预算推导也在这里做完：窗口连输出都放不下时直接抛错，`start` 的 catch
-    /// 按原版文案报错并返回 false，不会带着一个假预算把请求发出去。
+    /// 完成上下文预算推导：若窗口大小低于基础输出需求则抛出异常中断请求。
     private func promptSnapshot(
         action: WriterPromptAction,
         session: ProjectSession,
@@ -452,8 +446,7 @@ final class WriterController {
         return WriterPromptSnapshot(
             action: action,
             manuscript: manuscript,
-            // 预算重试时用户气泡已经在历史里了：再把它当历史带进去，指令会被
-            // 追加第二遍，同一句话发两次、token 虚高，还可能误判「仍然过大」。
+            // 预算重试时排除当前已持久化的用户指令消息，避免重复追加。
             messages: session.payload.messages.filter { $0.id != excludingMessageID },
             world: session.payload.world,
             assistantSupplement: session.payload.assistantSupplement,
@@ -478,7 +471,7 @@ final class WriterController {
         do {
             plan = try budget(for: preparation.provider, settings: store.settings)
         } catch {
-            // 预算算不出来就不能发：收回用户气泡和挂起状态，按原版文案报错。
+            // 预算推导异常时中止发送，回滚预存消息与挂起状态并抛出错误。
             budgetAlert = nil
             suspended = nil
             retractSend(
@@ -580,7 +573,7 @@ final class WriterController {
             guard let index = session.payload.messages.firstIndex(where: {
                 $0.id == messageID
             }), session.payload.messages[index].role == .assistant else {
-                store.toast = "这条助手消息已经不存在了"
+                store.toast = "该助手消息已不存在"
                 return
             }
             // 新版本是空的并被选中，后面的 appendDelta 会写进它。
@@ -656,8 +649,7 @@ final class WriterController {
     /// 预算推导，照抄原版 `L1/e3.java:22-55`：
     /// `effectiveInputBudget = min(inputBudget, contextWindow - outputBudget - 1024)`。
     ///
-    /// 窗口连输出都放不下时 `PromptBudget.make` 抛 `BudgetError`；这里直接往上传，
-    /// 由 `start` 按原版文案报错并停下，不再退化成「输入预算为准」继续发超窗请求。
+    /// 上下文窗口无法容纳输出预算时抛出异常，由上层统一处理错误并终止请求。
     private func budget(for provider: ProviderSetting, settings: AppSettings) throws -> PromptBudget {
         let window = settings.contextWindowTokens > 0
             ? settings.contextWindowTokens
@@ -821,14 +813,13 @@ final class WriterController {
     ) {
         switch event {
         case .delta(let text):
-            // 只更新控制器里的缓冲；气泡按「换行或时间」合并显示，
-            // 不去碰整份 payload（那是整页重算的源头）。
+            // 增量文本写入控制器内部缓冲区，按段落或时间节流合并更新视图。
             pendingDelta += text
             displayBuffer += text
             displayCharacterCount += text.count
             scheduleStreamingFlush(session: session, messageID: messageID)
             if text.contains("\n") {
-                // 段落边界立刻上屏，避免时间片把一句话切在中间。
+                // 遇到换行即时刷新显示，确保段落边界完整呈现。
                 flushStreamingDisplay()
             } else {
                 scheduleStreamingDisplay()
@@ -856,8 +847,7 @@ final class WriterController {
 
     /// 安排一次气泡刷新。按设备状态合并到 `displayInterval` 一次。
     ///
-    /// 思考过程也在这里上屏：DeepSeek 开启思考时，正文可能几十秒为空，
-    /// 只在 3 秒落盘时更新思考区会让界面看起来卡住。
+    /// 思考过程增量内容在此调度刷新，确保思考流式展示实时响应。
     private func scheduleStreamingDisplay() {
         guard displayTask == nil else { return }
         let interval = displayInterval
@@ -900,7 +890,7 @@ final class WriterController {
             streamingReasoning = reasoningBuffer
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
-        // 每次落盘（约 3 秒）都把已收内容并回会话；进程被杀最多丢这一段。
+        // 定时检查点（约 3 秒间隔）将增量内容持久化至会话存储。
         checkpoint(session: session)
     }
 
@@ -929,7 +919,7 @@ final class WriterController {
         ) { [weak self] in
             Task { @MainActor in
                 guard let self, self.isGenerating else { return }
-                // 系统要收回时间：先停流，finish 会保留已收内容并标中断。
+                // 后台执行即将到期：主动中止流式连接，保留已接收文本并标记中断。
                 self.backgroundExpired = true
                 self.stop()
             }
@@ -958,7 +948,7 @@ final class WriterController {
                 session.markInterrupted(messageID)
             }
         }
-        // 收尾先落掉最后一段缓冲，再判断内容是否为空。
+        // 完成阶段先将末尾缓冲区文本刷新落盘，再进行非空校验。
         flushTask?.cancel()
         flushTask = nil
         displayTask?.cancel()
@@ -971,7 +961,7 @@ final class WriterController {
             streamingReasoning = reasoningBuffer
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
-        // 结束前把最后一段增量并回会话；消息若已被撤回/删除则跳过，避免复活。
+        // 将末尾增量文本同步至消息会话；若消息已被删除则忽略以防状态回滚。
         if session.payload.messages.contains(where: { $0.id == messageID }) {
             persistPendingDelta(session: session, messageID: messageID)
             flushStreaming(session: session, messageID: messageID)
@@ -1021,7 +1011,7 @@ final class WriterController {
             return
         }
 
-        // 只有思考过程、没有正文：空气泡没有意义，按失败处理。
+        // 若仅包含思考过程而无正文生成，视为无效结果并按失败逻辑处理。
         guard !produced.isEmpty else {
             if isNewMessage {
                 session.deleteMessage(messageID)
@@ -1041,7 +1031,7 @@ final class WriterController {
         maybeAutoSummarize(session: session, store: store)
     }
 
-    /// 上下文占用达到阈值时，自动把未摘要的用户轮次并进长期规则。
+    /// 当上下文使用率达到设定阈值时，自动提取未摘要的用户会话更新长期规则。
     private func maybeAutoSummarize(session: ProjectSession, store: AppStore) {
         let settings = store.settings
         guard settings.autoConversationSummary, !autoSummarizing,
@@ -1051,7 +1041,7 @@ final class WriterController {
         do {
             limit = try budget(for: provider, settings: settings).effectiveInputBudget
         } catch {
-            // 自动摘要只是后台维护：预算本身不成立时跳过，不额外弹错。
+            // 自动摘要属于后台静默任务，预算校验失败时直接返回，不展示错误弹窗。
             return
         }
         let used = TokenEstimator.estimate(
@@ -1072,7 +1062,7 @@ final class WriterController {
         let ids = pendingMessages.map(\.id)
 
         autoSummarizing = true
-        // 挂句柄：停止生成、切书时能取消，不然它会继续对已被驱逐的会话写盘。
+        // 持有摘要异步任务句柄，支持切书或停止时统一取消后台任务。
         summaryTask?.cancel()
         summaryTask = Task { @MainActor in
             defer {
@@ -1090,7 +1080,7 @@ final class WriterController {
                 }
                 session.scheduleSave()
             } catch {
-                // 自动摘要是后台维护，不弹警报；失败原因用轻提示说清楚。
+                // 后台自动摘要异常时通过轻提示反馈。
                 guard !isCancellation(error) else { return }
                 store.toast = error.localizedDescription
             }

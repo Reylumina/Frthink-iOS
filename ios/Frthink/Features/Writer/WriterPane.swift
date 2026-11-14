@@ -1,8 +1,6 @@
 // 本文件负责：码字机 —— ChatBot 单栏对话 + 全屏正文。
 //
-// 0.5 秒测试：进创作页先看到一整列对话气泡，输入条在底部，不被正文挤成两半。
-// 正文是「对话的上下文」，不是和聊天争空间的第二块面板：点「正文」进全屏页阅读/编辑。
-// 这样既接近原版的聊天记录优先，也给 AI 回复足够的横向宽度。
+// 界面采用对话优先布局，底部常驻输入条；正文承载于独立全屏页面，保障移动端横向展示空间。
 
 import Foundation
 import SwiftUI
@@ -17,8 +15,7 @@ struct WriterPane: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let session: ProjectSession
-    /// 这一页登记的撤销都落在这份栈上：优先窗口栈，没有时用兜底栈，
-    /// 所以「插入正文 / 追加到正文」在任何状态下都撤得回来。
+    /// 页面撤销栈：优先采用窗口编辑撤销栈，回退至全局栈，确保插入与追加操作可逆。
     private let undoManager: UndoManager
 
     @State private var controller = WriterController()
@@ -28,21 +25,18 @@ struct WriterPane: View {
     @State private var undoActions: [WriterBodyUndoAction] = []
     /// 撤销栈的菜单状态：栈顶变了，⋯ 里的「撤销 / 重做」跟着变。
     @State private var undoState: WriterUndoState
-    /// 页面自带的「已插入正文 · 撤销」提示。
-    ///
-    /// 全局 toast 只有文字，放不下撤销按钮；这条只服务插入/追加这类可撤销动作，
-    /// 几秒后自动消失（§4.3）。
+    /// 针对正文插入与追加等可撤销操作展示的专用操作反馈条。
     @State private var undoPrompt: WriterUndoPrompt?
-    /// 输入条（含多选条）的高度：撤销提示浮在它上面，不挤动对话内容。
+    /// 底部控制条（输入栏或多选栏）的测量高度。
     @State private var bottomBarHeight: CGFloat = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
     @State private var columnWidth: CGFloat = 0
-    /// 对话内容是否撑满视口：内容不满一屏时从顶部排，只跨阈值时刷新，避免流式期每帧重算 body。
+    /// 标记对话内容高度是否超出可视区域，用于切换对齐布局策略。
     @State private var contentOverflowsViewport = true
     @State private var scrollAnchorMetrics = ScrollAnchorMetrics()
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
     @State private var cursorOffset = -1
-    /// 用户是否亲手在正文里放过插入点；false 时插到末尾，避免旧偏移插到开头。
+    /// 记录用户是否明确指定过正文插入位置。
     @State private var cursorPlaced = false
     /// 对话只渲染最近 N 条；更早的按原版「加载更早的对话」补。
     @State private var visibleMessageCount = 15
@@ -50,13 +44,13 @@ struct WriterPane: View {
     @State private var activeSheet: WriterSheet?
     @State private var isImportingBody = false
     @State private var pendingBodyImport: PendingBodyImport?
-    /// 气泡的追加/清理/删除共用一个 alert，避免同一层视图挂多个 alert。
+    /// 消息气泡追加、清理与删除复用单一确认弹窗容器。
     @State private var messageAction: MessageAction?
-    /// 用户是否停在聊天底部；滚上去后暂停自动跟随，避免抢滚动。
+    /// 视口是否处于列表底部；上滑查看历史时暂停自动跟随滚动。
     @State private var isAtBottom = true
-    /// 生成结束后的落底窗口：这段时间里底部哨兵离开屏幕不算用户滚走。
+    /// 生成完成后的布局稳定过渡窗口。
     @State private var isSettling = false
-    /// 删除等让内容突然变矮的操作后，强制回到底部，避免留下大片空白。
+    /// 列表内容高度缩减时触发强制回滚到底部。
     @State private var forceScrollToBottom = false
     /// 多选删除：条目选择态、选中的消息 id。
     @State private var selectionMode = false
@@ -123,10 +117,10 @@ struct WriterPane: View {
         var title: String {
             switch self {
             case .append: return "追加到正文？"
-            case .rollback: return "回退到这条用户指令"
+            case .rollback: return "回退到此指令"
             case .cleanup: return "清理历史版本？"
             case .delete: return "删除当前版本？"
-            case .deleteMessage: return "删除这条消息？"
+            case .deleteMessage: return "删除消息？"
             case .deleteSelected(let count): return "删除 \(count) 条消息？"
             case .clearAll: return "清空聊天记录？"
             }
@@ -159,11 +153,11 @@ struct WriterPane: View {
                 return "只保留当前展示的版本，其余版本会被删除且无法恢复。"
             case .delete(let message):
                 if message.variants.count <= 1 {
-                    return "这条气泡只有一个版本，删除后整条气泡消失且无法恢复。"
+                    return "当前气泡仅有一个版本，删除后将彻底移除且无法恢复。"
                 }
                 return "只删除当前展示的第 \(message.selectedVariant + 1) 版，其余 \(message.variants.count - 1) 个版本保留。"
             case .deleteMessage:
-                return "删除后，这条消息以及它在会话里的位置都会消失，正文不受影响。"
+                return "删除后，此消息及其在会话中的记录将被移除，正文不受影响。"
             case .deleteSelected:
                 return "删除后，这些消息以及它们在会话里的位置都会消失，正文不受影响，且无法恢复。"
             case .clearAll:
@@ -174,8 +168,7 @@ struct WriterPane: View {
 
     var body: some View {
         chatList
-            // 确认用推入页，不用和文件面板同层的 alert：面板收起与弹层抢转场时，
-            // 后者会被系统静默丢掉，表现就是「选完文件没反应」。
+            // 采用导航推入页进行确认，避免与系统文件选取器收起时的模态转场冲突。
             .navigationDestination(item: $pendingBodyImport) { pending in
                 BodyImportConfirmPage(pending: pending) {
                     performBodyImport(pending)
@@ -189,7 +182,7 @@ struct WriterPane: View {
                         updateBottomBarHeight(height)
                     }
             }
-            // 撤销提示浮在输入条上方，不改变对话区高度（§4.3）。
+            // 撤销提示条以浮层展示于输入条上方，不影响对话内容高度。
             .overlay(alignment: .bottom) {
                 undoPromptOverlay
             }
@@ -198,7 +191,7 @@ struct WriterPane: View {
                 if active { exitSelection() }
             }
             .onChange(of: controller.instructionToRestore) { _, _ in
-                // 裁剪重试失败不丢指令：控制器把原文交回来，这里放回输入框。
+                // 裁剪重试未成功时，将原指令还原至输入框。
                 guard let text = controller.consumeInstructionToRestore() else { return }
                 composer.text = text
             }
@@ -231,7 +224,7 @@ struct WriterPane: View {
                 handleBodyImport(result)
             }
             .onChange(of: scenePhase) { _, phase in
-                // 退后台时立刻把已收增量并回会话并落盘；系统随后可能直接杀进程。
+                // 切换至后台时立即持久化增量文本检查点。
                 if phase == .background {
                     controller.checkpoint(session: session)
                 }
@@ -275,7 +268,7 @@ struct WriterPane: View {
 
         #if DEBUG
         if LaunchArguments.writerFocus == "manuscript" {
-            // 截图流水线要拍「正文单区」：等首帧排版完再拉 sheet，避免 sheet 抢在列表前面。
+            // 延迟呈现正文视图，等待首帧布局渲染完毕。
             Task { @MainActor in
                 await Task.yield()
                 openSheet(.manuscript)
@@ -312,12 +305,7 @@ struct WriterPane: View {
         dismissKeyboard()
         controller.checkpoint(session: session)
 
-        // 切 Tab 也会触发 onDisappear，但生成和撤销栈必须继续保留。
-        //
-        // 判据是「这个会话还在不在缓存里」：切书时 RootView 会把旧会话从缓存里
-        // 驱逐，旧 Pane 的流和撤销动作必须清掉；切 Tab 时会话仍在缓存里，什么都不做。
-        // 用 activeProjectID 判不对——切走两秒内切回同一本时那个 id 会骗过判断，
-        // 旧流和新流就会并发写同一份会话。
+        // 校验会话缓存有效性：项目切换时释放旧任务与撤销栈，Tab 切换保留活跃状态。
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             let stillCached = store.cachedSession(for: session.project.id) === session
@@ -333,8 +321,7 @@ struct WriterPane: View {
 
     @ViewBuilder
     private var writerMenu: some View {
-        // 插入/追加正文的撤销入口。系统摇一摇和 ⌘Z 在没有聚焦输入框时拿不到
-        // 撤销栈，光靠四秒的提示条太容易错过，所以菜单里常驻一条。
+        // 菜单内常驻撤销与重做操作入口。
         Button {
             undoState.undo()
         } label: {
@@ -366,8 +353,7 @@ struct WriterPane: View {
         } label: {
             Label("正文发送范围…", systemImage: "text.alignleft")
         }
-        // 多选入口从这里进：气泡的长按菜单只放单条操作，免得每条消息都挂一个
-        // 需要先理解再点两下的模式开关。
+        // 多选操作模式入口。
         Button {
             if let last = windowedMessages.last {
                 beginSelection(last.id)
@@ -381,7 +367,7 @@ struct WriterPane: View {
 
         Button {
             dismissKeyboard()
-            // 菜单收起那一帧不能立刻提文件选择器，系统会拒绝，表现为点了没反应。
+            // 延迟调用文件选择器，确保当前菜单收起转场完毕。
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
                 isImportingBody = true
@@ -435,10 +421,7 @@ struct WriterPane: View {
     private var chatList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // 用 VStack 而不是 LazyVStack：整列已经按 `visibleMessageCount`
-                // 截过，行数有上限；流式那一行可能有上万字，LazyVStack 的估算
-                // 行高 + `scrollTo` 会在结束时落到内容之外，正文区留一整屏空白
-                // （Stream Check 的第 2 次连跑复现）。全量测量后偏移是精确值。
+                // 采用 VStack 承载已按窗口截断的消息列表，确保动态高度计算精确。
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     if session.payload.messages.count > visibleMessageCount {
                         Button("加载更早的对话") {
@@ -480,9 +463,7 @@ struct WriterPane: View {
                     }
                 }
             }
-            // 首帧用 defaultScrollAnchor 落在底部，避免布局前按估算行高定位；
-            // 用户手动滚开后锚点撤掉，不会被内容变高拽回去（§5.9）；
-            // 空对话不给锚点，空态按默认从顶部排。
+            // 初始通过 defaultScrollAnchor 对齐底部，手动滚动后移除锚点以避免干扰用户浏览。
             .defaultScrollAnchor(scrollAnchor)
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.size.height
@@ -500,8 +481,7 @@ struct WriterPane: View {
             .minimizeTabBarOnScroll()
             .simultaneousGesture(
                 DragGesture(minimumDistance: 10).onChanged { value in
-                    // 手指向下拖 = 回看更早的内容。生成中也让用户停在自己
-                    // 看的位置，不要被跟随器拽回底部。
+                    // 检测到下拉手势时取消底部跟随状态，保持当前浏览位置。
                     if value.translation.height > 10, isAtBottom {
                         isAtBottom = false
                     }
@@ -529,7 +509,7 @@ struct WriterPane: View {
                 }
             }
             .onChange(of: session.payload.messages.count) { oldCount, newCount in
-                // 新消息会把窗口外的旧行挤出去：选择集裁回还能看到的那些。
+                // 消息列表窗口滚动时裁剪已选择集合，保持与可见行一致。
                 if !selectedMessageIDs.isEmpty {
                     selectedMessageIDs = WriterSelection.pruning(
                         selectedMessageIDs,
@@ -603,7 +583,7 @@ struct WriterPane: View {
         columnWidth = width
     }
 
-    /// 输入条高度：撤销提示按它上浮，不挤动对话区。
+    /// 测量并更新底部输入条高度。
     private func updateBottomBarHeight(_ height: CGFloat) {
         guard height > 0, height != bottomBarHeight else { return }
         bottomBarHeight = height
@@ -817,12 +797,12 @@ struct WriterPane: View {
                 }
                 let index = session.payload.messages.firstIndex { $0.id == message.id }
                 let removed = session.withdraw(from: message.id)
-                presentUndoPrompt("已撤回这条指令") {
+                presentUndoPrompt("已撤销指令") {
                     session.restore(removed, at: index)
                 }
             }
             let delete = UIAction(
-                title: "删除这条消息",
+                title: "删除消息",
                 image: UIImage(systemName: "trash"),
                 attributes: isBusy ? [.destructive, .disabled] : .destructive
             ) { _ in
@@ -1006,8 +986,7 @@ struct WriterPane: View {
             autoFocus: LaunchArguments.focusComposer
         )
         .sensoryFeedback(.impact(weight: .light), trigger: session.payload.messages.count) { _, _ in store.settings.hapticsEnabled }
-        // 弹窗只决定「怎么发」：用户气泡和挂起的发送都在控制器里保留着，
-        // 三条路径各自走 `dismissBudget`，取消才收回气泡、把指令放回输入框（§4.3）。
+        // 预算弹窗确认逻辑：用户指令与挂起状态由控制器统一管理调度。
         .alert("上下文预算不足", isPresented: $budgetPresented) {
             Button("裁剪正文末尾后重试") {
                 controller.retryAfterTrimming(session: session, store: store)
@@ -1069,17 +1048,14 @@ struct WriterPane: View {
             session: session,
             store: store
         )
-        // 撤销栈只持有 target 的 unowned 引用，页面必须自己保住它，
-        // 所以不清空、不丢引用；离开页面时先摘动作再释放。
+        // 持有撤销动作强引用，防止 UndoManager 的 unowned 引用失效。
         undoActions.append(action)
         action.registerInitialUndo()
         undoState.refresh()
         return action
     }
 
-    /// 离开写作台时清掉本页登记的撤销动作：撤销栈挂在窗口上，
-    /// 不清就会切到别的书之后撤回旧书正文。撤销栈只持 unowned 引用，
-    /// 摘不掉动作时宁可把对象一起留着，也不能让它悬空。
+    /// 页面离开时注销所有撤销动作，避免跨项目误触发与悬挂引用。
     private func discardUndoActions() {
         for action in undoActions {
             undoManager.removeAllActions(withTarget: action)
@@ -1087,7 +1063,7 @@ struct WriterPane: View {
         undoActions.removeAll()
     }
 
-    /// 插入块前后补空行，避免和原文粘成一句。
+    /// 为插入文本补充段落分隔换行符。
     private func paragraphSeparated(_ text: String, at offset: Int) -> String {
         let ns = session.manuscript as NSString
         var block = text.trimmingCharacters(in: .newlines)
@@ -1108,13 +1084,13 @@ struct WriterPane: View {
                 block += after.hasPrefix("\n") ? "\n" : "\n\n"
             }
         }
-        // 插到末尾时只在前面补空行；后面没有正文，不需要再造一个空段。
+        // 末尾插入仅前置补齐换行。
         return block
     }
 
     private func openSheet(_ sheet: WriterSheet) {
         dismissKeyboard()
-        // 先开窗口再创建 sheet，避免 UITextView 首次取文时把整本正文拼出来。
+        // 呈现全屏正文前初始化窗口编辑状态，避免全量正文提前加载。
         if sheet == .manuscript {
             session.beginWindowedEditing()
         }
@@ -1142,8 +1118,7 @@ struct WriterPane: View {
     /// 浮层关闭后的收尾。
     private func sheetDidDismiss() {
         resolveCursorAfterSheet()
-        // 预算弹窗里点了「查看提示词回看」：挂起的发送和用户气泡都还在，
-        // 回到创作页再弹一次确认，指令不会丢在半路。
+        // 提示词查看弹窗关闭后重新展示预算确认提示。
         controller.republishBudgetAlert()
     }
 
@@ -1179,7 +1154,7 @@ struct WriterPane: View {
         )
     }
 
-    /// 回退：把对话砍到这条助手回复对应的用户指令之前，指令放回输入框。
+    /// 回退操作：回滚当前助手回复及其前置用户指令，并将指令文本恢复至输入框。
     private func performRollback(to target: ChatMessage) {
         let messages = session.payload.messages
         guard let index = messages.firstIndex(where: { $0.id == target.id }) else { return }
@@ -1193,8 +1168,8 @@ struct WriterPane: View {
         }
         session.rollbackToMessage(messages[cutIndex].id)
         store.toast = restoredInstruction
-            ? "已回退到这条指令，指令已放回输入框"
-            : "已删除这条气泡及其后的对话"
+            ? "已回退指令，指令已放回输入框"
+            : "已删除此气泡及后续对话"
     }
 
     // MARK: - 追加 / 清理 / 删除
@@ -1254,7 +1229,7 @@ struct WriterPane: View {
             withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.deleteMessage(message.id)
             }
-            store.toast = "已删除这条消息"
+            store.toast = "已删除消息"
         case .deleteSelected:
             let ids = selectedMessageIDs
             guard !ids.isEmpty else { return }
@@ -1353,7 +1328,7 @@ private struct BodyImportConfirmPage: View {
     }
 }
 
-/// 「导入正文」只认 UTF-8 文本；别的编码报清楚，而不是塞一段乱码进正文。
+/// 正文导入格式校验：仅支持 UTF-8 编码文本。
 private enum BodyImportError: LocalizedError {
     case notUTF8
 
@@ -1362,8 +1337,7 @@ private enum BodyImportError: LocalizedError {
     }
 }
 
-/// 桥接 UIKit `UIContextMenuInteraction`：长按原地就近弹出原生 Liquid Glass `UIMenu`，
-/// 并通过空 `visiblePath` 彻底屏蔽预览卡片与空白缩略玻璃。
+/// 桥接 `UIContextMenuInteraction` 弹出原生快捷菜单，屏蔽默认预览视图。
 private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
     let sections: [[UIMenuElement]]
     let content: Content

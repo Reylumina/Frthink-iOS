@@ -1,4 +1,4 @@
-// 本文件负责：写作资料浮层 —— 这本书的正文/人物/世界书规模，以及会写进提示词的几段资料。
+// 写作资料浮层：展示项目正文、人物卡与世界书体量，以及注入提示词的相关资料。
 
 import SwiftUI
 
@@ -137,7 +137,7 @@ struct WriterMaterialsSheet: View {
     }
 }
 
-/// 资料的全文预览。只读、可选中，避免在浮层里误改。
+/// 资料全文只读预览视图，支持文本选择。
 private struct MaterialTextDetail: View {
     let title: String
     let text: String

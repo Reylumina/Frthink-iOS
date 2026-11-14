@@ -1,10 +1,10 @@
-// 书封缩略图：真实封面异步解码 + 缩略图缓存；没有封面时画一枚低饱和书脊。
+// 书封缩略图：真实封面异步解码与缩略图缓存；无封面时绘制低饱和度书脊占位。
 //
-// 书架每一行都会重绘，base64 解码不能放在 `body` 里逐帧做。这里只缓存
-// 240×320 的缩略图，容量 32 张；真实封面按屏宽缩放也够清晰。
+// 书架列表项重绘频繁，Base64 解码在后台异步执行。此处维护
+// 240×320 规格缩略图缓存（容量 32 张），兼顾清晰度与内存占用。
 //
-// 尺寸和形状只在本文件定义：3:4 书封比例 + 一个 `@ScaledMetric`，
-// 继续写作、全部书稿、分支和回收站共用同一份封面语法，页面上不会出现两种画法。
+// 尺寸与样式由本文件规范：3:4 比例配合 @ScaledMetric，
+// 继续写作、全部书稿、分支与回收站共用统一封面规范，保持视觉一致。
 
 import SwiftUI
 import UIKit
@@ -13,19 +13,19 @@ struct LibraryCoverImage: View {
     /// `Project.coverImagePayload`，base64 编码的 PNG，可能为空。
     let payload: String?
     let title: String
-    /// 用书项目 id 决定占位色，同名书也能区分。
+    /// 基于书项目 ID 计算占位色，避免同名项目颜色重复。
     var seed: String = ""
 
     @State private var image: UIImage?
 
-    /// 书封高度；宽度按 3:4 推出，随 Dynamic Type 缩放。
+    /// 书封高度；宽度按 3:4 比例推导，支持 Dynamic Type 缩放。
     @ScaledMetric(relativeTo: .body) private var height: CGFloat = 70
 
     private var width: CGFloat {
         height * 3 / 4
     }
 
-    /// 封面形状：iOS 26 跟随所在行的容器同心，17–25 回落到 8pt 圆角。
+    /// 封面形状：iOS 26+ 与所在行容器保持同心圆角，iOS 17–25 回退至 8pt 圆角。
     private var shape: AnyShape {
         Theme.containerShape(minimum: Theme.Radius.small)
     }
@@ -54,15 +54,14 @@ struct LibraryCoverImage: View {
         .accessibilityHidden(true)
     }
 
-    /// 没有封面时的书脊标记：一枚固定的书本类符号。
+    /// 无封面时的书脊占位符号。
     ///
-    /// 不用书名首字：中文首字在封面上像错字，也不是图标语言。这里从 10 枚
-    /// 书本/文稿符号里按书 id 稳定取一枚，同一本书永远同一个标记。
+    /// 避免使用书名首字；根据书项目 ID 从预置书本/文稿符号中确定性选取，确保单本书标记固定。
     private var placeholderMark: some View {
         Image(systemName: symbol)
-            // 字形占宽度 46%：封面是缩略图，图标压过一半就压住了「书脊」的比例。
+            // 图标宽度占比 46%，保证缩略图下书脊布局比例协调。
             .font(.system(size: width * 0.46, weight: .medium))
-            // 占位纸色在深浅两档都是压暗的，图标固定白色。
+            // 占位底色在深浅色模式下均做暗化处理，图标固定为白色。
             .foregroundStyle(Color.white)
             .accessibilityHidden(true)
     }
@@ -84,8 +83,7 @@ struct LibraryCoverImage: View {
             return
         }
 
-        // key 用长度 + 前 64 个字符：主线程上对整段 base64 求哈希，
-        // 导入大封面后每次滚动书架都要 O(payload) 算一遍。
+        // 缓存键采用长度与前 64 字符组合，避免滚动书架时在主线程对完整 Base64 字符串执行耗时哈希计算。
         let key = "\(raw.count)-\(raw.prefix(64))"
         if let cached = CoverThumbnailCache.shared.image(for: key) {
             image = cached
@@ -101,13 +99,13 @@ struct LibraryCoverImage: View {
         image = decoded
     }
 
-    /// 在后台把 base64 解成 240×320 缩略图。解不出来就返回 nil，界面退回书脊。
+    /// 在后台将 Base64 解码为 240×320 缩略图；解码失败返回 nil 并降级显示书脊占位。
     private nonisolated static func decodeThumbnail(raw: String, key: String) -> UIImage? {
         if let cached = CoverThumbnailCache.shared.image(for: key) {
             return cached
         }
 
-        // 兼容 `data:image/png;base64,xxx` 这种带前缀的存法。
+        // 兼容带前缀的格式（如 data:image/png;base64,...）。
         var base64 = raw
         if let marker = raw.range(of: "base64,") {
             base64 = String(raw[marker.upperBound...])
@@ -148,15 +146,14 @@ private final class CoverThumbnailCache {
 
 // MARK: - 占位书脊符号
 
-/// 占位封面上的 10 枚符号：都是书本/文稿类，风格统一（单色、同一字重）。
+/// 占位封面符号集合：采用风格统一的书本与文稿类单色符号。
 ///
-/// 和纸色一样按书 id 稳定取，同一本书不会每次打开换一个图标。
-/// 纸色在 Theme.Identity，和一级分类图标共用一套。
+/// 根据书项目 ID 确定性获取，确保同一书项目图标固定。
+/// 纸色定义于 Theme.Identity，与一级分类图标共用色盘。
 private enum ShelfCoverSymbols {
-    /// 只用书本本身的形状：不带字、不带横线，也不混进箱子、文件夹这些非书图形。
+    /// 仅使用纯书本轮廓符号，排除非书籍类图形以保持语义一致。
     ///
-    /// 系统里纯书本轮廓只有这四种，12 种纸色乘上去已经够区分；
-    /// 宁可少而一致，不要多而入错类别。
+    /// 系统纯书本轮廓符号结合 12 种主题纸色可提供充足的区分度。
     private static let symbols: [String] = [
         "book",
         "book.closed",
@@ -165,8 +162,7 @@ private enum ShelfCoverSymbols {
     ]
 
     static func symbol(for seed: String) -> String {
-        // 用加盐的哈希：颜色和符号共用同一个哈希时，相近的 id（比如「分支 1」）
-        // 会同时撞色又撞图标，一排书看着像同一本。
+        // 采用加盐哈希：避免颜色与符号共用同一哈希导致相近 ID（如分支项目）同时出现颜色与图标冲突。
         symbols[Int(Theme.Identity.stableHash(seed + "#icon") % UInt64(symbols.count))]
     }
 }

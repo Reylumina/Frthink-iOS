@@ -1,6 +1,6 @@
 // 本文件负责：正文选区的改写弹层。
 //
-// 选中一段 → 输入要求 → 流式改写 → 只替换这一段，其余正文和码字机气泡都不动。
+// 选中文本 → 输入改写提示 → 流式生成 → 定向替换选区，不影响其余正文与对话记录。
 
 import SwiftUI
 
@@ -15,13 +15,13 @@ struct ManuscriptRewriteSheet: View {
 
     @State private var instruction = ""
     @State private var result = ""
-    /// 流式增量先落这里，约 60ms 合并一次到结果框，避免逐 token 重排。
+    /// 流式增量缓冲区，以约 60ms 间隔批量刷新至结果视图，降低排版开销。
     @State private var streamBuffer = ""
     @State private var lastFlush = Date.distantPast
     @State private var isRunning = false
     @State private var errorText: String?
     @State private var task: Task<Void, Never>?
-    /// 每轮改写一个 token；停止后立刻再开始时，旧任务的收尾不会把新任务的状态抹掉。
+    /// 改写任务执行标识：中断并快速重启时，防止旧任务回调覆盖新状态。
     @State private var runID = UUID()
     /// 有草稿或结果时关闭前确认放弃（§5.8）。
     @State private var showDiscardConfirm = false
@@ -30,7 +30,7 @@ struct ManuscriptRewriteSheet: View {
         result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 有没有会丢的东西：未发送的要求、已经生成的结果。
+    /// 检测是否存在未保存的输入指令或生成结果。
     private var hasUnsavedWork: Bool {
         !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !trimmedResult.isEmpty
@@ -83,8 +83,7 @@ struct ManuscriptRewriteSheet: View {
                     toolbarConfirmButton
                 }
             }
-            // 有未保存的指令或已经有生成结果时，下滑关闭会被半路丢掉；
-            // 只有「取消」这条明确入口能关，关闭前再确认一次（§5.8）。
+            // 存在未保存内容或任务运行中时禁用手势下滑，需通过明确的取消操作并进行二次确认。
             .interactiveDismissDisabled(hasUnsavedWork || isRunning)
             .alert(
                 "放弃这次改写？",
@@ -155,7 +154,7 @@ struct ManuscriptRewriteSheet: View {
         .controlSize(.small)
     }
 
-    /// 快捷要求追加而不是覆盖：连点几条可以叠加，也能再手动删改。
+    /// 快捷指令采用追加模式，支持多项指令组合与后续手动编辑。
     private func appendPrompt(_ prompt: String) {
         let current = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !current.isEmpty else {

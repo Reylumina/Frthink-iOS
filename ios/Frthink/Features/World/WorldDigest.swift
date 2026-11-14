@@ -4,20 +4,18 @@ import Foundation
 
 /// 把正文切成可单独送给模型的片段。
 enum WorldDigest {
-    /// 单段 token 上限。Android 用 min(4000, 输入预算 × 0.2)；
-    /// 这里由调用方把预算传进来，4000 只是封顶。
+    /// 单段 token 上限：调用方传入实际预算，最大封顶 4000。
     static let tokenChunkCap = 4_000
 
     /// 段间重叠，避免跨段的人名/因果被切断（Android 96 token）。
     static let overlapTokens = 96
 
-    /// 大书阈值：码点 ≥ 50 万时改为整篇前缀分析，一次只取上下文放得下的前缀。
+    /// 超长文本阈值：码点数 ≥ 50 万时采用前缀截取分析模式。
     static let wholeTextCodePointThreshold = 500_000
 
     /// 一个正文分段：文本 + 在全文里的码点范围。
     ///
-    /// 范围要进 P27/P28/P29（「第 n/m 段，范围 a–b」），只在提示词里写段号、
-    /// 不带范围，模型就不知道这一段在全文的哪个位置。
+    /// 包含分段序号与在全文中的码点区间，为提示词提供精确上下文定位信息。
     struct Chunk: Hashable {
         let text: String
         /// 0-based 起点。
@@ -31,12 +29,12 @@ enum WorldDigest {
         text.unicodeScalars.count >= wholeTextCodePointThreshold
     }
 
-    /// 取模型上下文放得下的最长前缀。
+    /// 截取上下文预算允许范围内的最长前缀文本。
     ///
     /// 按 1.2 的安全系数估算 token，超出预算即停。
     static func prefixChunk(of text: String, tokenBudget: Int) -> String {
         guard !text.isEmpty, tokenBudget > 0 else { return "" }
-        // 估算函数会给每条内容加 6 token 固定开销，这里先扣掉，保证最终估算不超预算。
+        // 扣除单条消息的基础 token 开销，确保估算总量严格在预算限额内。
         let limit = Double(max(1, tokenBudget - 6))
         var tokens = 0.0
         var end = text.startIndex
@@ -88,7 +86,7 @@ enum WorldDigest {
                 cursor = after
             }
 
-            // 极端大字符也不能原地打转。
+            // 保障游标每次至少推进一个字符，防止死循环。
             if cursor == start {
                 cursor = text.index(after: start)
             }
@@ -107,7 +105,7 @@ enum WorldDigest {
             ))
             if end == text.endIndex { break }
 
-            // 从段尾回退约 96 token 作为下一段起点；能落在换行后更好。
+            // 从段尾回退预设重叠 token 数作为下一分段起点，优先对齐换行符。
             var back = end
             var overlap = 0.0
             while back > start {
@@ -134,7 +132,7 @@ enum WorldDigest {
         return result
     }
 
-    /// 正文太长时只取末尾若干 token 做事件/文风抽取，避免一次请求过大。
+    /// 截取正文尾部指定 token 量的文本用于增量抽取，控制请求上下文体量。
     static func tail(_ text: String, tokens: Int) -> String {
         TokenEstimator.trimTail(text, toTokens: tokens)
     }

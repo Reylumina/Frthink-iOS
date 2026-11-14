@@ -33,8 +33,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
     /// 正文被外部改动过的次数（`ProjectSession.manuscriptRevision`）。
     ///
-    /// 只有这个数字变了才把整段文字回灌给 UITextView。逐字编辑时数字不变，
-    /// 免掉每次重绘都拿 56 万字做一次 `String ==`、还顺手重置光标。
+    /// 仅在版本号递增时全量同步文本至 UITextView，避免常规输入引发频繁文本比较与光标重置。
     var revision: Int = 0
 
     /// 阅读模式传 false：不弹键盘、不触发编辑回调，但仍可滚动与选择插入位置。
@@ -70,7 +69,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         let end = (text as NSString).length
         view.selectedRange = NSRange(location: end, length: 0)
         context.coordinator.appliedRevision = revision
-        // 委托最后挂：上面这些初始设置不该回调进 SwiftUI 的状态。
+        // 延迟绑定代理，防止初始化设置触发状态同步回调。
         view.delegate = context.coordinator
         context.coordinator.reportUndoManagerIfNeeded(view.undoManager)
         return view
@@ -86,8 +85,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             if !isEditable {
                 uiView.resignFirstResponder()
             } else {
-                // 从阅读切到编辑时直接弹键盘，少一次“再点一下正文”的动作。
-                // 放到下一轮主线程调度，等 isEditable 生效后再成为 first responder。
+                // 切换至编辑模式时自动激活键盘；延迟至下一事件循环以确保编辑属性生效。
                 Task { @MainActor in
                     await Task.yield()
                     guard uiView.isEditable, uiView.window != nil else { return }
@@ -137,8 +135,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var lastSelectionLength = 0
         /// 正文提交防抖：停止输入 400ms 才把整串交给 session。
         ///
-        /// 56 万字的书，每敲一个键都 `textView.text` 取一次整串 + 让 SwiftUI
-        /// 重算整页，输入法必然掉帧。这里只让 UITextView 自己刷新，停手再提交。
+        /// 输入停止后统一提交文本，避免逐字读取长文本造成主线程卡顿。
         private var pendingCommit: Task<Void, Never>?
         /// 光标同步防抖。章节高亮/插入位置的精度 120ms 足够。
         private var pendingCursor: Task<Void, Never>?
@@ -157,7 +154,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             parent.onUndoManagerReady?(manager)
         }
 
-        /// 外部替换文字前取消挂起的提交，免得把旧文字又写回去。
+        /// 外部内容更新前取消挂起的防抖写入任务，避免旧数据回写。
         func cancelPendingWrites() {
             pendingCommit?.cancel()
             pendingCommit = nil
@@ -204,16 +201,13 @@ struct ManuscriptTextEditor: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard !isUpdating else { return }
-            // 只在有选区（或刚从有选区变为无选区）时回调，避免每敲一个字
-            // 都把阅读页重建一次。
+            // 仅在选区存在或状态改变时触发回调，降低视图刷新频次。
             let range = textView.selectedRange
             if range.length > 0 || lastSelectionLength > 0 {
                 parent.onSelectionChange?(range)
             }
             lastSelectionLength = range.length
-            // 只读正文没有输入成本，光标必须立刻写回；否则「点正文再点插入」
-            // 会拿到 120ms 前的旧位置。编辑态仍保留防抖，避免每挪一下光标
-            // 都让写作台重算。
+            // 只读模式下即时同步光标位置；编辑模式采用 120ms 防抖同步。
             parent.onCursorInteraction?()
             if !parent.isEditable {
                 let location = textView.selectedRange.location
@@ -235,7 +229,7 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         func scroll(_ textView: UITextView, to location: Int) {
             let length = (textView.text as NSString).length
             let safe = min(max(location, 0), length)
-            // 程序性滚动/章节跳转也会改选区，别让它被当成“用户亲手放置光标”。
+            // 程序化滚动跳过用户交互标记，避免误识别为手动点击。
             isUpdating = true
             textView.selectedRange = NSRange(location: safe, length: 0)
             isUpdating = false

@@ -32,9 +32,9 @@ final class AppStore {
 
     /// 世界刷新/事件/文风/长期规则任务，按书项目登记。
     ///
-    /// 任务句柄原本只挂在 `WorldPane` 的 `@State` 上；切书后视图销毁、任务还在跑，
-    /// 被驱逐的旧会话继续写同一个 `payload.json`。切书时这里统一取消。
-    /// 令牌用来区分新旧任务：旧任务收尾时只能清掉自己那一条登记。
+    /// 任务句柄原先仅挂载于 `WorldPane` 的 `@State`；切换书稿后视图销毁但任务仍在执行，
+    /// 已驱逐的旧会话可能继续写入 `payload.json`。切换书稿时此处统一取消任务。
+    /// 令牌用于标识任务归属：旧任务收尾时仅清理匹配的登记项。
     @ObservationIgnored private var worldTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
 
     init(fileStore: FileStore = FileStore()) {
@@ -70,20 +70,20 @@ final class AppStore {
         }
     }
 
-    /// 退到后台/失去活跃前，把防抖窗口里的编辑立刻落盘。
+    /// 进入后台或失去活跃状态前，将防抖窗口内未保存的编辑内容立即写盘。
     ///
-    /// iOS 进入后台后可能直接终止进程；2 秒防抖等不到就会丢最后一段输入。
-    /// 这里等写盘真正结束再返回，给系统留出落盘时间。
+    /// iOS 切入后台可能立即终止进程，2 秒防抖延迟可能导致未落盘内容丢失。
+    /// 此处等待写盘完成后再行返回，确保数据完整持久化。
     func flushDirtySessions() async {
         for session in sessions.values where session.isDirty {
             await session.saveNowAndWait()
         }
     }
 
-    /// 同上，但向系统申请一点后台执行额度。
+    /// 刷新脏会话，并向系统申请后台执行时间。
     ///
-    /// `flushDirtySessions()` 是异步的：不申请额度的话，`scenePhase` 的 onChange
-    /// 立刻返回，进程可能在写盘途中被挂起，最后一段输入仍会丢。
+    /// `flushDirtySessions()` 为异步操作：若未申请后台时间，`scenePhase` 的 onChange
+    /// 立即返回可能导致进程在写盘过程中被挂起，引发数据丢失。
     func flushDirtySessionsInBackground() async {
         var identifier: UIBackgroundTaskIdentifier = .invalid
         identifier = UIApplication.shared.beginBackgroundTask(withName: "flush-sessions") {
@@ -103,8 +103,8 @@ final class AppStore {
         await flushDirtySessions()
     }
 
-    /// 只保留当前书稿的会话缓存。切书时调用；非当前书先落盘再释放，
-    /// 避免多本 56 万字书同时驻留内存，也避免旧会话的挂起保存盖住新书。
+    /// 仅保留指定书稿的会话缓存。切换书稿时调用；非目标书稿先持久化落盘再释放内存，
+    /// 避免多个大篇幅书稿同时常驻内存，防止旧会话的延迟保存覆盖新数据。
     func trimSessionCache(keeping keepIDs: Set<String>) async {
         let evicted = sessions.keys.filter { !keepIDs.contains($0) }
         for id in evicted {
@@ -176,7 +176,7 @@ final class AppStore {
             sessions[p.id] = session
             return p
         } catch {
-            // 只写成功一半时清掉刚建的目录，避免下次启动书架里多一本空书。
+            // 写入未完全成功时清理新建目录，防止启动时出现空书稿条目。
             try? fileStore.deleteProject(p.id)
             errorMessage = "创建失败：\(error.localizedDescription)"
             return nil
@@ -210,8 +210,8 @@ final class AppStore {
 
     /// 后台解码整份 payload 再建会话。
     ///
-    /// 56 万字的 JSON 解码在主线程做会直接卡住首帧；这里把 IO + 解码丢到后台，
-    /// 界面先显示书稿框架和「正在打开」。
+    /// 大体量 JSON 解码置于后台异步执行以避免阻塞主线程渲染；
+    /// 界面先行展示骨架屏与加载状态。
     func openSessionAsync(for project: Project) async -> ProjectSession {
         if let existing = sessions[project.id] {
             return existing
@@ -341,10 +341,10 @@ final class AppStore {
 
     /// 创建分支：复制成一个新项目，不是在同一项目内建树。
     ///
-    /// 严格照原版 `L1/W0.java:175-246`：
-    /// - 标题后缀是 `" · 分支 N"`，N 取**同根下的最大 branchOrder + 1**（不是本项目的 +1）
-    /// - `branchRootId` 指向根项目，`branchOrder` 从 1 开始
-    /// - **不复制正文**：新分支的稿子是空的，只继承世界/人物等元数据
+    /// 对齐原版 `L1/W0.java:175-246` 逻辑：
+    /// - 标题后缀为 `" · 分支 N"`，N 为**同根节点下的最大 branchOrder + 1**（非当前项目的 +1）
+    /// - `branchRootId` 指向根项目，`branchOrder` 从 1 递增
+    /// - **不复制正文**：新分支初始正文为空，仅继承世界观、人物等元数据
     @discardableResult
     func duplicate(_ project: Project) -> Project {
         let session = openSession(for: project)

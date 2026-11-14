@@ -1,8 +1,8 @@
 import Foundation
 
-/// 把世界资料 + 正文按规格 §1 的顺序拼成 messages。
+/// 将世界资料与正文按规格 §1 的顺序组装为 messages。
 ///
-/// **顺序就是语义**：§1 那 14 行是产品的装配顺序，改顺序模型行为就变了。
+/// **装配顺序决定上下文语义**：§1 中声明的 14 行顺序为标准装配逻辑，调整顺序将改变模型行为。
 /// 逐条对应关系见 `writingBlocks(_:)` 里的注释。
 enum PromptComposer {
 
@@ -219,8 +219,8 @@ enum PromptComposer {
 
     /// 兼容旧签名：直接给 `WorldBook` 的调用点。
     ///
-    /// `bodyRange` 默认按「全文」；调用方把正文裁成末尾一段时要显式传 `.tail(count:)`，
-    /// 否则 P13 的范围标注会和实际正文不符。
+    /// `bodyRange` 默认采用「全文」；若调用方将正文截取为末尾片段，需显式传入 `.tail(count:)`，
+    /// 避免 P13 的范围标注与实际传入正文不一致。
     static func writingMessages(
         world: WorldBook,
         manuscript: String,
@@ -244,10 +244,10 @@ enum PromptComposer {
 
     // MARK: - §3 续写
 
-    /// 断流后接上：把已生成片段的**最后 2000 个码点**作为 assistant 消息回灌，
-    /// 再用 P16 要求从片段末尾继续（`b3/l.java:1963-1975`）。
+    /// 断流续接：将已生成片段的**最后 2000 个码点**作为 assistant 消息注入上下文，
+    /// 并结合 P16 要求模型从片段末尾继续生成（`b3/l.java:1963-1975`）。
     ///
-    /// 片段为空时没有可回灌的内容，退化成 P15「继续当前最新气泡」。
+    /// 片段为空时无可用历史内容，回退至 P15「继续当前最新气泡」。
     static func continueFragmentMessages(
         world: WorldBook,
         manuscript: String,
@@ -283,7 +283,7 @@ enum PromptComposer {
     // MARK: - 渲染
 
     /// 参与本轮请求的人物：卡片 enabled + 所属分组 enabled。
-    /// 分组被删或 groupId 悬空时按启用处理，避免静默丢卡。
+    /// 分组被删除或 groupId 悬空时默认按启用处理，防止静默丢失人物卡。
     static func activeCharacters(in world: WorldBook) -> [CharacterCard] {
         // 分组 id 理论上唯一；存档导入可能带重复 id，不能因此崩溃。
         let groupStates = Dictionary(
@@ -304,8 +304,8 @@ enum PromptComposer {
 
     /// 事件卡渲染。规格只写「已有事件卡渲染文本」，没给字段标签；沿用字段名对应的中文标签。
     ///
-    /// 字段值内部换行压成「；」：P53 与 P08 都按「字段：值」一行一条读，
-    /// 合并（`WorldMerge.appended`）留下的续行没有标签，会被模型当成游离正文。
+    /// 字段值内部换行压缩为「；」：P53 与 P08 均按「字段：值」单行格式解析，
+    /// 合并操作（`WorldMerge.appended`）产生的无标签续行会被模型误识别为游离正文。
     static func renderEvents(_ events: [EventCard]) -> String {
         events.map { event in
             var lines = ["【" + PromptLibrary.singleLine(event.title) + "】"]
@@ -330,7 +330,7 @@ enum PromptComposer {
 
     // MARK: - 工具
 
-    /// 取最后 `limit` 个 **码点**（P16 的 2000 字回灌）。
+    /// 获取末尾 `limit` 个码点（对应 P16 的 2000 字上下文注入）。
     static func codePointTail(_ text: String, limit: Int) -> String {
         let scalars = Array(text.unicodeScalars)
         let drop = max(0, scalars.count - limit)
@@ -342,8 +342,8 @@ enum PromptComposer {
 
     /// 块键里的「哈希前 12 位」。
     ///
-    /// Android 侧用的哈希算法未确认（这个值只做块身份，不进提示词正文），这里用
-    /// FNV-1a 64 位取十六进制前 12 位，至少保证同一段文本在同一台设备上稳定。
+    /// Android 端具体哈希算法未明确声明（该值仅用于块唯一标识，不进入提示词文本），此处采用
+    /// FNV-1a 64 位截取前 12 位十六进制字符，保证同段文本在同设备上的哈希稳定性。
     static func shortHash(_ text: String) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in text.utf8 {
@@ -376,9 +376,9 @@ extension PromptAssembly {
 
     /// 主写作请求的完整装配。
     ///
-    /// `from(world:manuscript:)` 只映射了世界书里那几样；真正上线时要额外带上
-    /// 全局设置里的预设/技能/去 AI 味规则、宇宙共享条目、语料库，以及项目级的
-    /// 补充指令——少了任何一条，模型拿到的上下文就和原版不一致。
+    /// `from(world:manuscript:)` 仅映射了世界书基础属性；完整装配需额外包含
+    /// 全局设置中的预设、技能、去 AI 味规则、宇宙共享条目、语料库以及项目级
+    /// 补充指令，确保模型获取的上下文信息与原版完全一致。
     static func from(
         world: WorldBook,
         manuscript: String,
@@ -421,7 +421,7 @@ extension PromptAssembly {
         assembly.plotOutline = PromptComposer.renderEvents(world.events)
 
         // 8 · 语料条目（P09）：注入启用语料库的全部条目（0.8.213 全量注入）。
-        // 全局「语料收集库」开关关掉时一律不注入——总开关的语义就是「本次写作不用语料」。
+        // 全局「语料收集库」开关关闭时一律不注入，表明本次写作流程不引用语料库内容。
         if settings.corpusEnabled {
             assembly.corpus = settings.corpusLibraries
                 .filter { $0.enabled }

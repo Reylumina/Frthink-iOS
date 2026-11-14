@@ -1,7 +1,6 @@
 # iOS 端共享契约
 
-Core 层已由 Lead 写完，**不要修改 `Core/` 和 `App/` 下的文件**。你只写自己负责的
-`Features/` 子目录，四个人的文件互不重叠，靠这份契约对接。
+Core 层已开发完毕，**请勿修改 `Core/` 与 `App/` 目录下的文件**。各模块仅在对应的 `Features/` 子目录内进行开发，各功能模块文件边界独立，依托本契约进行接口对接。
 
 目标：iOS 17.0+，Xcode 26（Swift 5 语言模式），无任何第三方依赖，纯 SwiftUI。
 
@@ -9,22 +8,21 @@ Core 层已由 Lead 写完，**不要修改 `Core/` 和 `App/` 下的文件**。
 
 ```
 ios/
-  Frthink.xcodeproj/          # 已建好，PBXFileSystemSynchronizedRootGroup 自动收录文件
+  Frthink.xcodeproj/          # 工程配置已完成，由 PBXFileSystemSynchronizedRootGroup 自动同步文件
   Frthink/
-    App/                      # Lead 负责，不要动
+    App/                      # 核心入口模块，请勿修改
       FrthinkApp.swift
       RootView.swift
       ProjectWorkspaceView.swift
-    Core/                     # Lead 负责，不要动
+    Core/                     # 核心底层模块，请勿修改
       Models/  Store/  LLM/  Prompts/  Design/
-    Features/                 # 四个人分
+    Features/                 # 业务特性模块
     Resources/Assets.xcassets
 ```
 
-**新增 .swift 文件不需要改 pbxproj**——工程用的是文件夹同步分组，放进
-`Frthink/Features/...` 就会被编译。
+**新增 `.swift` 源代码文件无需手动修改 `pbxproj`**——工程配置了文件系统同步分组，放置于 `Frthink/Features/...` 路径下即可自动参与编译。
 
-## 可以直接用的 API
+## 可直接调用的 API
 
 ### 数据
 
@@ -64,8 +62,8 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
     var activeProjects: [Project]                 // 不含回收站
     var trashedProjects: [Project]
     var settings: AppSettings
-    var toast: String?                            // 设了就会在底部弹 2 秒
-    var errorMessage: String?                     // 设了就会弹顶部错误条
+    var toast: String?                            // 赋值后将在底部弹出提示，展示时长 2 秒
+    var errorMessage: String?                     // 赋值后将在顶部展示错误横幅
     func createProject(title: String) -> Project
     func openSession(for: Project) -> ProjectSession
     func rename(_:to:) / setSynopsis(_:to:) / trash(_:) / restore(_:) / deleteForever(_:)
@@ -78,7 +76,7 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
 
 @MainActor @Observable final class ProjectSession
     var project: Project
-    var payload: ProjectPayload        // 直接读改，改完调 scheduleSave()
+    var payload: ProjectPayload        // 支持直接读写，修改后调用 scheduleSave()
     var sourceText: String             // 原文（翻译源）
     var translations: [TranslationSegment]
     var isDirty: Bool
@@ -95,7 +93,7 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
     func removeMessage(_ messageID: String)
     func addVariant(to messageID: String)              // 重新生成
     func selectVariant(_ variant: Int, for messageID: String)
-    func rollbackToMessage(_ messageID: String)        // 砍掉它之后的所有消息
+    func rollbackToMessage(_ messageID: String)        // 回退并清除该消息之后的所有历史消息
     var lastUserMessage / lastAssistantMessage: ChatMessage?
 ```
 
@@ -140,7 +138,7 @@ do {
     for try await event in client.stream(request) {
         switch event {
         case .delta(let text): session.appendDelta(text, to: message.id)
-        case .reasoning(let text): /* 可以攒到单独字段，也可以忽略 */
+        case .reasoning(let text): /* 可累积至独立字段，或按需忽略 */
         case .finished: break
         }
     }
@@ -154,7 +152,7 @@ do {
 ### 提示词
 
 ```swift
-enum PromptLibrary     // 全部提示词常量，逐字来自 APK，不要改措辞
+enum PromptLibrary     // 全部提示词常量，完全依循 APK 原文，严禁修改文案
 enum PromptComposer
     .writingSystemPrompt(world:manuscript:) -> String
     .writingMessages(world:manuscript:history:userInstruction:) -> [LLMMessage]
@@ -175,41 +173,38 @@ enum PromptComposer
 token 和共用组件以 [`docs/DESIGN.md`](../docs/DESIGN.md) 为准（组件清单见 §5.11），实现在 `Core/Design/Theme.swift` 和 `Core/Design/AppComponents.swift`。
 
 ```swift
-ToastView / ErrorBanner               // RootView 已经接了，业务侧设 store.toast / store.errorMessage 即可
+ToastView / ErrorBanner               // 已在 RootView 中接入，业务层仅需为 store.toast 或 store.errorMessage 赋值
 ```
 
-## 各人负责的产物（签名必须完全一致）
+## 各特性模块交付产物（类型签名必须完全一致）
 
-| 谁 | 文件 | 必须提供的类型 |
+| 模块 | 文件路径 | 必须实现的类型 |
 |---|---|---|
 | library | `Features/Library/` | `LibraryView(store: AppStore, onOpen: (Project) -> Void)` |
 | writer | `Features/Writer/` | `WriterPane(session: ProjectSession)` |
 | world | `Features/World/` | `WorldPane(session: ProjectSession)` |
 | settings | `Features/Settings/` + `Features/Translation/` | `SettingsView(store: AppStore)`、`TranslationPane(session: ProjectSession)` |
 
-`LibraryView` 里放一个 toolbar 入口打开 `SettingsView`（用 sheet 或
-navigationDestination 都行，自己决定）。`onOpen` 由 Lead 的 RootView 接管导航。
+`LibraryView` 中需提供工具栏入口以呈现 `SettingsView`（可通过 sheet 或 navigationDestination 实现）。`onOpen` 回调由 `RootView` 统一处理导航路由。
 
 ## 硬性约束
 
-1. **不要修改 `App/` 和 `Core/` 下的任何文件。** 需要新 API 就在自己的目录里加，
-   或写个同名的 `extension`（不能加存储属性）。
-2. **不要引入第三方依赖。** 没有 SPM 包，没有 CocoaPods。Markdown 渲染用
-   `AttributedString(markdown:)` 或自己写简单解析。
-3. **不用 SwiftData / CoreData。** 持久化已经由 `ProjectSession` + `FileStore` 做了。
-4. **视觉遵循 Theme。** 不要硬编码颜色值和字号，用 `Theme.*`。
+1. **严禁修改 `App/` 与 `Core/` 目录下的任何文件。** 如需扩展接口，应在自身业务目录下扩展，或编写同名类型的 `extension`（禁止新增存储属性）。
+2. **不要引入第三方依赖。** 不引入 SPM 包或 CocoaPods。Markdown 渲染使用 `AttributedString(markdown:)` 或基于轻量解析实现。
+3. **不用 SwiftData / CoreData。** 数据持久化已统一由 `ProjectSession` 与 `FileStore` 负责实现。
+4. **视觉遵循 Theme。** 禁止硬编码颜色值与字号字面量，统一使用 `Theme.*` 规范。
 5. **每个文件顶部写一句注释说明这个文件负责什么。**
 6. 上屏文案用中文，和 APK 里的说法保持一致（世界书、码字机、仿写模板、人物卡、
    事件卡、译文、语料收集库）。
 
 ## 编译验证
 
-本机没有 Xcode，**任何代码都没法在本地编译**。所以：
+本地未安装 Xcode，**无法在本地执行代码编译**。因此须遵循以下规范：
 
-- 只用确定的、稳定的 SwiftUI API。拿不准的写法换成更朴素的写法。
+- 仅使用确定且稳定的 SwiftUI API。对于不确定的高级特性，优先采用基础可靠的标准语法替代。
 - 不用 `#Preview` 之外的宏技巧；`@Observable` 已在 Core 里使用，可正常编译。
 - `@Environment(AppStore.self)` 取 store，注意 `@Bindable` 才能做双向绑定。
-- 写完自己通读一遍，检查：所有引用的类型是否真实存在、是否都在本文件里
-  `import SwiftUI` 了、闭包捕获是否会有并发告警。
+- 编写完成后须通读代码复核：确认所有引用的类型真实存在、对应文件均已正确引入
+  `import SwiftUI`、以及闭包捕获逻辑不会触发并发安全警告。
 
-CI 会在 GitHub 上编译（`.github/workflows/ios.yml`），报错会返回至工作流日志。
+CI 会在 GitHub 上编译（`.github/workflows/ios.yml`），编译错误信息将直接输出至工作流日志中。

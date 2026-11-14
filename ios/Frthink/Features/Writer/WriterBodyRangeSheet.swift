@@ -1,5 +1,5 @@
-// 正文发送范围：原版 `bodyPromptSendWhole` / `bodyPromptTailCodePoints`。
-// 只影响发给模型的正文片段，不改正文本身。
+// 正文提示词发送范围配置：对应 `bodyPromptSendWhole` 与 `bodyPromptTailCodePoints`。
+// 仅控制提交至模型上下文的正文截取范围，不修改本地正文数据。
 
 import SwiftUI
 

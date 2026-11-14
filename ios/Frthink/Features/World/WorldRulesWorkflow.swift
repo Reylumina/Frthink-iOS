@@ -33,7 +33,7 @@ enum WorldRulesWorkflow {
             .filter { !$0.isEmpty }
 
         guard !recentMessages.isEmpty else {
-            // 已经进过摘要的轮次不再重复发送：连点两次不该把同一批消息再送一遍。
+            // 过滤已生成摘要的会话轮次，避免重复处理。
             throw WorldRunError(
                 message: session.payload.messages.contains { $0.role == .user }
                     ? "没有新的用户消息可整理；已经整理过的对话不会重复发送。"
@@ -101,7 +101,7 @@ enum WorldRulesWorkflow {
             if error.isLLMCancellation { throw CancellationError() }
             throw WorldRunError(message: "摘要未更新：\(error.localizedDescription)")
         }
-        // 请求期间用户可能点了停止：取消后不写规则、不落盘，按「已停止」上报。
+        // 校验取消状态：任务被中断时放弃写入并终止流程。
         try Task.checkCancellation()
 
         let rawTrimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,8 +152,7 @@ enum WorldRulesWorkflow {
 
     /// 把模型输出写回世界书。
     ///
-    /// `cancelled` 为真时什么都不写并返回 `.cancelled`：用户点了「停止」以后，
-    /// 已经拿到的输出也不该改摘要、不该新增历史版本，更不该落盘。
+    /// 当 `cancelled` 为 true 时放弃修改并返回 `.cancelled`，防止已取消任务写入历史快照。
     static func applyRulesResult(
         _ text: String,
         selected: [ChatMessage],
@@ -172,9 +171,7 @@ enum WorldRulesWorkflow {
 
     // MARK: - 输入
 
-    /// 手动「用最近对话更新」只取还没进过摘要的用户消息。
-    ///
-    /// 避免连点两次重复生成历史版本，并与自动摘要（`WriterController`）口径保持一致。
+    /// 提取尚未生成摘要的用户消息列表，与自动摘要逻辑保持一致，避免重复生成历史版本。
     static func pendingUserMessages(
         _ messages: [ChatMessage],
         summarized: [String],

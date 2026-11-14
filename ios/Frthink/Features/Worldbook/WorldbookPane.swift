@@ -48,14 +48,14 @@ struct WorldbookPane: View {
                 WorldbookPromptPreviewSheet(entries: entries)
             }
         }
-        .deleteConfirmationDialog({ _ in "删除这条世界书词条？" }, item: $pendingDelete) { entry in
+        .deleteConfirmationDialog({ _ in "删除世界书词条？" }, item: $pendingDelete) { entry in
             delete(entry)
         }
     }
 
     // MARK: - 头部
 
-    /// 一行就够：启用计数 + 预览 + 新建。列表尽量早出现。
+    /// 顶部栏：展示启用计数、预览与新建操作入口。
     private var header: some View {
         HStack(spacing: Theme.Spacing.s) {
             Text("\(enabledEntries.count) / \(entries.count) 已启用")
@@ -223,7 +223,7 @@ struct WorldbookPane: View {
         )
     }
 
-    /// 新建、编辑、预览共用一个 sheet，避免同一个视图上挂多个 `.sheet`。
+    /// 新建、编辑、预览共用单个 sheet 容器，避免多重 sheet 触发转场冲突。
     private enum WorldbookSheet: Identifiable {
         case newEntry
         case edit(WorldbookEntry)
@@ -239,7 +239,7 @@ struct WorldbookPane: View {
     }
 }
 
-/// 世界书词条块预览：把启用词条的提示词块原样列出来。
+/// 世界书词条块预览：展示已启用词条生成的提示词块。
 struct WorldbookPromptPreviewSheet: View {
     let entries: [WorldbookEntry]
 

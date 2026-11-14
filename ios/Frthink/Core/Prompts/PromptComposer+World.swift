@@ -11,9 +11,9 @@ extension PromptComposer {
     /// → P29 分段正文 → P30 已有角色卡；user 侧是 P27（首轮）或 P28（增量）。
     ///
     /// - Parameters:
-    ///   - segment: 分段编号与字符范围。调用方拿不到时传 nil：user 消息只发指令本身，
-    ///     正文块不加「第 n/m 段」前缀（宁可不写，也不编造编号）。
-    ///   - targetCharacter: 单人补卡时的目标角色名（P23）。
+    ///   - segment: 分段序号与字符区间。调用方无法获取时传入 nil：user 消息仅发送指令本身，
+    ///     正文块不附带「第 n/m 段」前缀，避免生成未验证的分段标识。
+    ///   - targetCharacter: 单人补充时的目标角色名（P23）。
     ///   - worldBuildInstruction: 设置里改写过的「世界建立要求」（P18），默认用出厂值。
     static func worldRefreshMessages(
         existingCharacters: [CharacterCard],
@@ -35,8 +35,8 @@ extension PromptComposer {
             key: PromptLibrary.taskOutputContractKey,
             category: .agentPrompt,
             title: PromptLibrary.taskOutputContractTitle,
-            // 原版刷新固定用 P21 精简契约（`U2.java:472`，z3=false）；
-            // P20 全量契约在反编译调用点里没人传，不能拿来当刷新默认。
+            // 原版刷新逻辑固定采用 P21 精简契约（`U2.java:472`，z3=false）；
+            // P20 全量契约在反编译调用链路中未被引用，不应作为刷新默认配置。
             body: PromptLibrary.characterJSONContract(
                 full: false,
                 targetCharacter: targetCharacter,
@@ -82,7 +82,7 @@ extension PromptComposer {
         }
 
         // P29 · task:character-extraction:<哈希前12>:<段序号> · 正文
-        // 规格没给 P29 单独的块标题（段落信息在正文首行前缀里），这里用分类名「正文」。
+        // 规格未定义 P29 的独立块标题（分段信息包含于正文首行前缀），此处采用分类名称「正文」。
         // 大书模式只发一段完整前缀，不再套「第 n/m 段」的段落头。
         if !digest.isEmpty {
             blocks.append(PromptBlock(

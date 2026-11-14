@@ -1,6 +1,6 @@
 // 新建 / 重命名 / 改简介共用的输入弹窗。
 //
-// 这一页有草稿：关闭（取消或下滑）前必须确认放弃，不能静默丢掉已经输入的内容。
+// 包含草稿状态：关闭（取消或下拉返回）前需确认放弃，防止未保存输入丢失。
 // 单行字段只有填充底，没有描边和投影。
 
 import SwiftUI
@@ -19,7 +19,7 @@ struct LibraryInputSheet: View {
     @State private var text: String
     @State private var confirmingDiscard = false
     @FocusState private var focused: Bool
-    /// 打开时的原文，用来判断有没有未提交的输入。
+    /// 打开时的初始文本，用于比对判断是否存在未提交修改。
     private let initialText: String
 
     init(
@@ -39,7 +39,7 @@ struct LibraryInputSheet: View {
         self.initialText = initialText
         self.onCommit = onCommit
         _text = State(initialValue: initialText)
-        // `@FocusState` 在自定义 init 里要显式建好，避免漏初始化。
+        // 在自定义 init 中显式初始化 @FocusState，确保状态正常绑定。
         _focused = FocusState<Bool>()
     }
 
@@ -83,7 +83,7 @@ struct LibraryInputSheet: View {
             .pageBackground()
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
-            // 重命名/改简介的结果句要在这个 sheet 里可见。
+            // 确保当前弹窗能够展示操作结果 Toast 提示。
             .sheetToast()
             .toolbar { toolbarContent }
             .discardChangesDialog(isPresented: $confirmingDiscard, hasChanges: hasChanges) {
@@ -92,7 +92,7 @@ struct LibraryInputSheet: View {
             .presentationDetents([.medium, .large])
         }
         .onAppear {
-            // 单行输入一进来就给焦点，省一次点击。
+            // 单行输入框进入时默认聚焦，减少用户操作步骤。
             focused = !multiline
         }
     }
@@ -128,8 +128,8 @@ struct LibraryInputSheet: View {
 
     private func commit() {
         guard canCommit else { return }
-        // 先提交再关闭：新建书项目会在这里就触发 onOpen，
-        // 先提交可以保证弹窗收起和导航推入由同一轮状态更新驱动。
+        // 先提交再关闭：新建项目在此处触发 onOpen，
+        // 先提交可确保弹窗收起与导航推入由同一轮状态更新驱动。
         onCommit(trimmedText)
         dismiss()
     }

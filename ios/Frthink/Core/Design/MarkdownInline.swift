@@ -4,16 +4,16 @@ import SwiftUI
 /// 创作页回复里的 Markdown。
 ///
 /// 行内（`**加粗**`、`*斜体*`）统一走 `runs(_:)`，把文本切成带样式的片段——
-/// 流式与完成态都用这一份，换气泡时不会多出或吞掉一个星号。用户气泡仍走
-/// `AttributedString(markdown:)`。块级只认
+/// 流式生成与完成态统一使用该实现，避免状态切换时出现符号吞吐或格式跳变。用户气泡仍采用
+/// `AttributedString(markdown:)` 处理。块级只认
 /// 一到三级标题（行首 `#`、`##`、`###`），其余一律按正文排版——小说正文里的
 /// 星号、短横线很常见，全量块级解析会把它们误读成列表和分隔线。
 enum MarkdownInline {
     static func attributed(_ raw: String) -> AttributedString? {
-        // 加粗、斜体都交给系统解析；解析失败就退回纯文本，不会出现半截标记。
+        // 加粗与斜体均委托系统解析；解析失败则回退至纯文本，防止残留不完整的格式标记。
         guard raw.contains("*") || raw.contains("__") else { return nil }
-        // 带方括号或反引号时保持原文：行内解析会把 [注](url) 的方括号和反引号吃掉，
-        // 小说正文里这两个符号比 Markdown 结构更常见。
+        // 包含方括号或反引号时保留原始内容：标准行内解析会剥离括号或反引号，
+        // 而在小说文本中此类符号多为标点或引用，而非 Markdown 语法结构。
         guard !raw.contains("["), !raw.contains("`") else { return nil }
         return try? AttributedString(
             markdown: raw,
@@ -23,7 +23,7 @@ enum MarkdownInline {
 
     /// 整行只有分隔线标记（`---`、`***`、`___`）时返回 true。
     ///
-    /// 模型很爱在段与段之间插一条横线；小说正文里它们只是噪音，两处渲染都跳过。
+    /// 模型生成时常在段落间插入水平分割线；在小说正文中此类符号多属冗余噪点，渲染时予以忽略。
     static func isDivider(_ raw: String) -> Bool {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 3 else { return false }
@@ -37,7 +37,7 @@ enum MarkdownInline {
         guard trimmed.hasPrefix("#") else { return nil }
         let level = trimmed.prefix(while: { $0 == "#" }).count
         guard (1...3).contains(level) else { return nil }
-        // 必须跟一个空格才是标题；"#标签" 这种不算。
+        // 需后跟空格方判定为标题；类似 "#标签" 的内容不视为标题。
         let rest = trimmed.dropFirst(level)
         guard rest.hasPrefix(" ") || rest.hasPrefix("　") else { return nil }
         return level
@@ -55,8 +55,8 @@ enum MarkdownInline {
 
     /// 把一段按 `**` 和 `*` 切成带样式的 run，标记本身不显示。
     ///
-    /// 流式气泡和完成态气泡共用这一份解析：两边各写一套时，生成结束换气泡那一刻
-    /// 会出现「多一个星号 / 少一层加粗」的跳变。
+    /// 流式气泡与完成态气泡共享此解析逻辑，避免两套解析差异导致生成结束切换视图时
+    /// 出现格式跳变或标记残留。
     static func runs(_ raw: String) -> [(String, InlineStyle)] {
         guard raw.contains("*") else { return [(raw, .normal)] }
         var runs: [(String, InlineStyle)] = []

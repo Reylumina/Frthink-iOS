@@ -1,4 +1,4 @@
-// 同一本书的分支（平行稿）列表：可以打开任意分支，或再创建一条。
+// 同一本书的分支（平行稿）列表：可打开现有分支或新建分支。
 //
 // 分支也是书稿：行内沿用书架的「书脊 + 书名 + 一行元数据」语法，
 // 打开后与书架行看到的是同一本书的同一份索引。
@@ -7,7 +7,7 @@ import SwiftUI
 
 struct LibraryBranchesSheet: View {
     let store: AppStore
-    /// 当前正在看的这条分支，用来标记「当前」。
+    /// 当前活跃分支，用于标记当前查看项。
     let project: Project
     let onOpen: (Project) -> Void
 
@@ -32,8 +32,8 @@ struct LibraryBranchesSheet: View {
             .groupedPageBackground()
             .navigationTitle("分支")
             .navigationBarTitleDisplayMode(.inline)
-            // 这个 sheet 会写 `store.toast`（创建分支的结果），根视图的 toast 被
-            // 展示层盖住，所以在这一层再挂一次。
+            // 当前弹窗会写入 `store.toast`（分支创建结果）；因根视图 Toast 被
+            // 模态层覆盖，在此处单独挂载 Toast 提示。
             .sheetToast()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -99,15 +99,15 @@ struct LibraryBranchesSheet: View {
         store.branches(of: project)
     }
 
-    /// 第几条 + 最近编辑时间：和书架一样合成一行，不再单独放一行说明。
+    /// 分支序号与最近编辑时间合并显示，保持与书架格式一致。
     private func subtitle(for branch: Project) -> String {
         "第 \(branch.branchOrder + 1) 条 · " + LibraryFormat.updatedText(branch.updatedAt)
     }
 
-    /// 复制当前分支就是「再创建一条分支」：`duplicate` 会把副本挂到同一个分支根下。
+    /// 复制当前分支（即新建分支）：`duplicate` 会将副本关联至同一个分支根节点。
     private func createBranch() {
         let copy = store.duplicate(project)
-        // 失败时 `duplicate` 原样返回入参，用 id 区分成功与失败。
+        // 失败时 `duplicate` 返回原入参，通过 ID 区分操作结果。
         if copy.id != project.id {
             store.toast = "已创建分支「\(copy.title)」"
         }

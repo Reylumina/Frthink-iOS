@@ -21,7 +21,7 @@ enum WorldWorkflow {
         let addedCharacters: Int
         let updatedCharacters: Int
         let processedChunks: Int
-        /// 本次跑完后仍未整理的段数（取消、失败或大书截断之外的剩余）。
+        /// 本次执行后尚未完成分析的分段数。
         let remainingChunks: Int
         /// 人物去重是可选步骤，失败时的提示挂在这里。
         var dedupeNote: String? = nil
@@ -60,7 +60,7 @@ enum WorldWorkflow {
     ///
     /// - 已有世界资料时是增量模式：从 `refreshedUpTo` 之后继续，只提取新事实。
     /// - `forceFull` 为 true 时忽略断点，从正文开头重新整理（合并仍然只增不减）。
-    /// 每处理完一段就落一次 `refreshedUpTo`，中途失败不会丢掉已完成的进度。
+    /// 每段处理完毕即持久化更新 `refreshedUpTo` 断点进度。
     static func refreshWorld(
         session: ProjectSession,
         store: AppStore,
@@ -80,7 +80,7 @@ enum WorldWorkflow {
             ContentHash.of(manuscript)
         }.value
 
-        // 大书模式：正文 ≥ 50 万码点，按模型上下文一次分析一个前缀，断点续跑。
+        // 超长文本模式：正文 ≥ 50 万码点时截取最大上下文前缀进行分析并支持断点续跑。
         if WorldDigest.usesWholeTextPass(manuscript) {
             return try await refreshWholeText(
                 session: session,
@@ -96,17 +96,17 @@ enum WorldWorkflow {
         }
 
         // 分段续抽：`characterAnalysisCheckpoint` 记录已完成段，正文未变时仅补未完成段。
-        // 单段预算：min(4000, 输入预算 × 0.2) token，输入预算过小时保底 256。
+        // 单段预算：min(4000, 输入预算 × 0.2) token，保底 256 token。
         let chunkBudget = min(
             WorldDigest.tokenChunkCap,
             max(256, store.settings.inputBudgetTokens / 5)
         )
-        // 56 万字的切段是纯计算，不能占主线程；先丢后台再回主线程改断点。
+        // 正文分段计算由后台任务执行，避免阻塞主线程。
         let allSegments = await Task.detached(priority: .userInitiated) {
             WorldDigest.chunks(of: manuscript, tokenBudget: chunkBudget)
         }.value
         if session.payload.world.analysisSourceHash != sourceHash {
-            // 正文变过，之前的段进度和未落库候选都作废。
+            // 正文内容发生变动，重置历史分段进度与临时候选数据。
             resetAnalysisCheckpoint(session: session, sourceHash: sourceHash)
             session.payload.world.analysisSegmentCount = allSegments.count
         } else if session.payload.world.analysisSegmentCount != allSegments.count {
@@ -128,7 +128,7 @@ enum WorldWorkflow {
         let chunks = batchIndexes.map { allSegments[$0] }
 
         guard !chunks.isEmpty else {
-            // 上次可能正好跑完最后一段但没来得及去重/落库，这里补完。
+            // 若所有分段已完成但尚未执行最终合并，在此触发结算落库。
             if isAnalysisComplete(
                 completed: session.payload.world.completedAnalysisSegments,
                 total: allSegments.count
@@ -194,15 +194,14 @@ enum WorldWorkflow {
                 )
             }
 
-            // 这一段做完了：记进断点，中途失败下次接着跑。
+            // 当前分段处理完成：更新断点记录以支持断点续跑。
             if !session.payload.world.completedAnalysisSegments.contains(segmentIndex) {
                 session.payload.world.completedAnalysisSegments.append(segmentIndex)
             }
             session.payload.world.refreshedUpTo =
                 session.payload.world.completedAnalysisSegments
                     .reduce(0) { sum, done in
-                        // 存档里的段序号可能越界（旧书/损坏 payload），越界就跳过，
-                        // 不能让一个坏索引把整轮刷新崩掉。
+                        // 校验分段索引有效性，防止越界异常中断流程。
                         guard allSegments.indices.contains(done) else { return sum }
                         return sum + allSegments[done].text.unicodeScalars.count
                     }
@@ -210,7 +209,7 @@ enum WorldWorkflow {
             session.scheduleSave()
         }
 
-        // 全部段都完成才写库；一次刷新只发一次 P32 去重请求。
+        // 所有分段全部完成后统一执行去重并持久化落库。
         if isAnalysisComplete(
             completed: session.payload.world.completedAnalysisSegments,
             total: allSegments.count
@@ -240,7 +239,7 @@ enum WorldWorkflow {
         return valid.count == total
     }
 
-    /// 正文变过以后，旧段进度、候选和完成标记一起作废。
+    /// 正文内容变更时重置分段分析断点状态与候选集。
     private static func resetAnalysisCheckpoint(
         session: ProjectSession,
         sourceHash: String
@@ -253,15 +252,11 @@ enum WorldWorkflow {
         session.payload.world.analysisMergedCards = []
         session.payload.world.analysisWorldRefreshComplete = false
         session.payload.world.refreshedUpTo = 0
-        // 概览按码点数判断「大书模式」；正文改过还留着旧值，状态行会按
-        // 上一版的字数显示进度。分段路径本身不用这个字段。
+        // 重置源码码点计数，避免历史数值影响进度展示。
         session.payload.world.analysisSourceCodePointCount = 0
     }
 
-    /// 大书模式：一次只分析上下文放得下的前缀，落盘后等下一次点击继续。
-    ///
-    /// 正文 ≥ 50 万码点时不切小段，而是将上下文放得下的前缀整段送入，
-    /// 并用「已分析正文前 N 字」提示剩余量。
+    /// 超长文本模式：单次分析上下文容量允许的最大前缀，完成后持久化并支持后续继续处理。
     private static func refreshWholeText(
         session: ProjectSession,
         store: AppStore,
@@ -379,8 +374,7 @@ enum WorldWorkflow {
 
     /// 把候选去重后并入人物卡。分段模式等全部段完成再调用，大书模式每前缀调用一次。
     ///
-    /// 候选只在写库成功后才清空：去重请求被取消或失败时，下一轮还要靠这份候选补写，
-    /// 先清会让「全部段已完成但一张卡都没有」变成永久状态。
+    /// 候选数据仅在落库成功后清空；请求失败或中断时保留候选集，以便重试恢复。
     private static func commitCandidates(
         session: ProjectSession,
         context: WorldRequestContext

@@ -1,9 +1,6 @@
 // 本文件负责：写作台底部输入条（独立视图）。
 //
-// 为什么要拆出来：输入框的 `text` 若放在 `WriterPane` 的 `@State` 里，每敲一个
-// 字都会让整页 body 重算（正文编辑器、章节条、对话列表都跟着求值）。按 Apple
-// WWDC25《Optimize SwiftUI performance with Instruments》的建议，把高频变化的
-// 状态隔离到只依赖它的小视图，写作台只保留低频状态。
+// 将高频变化的输入文本状态独立封装至子视图中，避免输入过程中触发父视图大范围重新求值。
 
 import SwiftUI
 import UIKit
@@ -26,7 +23,7 @@ struct WriterComposerBar: View {
     @Bindable var model: WriterComposerModel
     @Environment(AppStore.self) private var store
 
-    /// 返回 false 表示没发出去（未配置供应方等），输入框要把文字还回去。
+    /// 发送回调，返回 false 表示发送未成功，输入框还原原草稿文本。
     let onSend: (String) -> Bool
     let onContinue: () -> Void
     /// 截图流水线用：进入页面就聚焦输入框。
@@ -79,7 +76,7 @@ struct WriterComposerBar: View {
             focused = false
         }
         .onDisappear {
-            // 切页/切书时把没落盘的草稿立刻写掉。
+            // 页面退出或切换项目时立即持久化输入草稿。
             saveDraft()
         }
     }
@@ -207,8 +204,7 @@ struct WriterComposerBar: View {
 
 /// 输入条外壳。§1.6：iOS 26 只有输入框是玻璃胶囊，发送键是实心圆，
 /// 所以这一条只有一个玻璃元素、不套 `GlassEffectContainer`，也不铺满宽底条；
-/// 17–25 回落成 `.bar` 材质满宽底条。两档分支收在组件里，页面代码不写
-/// `#available`（§5.2）。
+/// 内部兼容不同系统版本的材质适配，封装系统版本分支判断。
 private struct WriterComposerShell<Content: View>: View {
     private let content: Content
 

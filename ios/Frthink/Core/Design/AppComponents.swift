@@ -1,4 +1,4 @@
-// 二/三/四级界面通用件：只补系统默认样式缺的部分，不持业务状态。
+// 二/三/四级界面通用组件：仅补充系统默认样式缺失部分，不持有业务状态。
 
 import SwiftUI
 import UIKit
@@ -16,8 +16,8 @@ extension View {
 
 /// 行内圆形图标按钮的可见部分：36pt 圆 + 居中符号（§5.1）。
 ///
-/// 只画外形，热区由外层的 `CircleIconButton` 或调用方补到 44pt。
-/// 单独拆出来是因为 `Menu` 也要用同一个圆做 label。
+/// 仅绘制视觉外形，点击热区由外层 `CircleIconButton` 或调用方补足至 44pt。
+/// 独立拆分以便 `Menu` 组件复用该圆形样式作为 label。
 struct CircleIconLabel: View {
     let symbol: String
     var fill: Color = Theme.accentSoft
@@ -36,8 +36,8 @@ struct CircleIconLabel: View {
 
 /// 行内圆形图标按钮：可见 36pt（Theme.Layout.controlHeight），热区 44pt（§5.1）。
 ///
-/// 世界页的排序、新建等一行里的圆钮都走这里，避免每处再抄一遍
-/// 「画圆 → 补热区 → contentShape」。
+/// 世界页排序、新建等行内圆形按钮统一使用此组件，避免各处重复编写
+/// 绘制圆形、补足热区与 contentShape 逻辑。
 struct CircleIconButton: View {
     let symbol: String
     let label: String
@@ -63,7 +63,7 @@ struct CircleIconButton: View {
 
 /// 行内搜索框：36pt 胶囊 + 放大镜 + 清除键（§5.1）。
 ///
-/// 清除键跟胶囊同高，不参与行高：写成 44pt 会让输入文字后整条长高 8pt。
+/// 清除按钮与胶囊等高，不参与行高计算：若设为 44pt 会导致输入文字后整栏高度增加 8pt。
 /// 焦点由组件自己持有，调用方不关心。
 struct InlineSearchField: View {
     let placeholder: String
@@ -92,7 +92,7 @@ struct InlineSearchField: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(Font.footnote)
                         .foregroundStyle(.tertiary)
-                        // 热区 44pt，负内边距把占位让回去，搜索框不会因此长高（§5.1）。
+                        // 点击热区 44pt，通过负内边距抵消外扩占位，避免搜索框高度增加（§5.1）。
                         .frame(
                             width: Theme.Layout.hitTarget,
                             height: Theme.Layout.hitTarget
@@ -144,8 +144,8 @@ enum AppTone {
 
 /// 设置行 / 分类入口左侧的图标印章。
 ///
-/// 尺寸走 `@ScaledMetric`（基准 28pt）：系统设置的方块在无障碍字号下也会跟着放大。
-/// 圆角、字形比例对着系统设置量的：22.6% 圆角、54% 字形、medium 字重。
+/// 尺寸采用 `@ScaledMetric`（基准 28pt）：图标背景方块在辅助功能字号下同步缩放。
+/// 圆角与字形比例严格对齐系统设置规范：22.6% 圆角、54% 字形比例、medium 字重。
 struct IconTile: View {
     let symbol: String
     var tint: Color = Theme.accent
@@ -154,7 +154,7 @@ struct IconTile: View {
     /// 实底 + 白色符号（一级分类用，和 Apple 设置同一个做法）；默认是淡底 + tint 符号。
     var filled: Bool = false
 
-    /// 基准 28pt、圆角 22.6%、字形 54%、medium：对着系统设置的方块量的。
+    /// 基准 28pt、圆角 22.6%、字形 54%、medium：对齐系统设置规范度量。
     @ScaledMetric(relativeTo: .body) private var baseSize: CGFloat = Theme.Layout.iconTileSize
 
     private var effectiveSize: CGFloat { size ?? baseSize }
@@ -172,7 +172,7 @@ struct IconTile: View {
     }
 }
 
-/// AI 服务商图标：有官方品牌标就用资产图，否则退回 SF Symbol。
+/// AI 服务商图标：优先使用官方品牌资产图标，无资产时回退至 SF Symbol。
 ///
 /// 品牌标不做 tinted symbol，保留官方颜色；底色用中性灰，避免品牌色和主题色
 /// 互相染色。当前项由旁边的「当前」胶囊表示，不靠图标颜色。
@@ -216,8 +216,8 @@ struct ProviderIcon: View {
 
 /// 工具栏圆形按钮的标签：28pt 圆 + 一条细描边。
 ///
-/// 和系统搜索框右侧的关闭键同一种形状，顶栏几个动作因此有统一的轮廓，
-/// 不再是一排粗细不一的裸符号。
+/// 与系统搜索框右侧关闭按钮同构，使顶栏各操作具备统一的视觉轮廓，
+/// 避免多个独立符号粗细不一致。
 struct ToolbarCircleIcon: View {
     let symbol: String
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = Theme.Layout.iconTileSize
@@ -263,7 +263,7 @@ struct AppSettingsRow: View {
     var detail: String? = nil
 
     var body: some View {
-        // 无障碍字号下横排放不下时改竖排：图标在上，标题与值各占一行（§5.5）。
+        // 辅助功能字号下横向空间不足时切换为纵向排版：图标置顶，标题与数值各占一行（§5.5）。
         ViewThatFits(in: .horizontal) {
             horizontal
             vertical
@@ -324,7 +324,7 @@ struct AppValueRow: View {
     @ScaledMetric(relativeTo: .footnote) private var iconColumn: CGFloat = 20
 
     var body: some View {
-        // 无障碍字号下值放不进同一行时改竖排，避免数值折行断字（§5.5）。
+        // 辅助功能字号下数值无法单行容纳时切换为纵向排版，避免数值异常折行断字（§5.5）。
         ViewThatFits(in: .horizontal) {
             horizontal
             vertical
@@ -377,8 +377,8 @@ struct StatusPill: View {
     var body: some View {
         Text(text)
             .font(Theme.badge)
-            // 同色小字压在 16% 同色底上，浅色档只有 2:1 上下；往正文色方向压一档，
-            // 深浅两档都过 4.5:1，颜色语义仍在。
+            // 同色小字置于 16% 纯度背景时，浅色模式对比度仅约 2:1；向正文色阶调整后，
+            // 深浅两档对比度均满足 4.5:1 标准，且保持色彩语义清晰。
             .foregroundStyle(tone.pillText)
             .padding(.horizontal, Theme.Spacing.s)
             .padding(.vertical, 2)
@@ -448,9 +448,9 @@ private struct FieldChrome: ViewModifier {
     var vertical: CGFloat = Theme.Spacing.s
     /// 表单行内的字段：不自己画圆角矩形。
     ///
-    /// 卡片本身已经是一个大圆角，里面再套一个圆角输入框就成了「圆角套圆角」，
-    /// 内外半径也对不上（同心圆角要求内 = 外 − 内边距）。表单里把圆角交给卡片，
-    /// 字段只保留内边距与聚焦描边。
+    /// 卡片容器本身具备圆角，若内部输入框重复绘制圆角易造成视觉嵌套不协调，
+    /// 且同心圆角半径难保证完全匹配。表单场景下将圆角由外部卡片统一呈现，
+    /// 输入字段仅保留内边距与聚焦描边。
     var flat: Bool = false
 
     func body(content: Content) -> some View {

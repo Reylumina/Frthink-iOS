@@ -2,7 +2,7 @@ import Foundation
 
 /// 宇宙层：跨书项目共享的设定与预设。
 ///
-/// 和「世界」的区别在数据归属上——世界的资料只属于一本书
+/// 与「世界」的区别在于数据归属维度：世界数据仅作用于单一书稿
 /// （`ProjectPayload.world`），宇宙资料属于全局（`AppSettings.universeEntries`），
 /// 每本书单独决定启用哪几条（`ProjectPayload.enabledUniverseEntryIDs`）。
 ///
@@ -33,7 +33,7 @@ struct UniverseEntry: Identifiable, Codable, Hashable {
     var title: String
     var body: String
     var kind: Kind
-    /// 全局开关：关掉后所有书都不再注入；每本书的勾选仍单独保存。
+    /// 全局开关：关闭后所有书稿均不再注入；单本书稿的启用状态仍独立保留。
     var enabled: Bool
     var updatedAt: Date
 

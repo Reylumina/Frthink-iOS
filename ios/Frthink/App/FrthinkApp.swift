@@ -13,7 +13,7 @@ struct FrthinkApp: App {
     var body: some Scene {
         WindowGroup {
             if SelfCheck.isRequested {
-                // CI 用 `-runSelfCheck` 拉起来跑一遍纯逻辑，输出进日志后退出。
+                // CI 通过 `-runSelfCheck` 参数启动执行纯逻辑自检，将结果输出至日志后退出。
                 Color.clear
                     .onAppear {
                         let code = SelfCheck.run()

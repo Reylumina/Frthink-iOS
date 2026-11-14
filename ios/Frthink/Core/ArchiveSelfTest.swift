@@ -3,13 +3,13 @@ import Foundation
 #if DEBUG
 /// Debug 构建里的 gzip 互认自检。
 ///
-/// 只测「自己压、自己解」证明不了和 Android 互认，所以额外用 `gzip(1)` 那一套
-/// 生成的标准字节流解一遍（下面几组 base64 由 Python 的 `gzip.compress` 产出，
-/// 其中一组带 FEXTRA/FNAME/FCOMMENT 标志），再核对 CRC32 的标准测试向量。
-/// 设置页在 Debug 构建里会自动跑一遍并显示结果，CI 的模拟器编译也会走到。
+/// 仅测试内部压缩与解压无法验证与 Android 端的互操作性，因此额外使用 `gzip(1)`
+/// 生成的标准字节流进行解压验证（以下几组 base64 数据由 Python 的 `gzip.compress` 生成，
+/// 其中一组包含 FEXTRA/FNAME/FCOMMENT 标志位），并比对 CRC32 标准测试向量。
+/// 设置页在 Debug 构建下会自动执行该测试并展示结果，CI 模拟器构建阶段亦会覆盖此流程。
 enum FrthinkArchiveSelfTest {
 
-    /// 返回一行摘要：全过就是「自检通过」，否则带第一条失败原因。
+    /// 返回一行摘要：全项通过显示「自检通过」，否则附带首项失败原因。
     static func run() -> String {
         var failures: [String] = []
 
@@ -132,7 +132,7 @@ enum FrthinkArchiveSelfTest {
             } catch FrthinkArchiveError.unsupportedFormat {
                 rejected = true
             } catch {
-                // 其它错误也算拒绝，但这条用例想验的就是版本分支。
+                // 其他错误亦属于拒绝范畴，但本测试用例旨在专项验证版本校验分支。
             }
             check("拒绝 version 2", rejected)
         } catch {

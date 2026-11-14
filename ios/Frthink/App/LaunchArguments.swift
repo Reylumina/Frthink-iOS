@@ -2,8 +2,8 @@ import Foundation
 
 /// 启动参数集中解析。
 ///
-/// 截图流水线用 `-initialTab` / `-worldTab` / `-readerPanel` 等参数把界面
-/// 直接摆到某个状态；演示数据用 `-seedDemo`。
+/// 截图流水线通过 `-initialTab` / `-worldTab` / `-readerPanel` 等参数使界面
+/// 直接导航至指定状态；演示数据通过 `-seedDemo` 注入。
 enum LaunchArguments {
     static var initialTab: String? { value(after: "-initialTab") }
     static var worldTab: String? { value(after: "-worldTab") }

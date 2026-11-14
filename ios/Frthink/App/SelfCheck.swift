@@ -2,11 +2,11 @@ import Foundation
 
 /// 运行时自检。
 ///
-/// 用启动参数 `-runSelfCheck` 触发，跑完把结果打到 stdout 并退出。
+/// 通过启动参数 `-runSelfCheck` 触发，执行完成后将结果输出至标准输出并退出。
 /// CI 的 `xcrun simctl launch --console-pty` 会把输出抓下来，所以这是
-/// **「逻辑真的执行了」**的证据，而不是「能编译」。
+/// **「业务逻辑实际执行」**的验证，而非仅验证「可编译」。
 ///
-/// 只测纯逻辑：不联网、不依赖用户数据。目的是覆盖那些光看代码看不出错的地方——
+/// 仅测试纯业务逻辑：不依赖网络与用户数据。旨在覆盖仅通过静态代码审查难以发现的问题——
 /// 提示词块顺序、token 估算数值、预算推导、存档 gzip 往返。
 enum SelfCheck {
 
@@ -47,7 +47,7 @@ enum SelfCheck {
     /// 异步自检：把 body 交给 MainActor 任务后泵主线程，等它真正完成。
     ///
     /// `saveNowAndWait()` 要等后台写盘，写盘完成回调又回到 MainActor；同步的
-    /// `check` 里没法 await，直接阻塞主线程又会死锁。这里让出主线程（RunLoop
+    /// `check` 为同步方法无法直接 await，若直接阻塞主线程会导致死锁。此处让出主线程调度（RunLoop
     /// 会处理 MainActor 上的任务），最多等 15 秒。
     private static func checkAsync(
         _ name: String,
@@ -87,7 +87,7 @@ enum SelfCheck {
         #endif
         lines.append("=== Frthink self check ===")
 
-        // 1 · token 估算（权重照抄原版，结果应当完全一致）
+        // 1 · token 估算（权重与原版严格对齐，计算结果完全一致）
         check("token.estimate") {
             // "你好" = 2 个汉字 → 2.0 * 1.2 = 2.4 → ceil 3 → +6 = 9
             let cjk = TokenEstimator.estimate("你好")
@@ -321,7 +321,7 @@ enum SelfCheck {
                 "剧情/仿写归纳预设没有导入"
             )
 
-            // 写盘 + 读回：证明落盘链路真的能跑，而不只是解码成功。
+            // 写盘与读回：验证持久化存储链路完整可用，而非仅验证解码成功。
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-selfcheck-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: root) }
@@ -505,7 +505,7 @@ enum SelfCheck {
             return "2 本书译文归属 ok"
         }
 
-        // snapshot 解不出来必须整本失败，不能静默用空快照覆盖同名书
+        // snapshot 解码失败必须中断整本书导入，禁止以空快照静默覆盖同名书稿
         check("archive.rejectBrokenSnapshot") {
             var payload = ArchiveFixture.payload()
             var projects = payload["projects"] as? [[String: Any]] ?? []
@@ -586,7 +586,7 @@ enum SelfCheck {
         }
 
         // Android 两份书都用 index 0 起排的 TranslationRecord；没有 project 字段，
-        // 导入时必须按所属项目补齐，否则会被判成重复译文整份失败。
+        // 导入时必须按所属项目补齐，否则会因判定为重复译文导致整体导入失败。
         check("archive.androidMultiBookTranslations") {
             var payload = ArchiveFixture.payload()
             var projects = payload["projects"] as? [[String: Any]] ?? []
@@ -654,7 +654,7 @@ enum SelfCheck {
         }
 
         // 全量恢复：Android 备份没有 activeProviderID，导入后必须保留本机选中的
-        // 供应方；退化成列表第一个会把用户切到可能没填 Key 的那条。
+        // 供应方；若直接回退至列表第一项，可能导致切换至未配置 API Key 的供应商。
         check("archive.fullRestoreKeepsActiveProvider") {
             let deepseek = ProviderSetting(kind: .deepseek)
             let openRouter = ProviderSetting(kind: .openRouter)
@@ -721,8 +721,8 @@ enum SelfCheck {
             return "缺键设置保留本机值 ok"
         }
 
-        // 真实 Android 备份要能给出「实际出现的设置键」，否则合并时的缺键保留
-        // 永远不生效；这条同时用真实数据验证缺键不会被 iOS 出厂值覆盖。
+        // 真实 Android 备份需解析出「实际存在的设置键」，以确保合并时的缺键保留策略生效；
+        // 此用例同时使用真实数据验证缺失键不会被 iOS 默认值覆盖。
         check("archive.androidSettingsKeyNames") {
             guard let url = Bundle.main.url(
                 forResource: "fixture-backup",
@@ -768,8 +768,8 @@ enum SelfCheck {
             return "真实备份设置键 \(backup.settingsKeyNames.count) 个"
         }
 
-        // 本机 settings.json 里一条供应方坏掉时，不能把整组供应方解成空数组：
-        // 启动后没有供应方，下一次保存还会把空列表写回去。
+        // 本机 settings.json 中单个供应方损坏时，禁止将整组供应方反序列化为空数组：
+        // 否则启动后供应方丢失，后续持久化会将空列表写盘。
         check("archive.loadSettingsRecoversProviders") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-settings-\(UUID().uuidString)")
@@ -809,8 +809,8 @@ enum SelfCheck {
             return "单条坏供应方不影响其余条目 ok"
         }
 
-        // 导出前必须查 payload 状态：损坏/缺页的书不能导出成「成功但没有对话、
-        // 世界或正文」的备份，否则拿它恢复会把本机数据真的弄丢。
+        // 导出前必须检查 payload 状态：损坏或缺页的书稿禁止导出为缺失对话、
+        // 世界或正文的不完整备份，避免后续恢复造成数据丢失。
         check("archive.exportRejectsCorruptPayload") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-export-\(UUID().uuidString)")
@@ -856,8 +856,8 @@ enum SelfCheck {
             return "损坏 payload / 缺页导出被拒绝 ok"
         }
 
-        // 覆盖导入后，已缓存会话必须换成磁盘上的新内容并复位只读，否则旧会话
-        // 会把旧稿写回去，阅读页也还拿着旧的分页缓存。
+        // 覆盖导入后，已缓存会话必须替换为磁盘中的最新内容并重置只读状态，防止旧会话
+        // 将旧数据写回磁盘，以及阅读页继续持有陈旧的分页缓存。
         check("archive.overwriteRefreshesSession") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-overwrite-\(UUID().uuidString)")
@@ -999,7 +999,7 @@ enum SelfCheck {
             return "消息多版本 / 文风笔记 / 译文往返 ok"
         }
 
-        // 10 · 解码失败要说出缺哪个键
+        // 10 · 解码失败需明确指出缺失的具体键名
         check("archive.decodeDetail") {
             var broken = ArchiveFixture.payload()
             broken.removeValue(forKey: "projects")
@@ -1015,7 +1015,7 @@ enum SelfCheck {
             }
         }
 
-        // 12 · 思考档位请求体（关闭时不追加、开启时按供应方发对字段）
+        // 12 · 思考档位请求体（关闭时不追加、开启时按供应方规范传递正确字段）
         check("llm.thinkingLevel") {
             let base = LLMRequest(model: "m", messages: [.user("hi")], stream: false)
 
@@ -1260,7 +1260,7 @@ enum SelfCheck {
             try expect(files.loadPayload(projectID).manuscript == payload.manuscript,
                        "解密读回不一致")
 
-            // 旧明文要自动迁移：写一份明文，读一次，文件应变成密文。
+            // 旧明文需自动迁移：写入明文数据后执行单次读取，文件应自动迁移为密文格式。
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(payload).write(to: url, options: .atomic)
@@ -1269,7 +1269,7 @@ enum SelfCheck {
             let migrated = try Data(contentsOf: url)
             try expect(PayloadCipher.isEncrypted(migrated), "旧明文没有加密迁移")
 
-            // 认证标签被改动后必须解不开，不能静默返回错数据。
+            // 认证标签被篡改后必须解密失败，禁止静默返回错误数据。
             var tampered = sealed
             tampered[tampered.count - 1] ^= 0xFF
             var rejected = false
@@ -1376,7 +1376,7 @@ enum SelfCheck {
             return "落盘密文 / 读回 / 明文迁移 / 篡改拒绝 / 原文与译文 / 正文独立文件 均通过"
         }
 
-        // 损坏的 payload 不能当空书：只读打开，且任何保存都不落盘
+        // 损坏的 payload 禁止作为空书稿处理：以只读模式打开，且阻止任何写盘操作
         check("store.corruptPayload") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-corrupt-\(UUID().uuidString)")
@@ -1455,7 +1455,7 @@ enum SelfCheck {
             return "键 / SHA-256 / 历史版本 均通过"
         }
 
-        // 恢复上一版摘要：弹出最后一条历史，内容与源键回滚，updatedAt 记为当前
+        // 恢复上一版摘要：弹出最后一条历史记录，回滚内容与源键，并更新 updatedAt 为当前时间
         check("summary.restore") {
             var world = WorldBook()
             let key = SummaryKey.messageKey(id: "m1", content: "要求")
@@ -1483,7 +1483,7 @@ enum SelfCheck {
             return "恢复上一版 / 时间戳 ok"
         }
 
-        // 生成中断恢复：进程在生成中被杀后，下次启动把消息标成中断。
+        // 生成中断恢复：进程在生成过程中被终止后，下次启动需将消息标记为中断状态。
         check("generation.recovery") {
             var payload = ProjectPayload()
             payload.generatingMessageID = "msg-1"
@@ -1558,7 +1558,7 @@ enum SelfCheck {
             return "空正文世界书块 ok"
         }
 
-        // 世界字段追加：换行分隔，不能把新事实串成一排分号
+        // 世界字段追加：换行分隔，禁止将新增事实拼接为连续分号
         check("world.mergePunctuation") {
             let merged = WorldMerge.appended("旧事实。", "新事实一。新事实二。")
             try expect(
@@ -1569,7 +1569,7 @@ enum SelfCheck {
             return "换行追加 ok"
         }
 
-        // 事件卡合并：同名只补字段、空标题跳过、别的事件新增，不能整表重写。
+        // 事件卡合并：同名仅补充字段、空标题忽略、其他事件新增，禁止全表覆盖重写。
         check("world.mergeEvents") {
             let existing = [
                 EventCard(title: "雨夜来客", characters: ["林昭"], cause: "林昭找书")
@@ -1665,7 +1665,7 @@ enum SelfCheck {
             return "事件数组与别称校验 ok"
         }
 
-        // 事件字段并段：模型一句一行时不能原样上屏成短句列表
+        // 事件字段并段：模型按行输出单句时，不可直接展示为短句列表
         check("world.eventProse") {
             let raw = #"{"events":[{"title":"雨夜","scene":"旧书店。\n雨声很密。","development":"她推门。\n他抬头。","consequence":"两人相认。"}]}"#
             let events = try WorldJSON.parseEvents(raw)
@@ -1679,7 +1679,7 @@ enum SelfCheck {
                 "经过换行未并段：\(events[0].development)"
             )
 
-            // 空行是段落分隔：段内并句，段间保留换行，长「经过」不能压成一整块
+            // 空行作为段落分隔：段内合并单句，段间保留换行，避免长段落文本被压缩为单一文本块
             let paragraphic = #"{"events":[{"title":"雨夜","development":"她推门。\n他抬头。\n\n两人对视。\n谁都没说话。","consequence":"相认。"}]}"#
             let split = try WorldJSON.parseEvents(paragraphic)
             try expect(
@@ -1687,7 +1687,7 @@ enum SelfCheck {
                 "空行分段未保留：\(split[0].development)"
             )
 
-            // 漏标点、半角标点、列表符号都要在解析时修好
+            // 缺失标点、半角标点及列表符号均需在解析阶段完成修正
             let messy = #"{"events":[{"title":"雨夜。","scene":"- 旧书店\n- 雨声很密","development":"她推门.\n他抬头!","consequence":"两人相认"}]}"#
             let fixed = try WorldJSON.parseEvents(messy)
             try expect(fixed[0].title == "雨夜", "标题应去掉句读：\(fixed[0].title)")
@@ -1704,7 +1704,7 @@ enum SelfCheck {
                 "段末缺句号未补：\(fixed[0].consequence)"
             )
 
-            // 反向宽度变换来自 Foundation；中文行里的半角标点靠它转全角
+            // 反向宽度变换来自 Foundation；中文行里的半角标点通过其转换为全角标点
             try expect(
                 ",".applyingTransform(.fullwidthToHalfwidth, reverse: true) == "，",
                 "Foundation 反向宽度变换不可用"
@@ -1728,7 +1728,7 @@ enum SelfCheck {
             return "事件字段并段与标点修复 ok"
         }
 
-        // 大书模式：≥50 万码点走单前缀，前缀按 1.2 安全系数卡预算
+        // 大作品模式：≥50 万码点采用单前缀策略，前缀按 1.2 安全系数控制上下文预算
         check("world.wholeTextPlan") {
             let threshold = WorldDigest.wholeTextCodePointThreshold
             try expect(
@@ -1757,7 +1757,7 @@ enum SelfCheck {
         }
 
         // P11/P53 的块形状是「一行一个字段：值」。合并按换行追加新事实，
-        // 字段值里的换行必须在渲染时压成「；」，否则会多出无标签续行。
+        // 字段值中的换行符在渲染时需替换为「；」，避免产生无标签前缀的悬空行。
         check("world.fieldOneLine") {
             // 合并真实产出的形状：`appended` 用换行接新事实。
             let mergedPersonality = WorldMerge.appended("冷静。", "克制。")
@@ -1804,7 +1804,7 @@ enum SelfCheck {
             return "人物卡/事件卡字段单行渲染 ok"
         }
 
-        // 说明文字里带括号时不能从那里截 JSON；围栏与空数组都要能解析。
+        // 说明文字包含括号时不可误作为 JSON 截断边界；代码块围栏与空数组均需支持正确解析。
         check("world.jsonExtraction") {
             let withNote = "先说明一下（[别名] 也要写全）：\n{\"characters\":[{\"name\":\"林昭\"}]}"
             let parsed = try WorldJSON.parseWorldRefresh(withNote)
@@ -1821,8 +1821,8 @@ enum SelfCheck {
             return "JSON 提取 / 围栏 / 空数组 ok"
         }
 
-        // 事件卡人物只接受数组或分隔字符串；对象/数字要按 APK 文案报错，
-        // 不能静默变成「没有人物」。
+        // 事件卡人物字段仅接受数组或分隔字符串；对象或数值类型需按规范报错，
+        // 禁止静默处理为无人物角色。
         check("world.eventCharacters") {
             let bad = #"{"events":[{"title":"甲","characters":[{"name":"林昭"}]}]}"#
             do {
@@ -1862,7 +1862,7 @@ enum SelfCheck {
             return "事件卡同名拦截 ok"
         }
 
-        // 事件卡：标题冲突且有未保存改动时不能滑走，否则 onDisappear 会把草稿静默丢掉。
+        // 事件卡：标题冲突且存在未保存改动时禁止滑动关闭，防止 onDisappear 静默丢弃草稿。
         check("world.eventEditorDiscardGuard") {
             let stored = EventCard(id: "a", title: "雨夜来客", scene: "旧书店")
             var draft = stored
@@ -1894,8 +1894,8 @@ enum SelfCheck {
             return "事件卡下滑丢弃保护 ok"
         }
 
-        // 规则编辑页：AI 在页面开着时更新同一字段，没动过草稿就换成新值，
-        // 动过就保留用户输入（否则「完成」会用旧草稿盖掉 AI 结果）。
+        // 规则编辑页：页面处于打开状态且 AI 更新相同字段时，若草稿未被修改则采用新值，
+        // 若已被修改则保留用户编辑内容（防止「完成」操作以旧草稿覆盖 AI 生成结果）。
         check("world.ruleDraftSync") {
             try expect(
                 WorldRuleDraftSync.decision(draft: "旧", baseline: "旧") == .adoptExternal,
@@ -1908,7 +1908,7 @@ enum SelfCheck {
             return "规则草稿同步判定 ok"
         }
 
-        // 手动「用最近对话更新」只取未摘要的用户消息，连点两次不重复消费。
+        // 手动「用最近对话更新」仅获取未摘要的用户消息，连续触发两次不重复消费。
         check("world.rulesPendingMessages") {
             let messages = [
                 ChatMessage(id: "u1", role: .user, content: "第一条"),
@@ -1927,8 +1927,8 @@ enum SelfCheck {
             return "手动更新只看未摘要消息 ok"
         }
 
-        // 长期规则「停止」：请求返回后再取消，不能写摘要、不能新增历史版本；
-        // 调用方拿到 .cancelled 就跳过落盘。
+        // 长期规则「停止」：请求返回后若被取消，禁止写入摘要与新增历史版本；
+        // 调用方接收到 .cancelled 时跳过写盘。
         check("world.rulesCancelKeepsSummary") {
             var world = WorldBook()
             _ = world.applySummaryUpdate(content: "旧规则", newKeys: [], now: 100)
@@ -1958,7 +1958,7 @@ enum SelfCheck {
                 "取消后更新时间变了"
             )
 
-            // 对照：同一份结果未取消时会写入，证明上面的断言不是空转。
+            // 对照：同一份结果未取消时会写入，验证上述取消断言有效且非假阳性。
             var appliedWorld = world
             let appliedCommit = WorldRulesWorkflow.applyRulesResult(
                 "新规则",
@@ -1972,7 +1972,7 @@ enum SelfCheck {
             return "取消不写摘要 / 不新增历史 ok"
         }
 
-        // 素材断点：正文前缀没变才续跑，正文改过从头归纳。
+        // 素材断点：仅在正文前缀未变更时继续断点处理，正文变更则重新开始全量归纳。
         check("world.materialCheckpoint") {
             let manuscript = String(repeating: "甲", count: 100)
             let prefix = String(manuscript.prefix(40))
@@ -2029,7 +2029,7 @@ enum SelfCheck {
             return "\(events.count) 张 → \(trimmed.count) 张 ok"
         }
 
-        // 已有事件被预算裁空时，契约仍要走增量版（P49/P51），不能退回初次归纳。
+        // 已有事件因上下文预算被裁减为空时，接口协议仍保持增量模式（P49/P51），不回退至初次归纳。
         check("world.eventIncrementalContract") {
             let messages = PromptComposer.eventMessages(
                 existingEvents: [],
@@ -2063,8 +2063,8 @@ enum SelfCheck {
             return "去重名称归一 ok"
         }
 
-        // 取消归一：世界四类任务（刷新/事件/文风/规则）都按这个谓词判断
-        // 「用户点了停止」，判错会弹红色失败或把取消当完成。
+        // 取消状态归一化：世界四类任务（刷新/事件/文风/规则）统一使用该谓词判断
+        // 用户是否终止操作，误判将导致错误提示或将取消判定为成功。
         check("world.cancellationShape") {
             try expect(CancellationError().isLLMCancellation, "结构化取消未识别")
             try expect(LLMError.cancelled.isLLMCancellation, "LLMError.cancelled 未识别")
@@ -2152,8 +2152,8 @@ enum SelfCheck {
             return "跨页切片 / 块索引 ok"
         }
 
-        // 提示词组装移到后台后，输出结构必须保持：system + 历史 + 本轮指令；
-        // 续写把正文片段回灌成 assistant 消息。
+        // 提示词组装迁移至后台后，输出结构需严格保持：system + 历史上下文 + 当前轮指令；
+        // 续写场景将正文片段注入为 assistant 消息。
         check("writer.promptAssembly") {
             var settings = AppSettings()
             settings.globalPreset = "全局预设"
@@ -2229,8 +2229,8 @@ enum SelfCheck {
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 
-        // 世界刷新契约：APK 刷新入口传增量 true（C0592r0.java:35），
-        // 世界建立入口传 false（M1/D1.java:60）；两条支线不能混。
+        // 世界刷新协议：原版 APK 刷新入口传递增量参数 true（C0592r0.java:35），
+        // 世界创建入口传递 false（M1/D1.java:60）；两个调用分支不可混用。
         check("world.refreshContract") {
             let cards = [CharacterCard(name: "林昭")]
             let refresh = PromptComposer.worldRefreshMessages(
@@ -2278,7 +2278,7 @@ enum SelfCheck {
             return "刷新增量 / 建立非增量分流 ok"
         }
 
-        // 提示词回看：大快照按 token 总量封顶，小快照仍按 30 条封顶
+        // 提示词回看：大型快照按 token 总量控制，小型快照仍保留 30 条上限
         check("writer.snapshotBudget") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-snapshot-\(UUID().uuidString)")
@@ -2326,8 +2326,8 @@ enum SelfCheck {
             return "\(session.payload.requestSnapshots.count) 条快照 ok"
         }
 
-        // 退后台/切书/导出都依赖「等写盘真正结束」：saveNowAndWait 返回后磁盘
-        // 必须已经是新内容。这条要真的 await 异步写盘，放在最后单独跑。
+        // 切至后台、切换书稿及导出操作均依赖持久化完全结束：saveNowAndWait 返回后磁盘
+        // 必须已写入最新数据。此项需实际 await 异步写盘任务，置于最后独立执行。
         checkAsync("archive.saveNowAndWait") {
             let root = FileManager.default.temporaryDirectory
                 .appendingPathComponent("frthink-wait-\(UUID().uuidString)")

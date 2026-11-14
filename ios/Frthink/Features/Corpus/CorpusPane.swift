@@ -3,7 +3,7 @@
 // 语料在提示词里只作为「可选表达参考」出现，不会当成书里
 // 已经发生的事实；每条原句要求逐字复制自原文。
 //
-// 总开关只在「设置 → 提示词与资料」里维护，这一页不重复放同一个开关。
+// 总开关由「设置 → 提示词与资料」统一维护，当前页面不重复提供该开关。
 
 import SwiftUI
 
@@ -16,7 +16,7 @@ struct CorpusPane: View {
     @State private var activeSheet: CorpusSheet?
     @State private var pendingDelete: CorpusEntry?
     @State private var highlightCache = CorpusHighlightCache()
-    /// 分类 / 标签候选集只在当前库的条目变化时重算，不跟每次 body 求值。
+    /// 分类与标签候选集仅在当前库条目变更时重新计算，不随 body 求值重复执行。
     @State private var categories: [String] = []
     @State private var tags: [String] = []
 
@@ -337,7 +337,7 @@ struct CorpusPane: View {
 
     private var deleteAlertTitle: String {
         let title = pendingDelete?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return title.isEmpty ? "删除这条语料？" : "删除「\(title)」？"
+        return title.isEmpty ? "删除此语料？" : "删除「\(title)」？"
     }
 
     private var deleteAlertBinding: Binding<Bool> {
@@ -508,7 +508,7 @@ private struct CorpusExtractSheet: View {
 
 // MARK: - 筛选行
 
-/// 分类 / 标签共用的一行：下拉里选一个值，再选同一个值就取消。
+/// 分类与标签通用筛选行：下拉菜单中选择某项，再次选择同一项则取消选中。
 private struct CorpusFilterMenuRow: View {
     let title: String
     let symbol: String
@@ -558,7 +558,7 @@ private struct CorpusFilterMenuRow: View {
 
 // MARK: - 行内容
 
-/// 一条语料的完整行：点按编辑，右滑取用 / 删除，长按菜单给出同样的三个动作。
+/// 单条语料项：点击编辑，右滑支持取用或删除，长按上下文菜单提供相同操作。
 private struct CorpusEntryRow: View {
     let entry: CorpusEntry
     let highlighted: CorpusRowHighlight
@@ -678,9 +678,8 @@ private struct CorpusRowContent: View {
         )
     }
 
-    /// 每条标签一个 pill。id 用「标签 + 出现序号」：导入的旧数据可能带重复标签，
-    /// 序号保证 ForEach 的 id 仍然唯一；序号总带着，避免「a#1」这种标签名
-    /// 和标签 a 的第二次出现撞上同一个 id。
+    /// 单个标签胶囊视图。ID 采用「标签名 + 索引」：导入的历史数据可能包含重复标签，
+    /// 附带索引可保证 ForEach 的 ID 唯一，避免与名称形如「a#1」的标签产生 ID 冲突。
     private static func tagPills(for tags: [String], tokens: [String]) -> [CorpusTagPill] {
         var occurrences: [String: Int] = [:]
         return tags.prefix(5).map { tag in
@@ -719,8 +718,7 @@ private final class CorpusHighlightCache {
     private var values: [String: Entry] = [:]
 
     func highlight(entry: CorpusEntry, tokens: [String]) -> CorpusRowHighlight {
-        // 签名必须包含内容本身：只记长度时，改成同样字数的另一个词
-        // 哈希不变，列表会一直显示旧标题和旧原句。
+        // 签名必须包含内容本身：若仅记录长度，内容变更为相同长度时哈希值不变，会导致列表持续显示旧数据。
         let signature = [
             tokens.joined(separator: "\u{1F}"),
             entry.title,

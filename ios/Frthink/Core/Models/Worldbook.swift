@@ -2,8 +2,8 @@ import Foundation
 
 /// 项目自带的世界书词条（规格 D · P10）。
 ///
-/// 词条标题就是提示词里的 `# <词条名>`，正文原样跟在下一行；只有启用的词条
-/// 会随本书的写作请求发送。和「宇宙」共享世界书的区别是归属：这些词条只属于
+/// 词条标题对应提示词中的 `# <词条名>`，正文紧随下一行；仅启用的词条
+/// 会随当前书稿的写作请求发送。与「宇宙」共享世界书的区别在于归属范围：此类词条仅归属于
 /// 当前书项目（`WorldBook.worldbookEntries`）。
 struct WorldbookEntry: Identifiable, Codable, Hashable {
     var id: String

@@ -1,13 +1,12 @@
-// 本文件负责：阅读页主界面 —— 原文/译文切换、全文搜索、显示设置、章节与段落导航、书签。
+// 阅读页主界面：原文/译文切换、全文搜索、显示设置、章节与段落导航及书签管理。
 
 import Foundation
 import SwiftUI
 
 /// 阅读页。
 ///
-/// 正文先按空行切成小段，再交给 `LazyVStack` 渲染：几万字的书也只画屏幕上的十几段，
-/// 不会因为一个 `Text` 塞进整篇而卡住。跳章节、跳命中、跳书签一律换算成「哪一段的
-/// 起始偏移」，写进 `scrollPosition` 的绑定滚过去。
+/// 正文按空行切分为段落并通过 `LazyVStack` 惰性渲染，避免一次性渲染全量文本造成卡顿。
+/// 章节、搜索命中与书签跳转均换算为段落起始偏移，通过 `scrollPosition` 实现精确定位。
 struct ReaderPane: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -22,14 +21,14 @@ struct ReaderPane: View {
     @AppStorage private var lastOffset: Int
 
     @State private var document = ReaderDocument.empty
-    /// 译文拼接结果。只在 `translations` 变化时重拼，不在每帧重算。
+    /// 译文拼接结果：仅在 `translations` 变化时重新拼接，避免每帧重复计算。
     @State private var translationText = ""
-    /// 原文的 UTF-16 长度。译文模式折算章节位置时要用，避免每帧桥接一次 NSString。
+    /// 原文 UTF-16 长度：译文模式折算章节位置时使用，避免频繁桥接 NSString。
     @State private var manuscriptLength = 0
-    /// 当前定位点（UTF-16 偏移），滚动时跟着视口顶部那一段走。
+    /// 当前定位点（UTF-16 偏移），随视口顶部段落滚动更新。
     @State private var position = ReaderPositionState()
     @State private var offsetSaveTask: Task<Void, Never>?
-    /// `scrollPosition(id:)` 报告的顶部段落起点；跳转也写它，只保留一个滚动驱动。
+    /// `scrollPosition(id:)` 报告的顶部段落起点；跳转时亦驱动该状态以保持单一驱动源。
     @State private var scrolledBlockStart: Int?
     @State private var showSettings = false
     @State private var showChapters = false
@@ -38,14 +37,14 @@ struct ReaderPane: View {
     @State private var matches: [ReaderMatch] = []
     @State private var highlightMap: [Int: [NSRange]] = [:]
     @State private var matchIndex = 0
-    /// 搜索是否还没出结果。面板据此先显示加载态，不先闪「没有找到」。
+    /// 搜索进行中状态；用于展示加载中视图，避免界面闪烁空结果提示。
     @State private var isSearching = false
-    /// 排版（切块）任务。56 万字的正文切块不能在主线程做。
+    /// 文本排版与切块后台任务，避免阻塞主线程。
     @State private var rebuildTask: Task<Void, Never>?
     @State private var searchTask: Task<Void, Never>?
-    /// 阅读页当前是否可见。不可见时正文变化不重排，切回来再补。
+    /// 阅读页可见状态；不可见时跳过排版，重新可见时补算。
     @State private var isVisible = false
-    /// 首帧到排版完成之间显示加载态，避免把「正在排版」误报成「正文还是空的」。
+    /// 首帧至排版完成期间展示加载状态，避免误展示为空状态。
     @State private var isLoadingDocument = true
     /// 章节在显示文本里的偏移（译文模式按长度比例折算）。跟 `document` 一起更新，
     /// 不在 body 里逐帧重算——几千章的长篇也不让每帧都扫一遍章节表。
@@ -73,7 +72,7 @@ struct ReaderPane: View {
             Divider().overlay(Theme.separator)
             ReaderFooterView(position: position, document: document)
         }
-        // 搜索是浮在正文上的控制层：不占布局高度，打开时正文不下推。
+        // 搜索面板使用覆盖层展示，不占据正文布局高度。
         .overlay(alignment: .top) {
             searchOverlay
         }
@@ -94,7 +93,7 @@ struct ReaderPane: View {
         }
         .onDisappear {
             isVisible = false
-            // 切走时把搜索浮层一起收起，键盘不会留在别处。
+            // 页面离开时收起搜索浮层并注销键盘响应。
             showSearch = false
             isSearching = false
             rebuildTask?.cancel()
@@ -105,8 +104,7 @@ struct ReaderPane: View {
             offsetSaveTask = nil
             lastOffset = anchorOffset
         }
-        // 结构改动（插入/撤销/导入/覆盖恢复）才需要重排；逐字编辑走正文编辑器，
-        // 不用在这里比一遍 56 万字的字符串。
+        // 仅在结构性变更（插入、撤销、导入、覆盖恢复）时触发重排，避免逐字编辑时比对全量长文本。
         .onChange(of: session.manuscriptRevision) { _, _ in
             if isVisible { scheduleRebuild() }
         }
@@ -116,13 +114,13 @@ struct ReaderPane: View {
         .onChange(of: modeRaw) { _, _ in
             if isVisible { scheduleRebuild(immediate: true) }
         }
-        // 章节索引是后台扫描的派生数据，扫完或重扫后刷新一次折算结果。
+        // 章节索引由后台扫描派生，扫描完成后更新映射结果。
         .onChange(of: session.payload.chapters) { _, _ in
             refreshChapterOffsets()
         }
-        // 换书由 RootView 的 `.id(session.project.id)` 重建整页，这里不用再监听。
-        // 搜索防抖：打字停下 220ms 再扫全文；输入变了或页面走了，上一轮自动取消。
-        // 空关键词立即清结果，不做加载态；有词时先亮加载，避免先闪一下「没有找到」。
+        // 书项目切换由 RootView 视图标识驱动重建，此处无需冗余监听。
+        // 搜索防抖：输入停止 220ms 后执行检索；输入变更或页面销毁时自动取消前置任务。
+        // 空关键词立即清空结果；非空时展示加载状态，避免界面瞬时闪烁空提示。
         .task(id: query) {
             let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !needle.isEmpty else {
@@ -140,7 +138,7 @@ struct ReaderPane: View {
 
     // MARK: - 浮层与弹窗
 
-    /// 搜索浮层。挂在 overlay 上，不参与正文布局。
+    /// 搜索浮层：通过 overlay 挂载，不参与正文排版布局。
     @ViewBuilder
     private var searchOverlay: some View {
         if showSearch {
@@ -329,9 +327,8 @@ struct ReaderPane: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .softScrollEdge()
-        // iOS 17 的滚动位置绑定：只更新一个 Int，不再给每一段挂
-        // GeometryReader + PreferenceKey，滚动时不会整页重算。
-        // 跳转也只写这个绑定，避免 `scrollTo` 与 id 驱动互相拉扯。
+        // 使用 iOS 17 滚动位置绑定机制，避免为每个段落挂载 GeometryReader 导致重绘；
+        // 跳转统一驱动绑定变量，避免与 scrollTo 冲突。
         .scrollPosition(id: $scrolledBlockStart, anchor: .top)
         .onChange(of: scrolledBlockStart) { _, start in
             guard let start, start != anchorOffset else { return }
@@ -342,7 +339,7 @@ struct ReaderPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 设置字号按 Dynamic Type 换算后的实际字号；正文栏宽度按它算。
+    /// 设置字号经 Dynamic Type 换算后的实际字号；正文栏宽度据此计算。
     private var scaledBodyFontSize: CGFloat {
         DynamicTypeFont.bodySize(fontSize, dynamicTypeSize: dynamicTypeSize)
     }
@@ -359,7 +356,7 @@ struct ReaderPane: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 排版完成前的占位；大书或旧书回退全文解析时能看到，而不是先闪一下空态。
+    /// 排版未完成时的占位视图，避免回退解析全量文本时闪现空状态。
     private var loadingState: some View {
         ProgressView()
             .frame(maxWidth: .infinity)
@@ -413,22 +410,21 @@ struct ReaderPane: View {
         return chapters[index].title
     }
 
-    /// 章节偏移只在文档重建和章节表变化时算一次；body 里直接读缓存。
+    /// 章节偏移仅在文档重建与章节表变动时计算一次，body 中直接读取缓存。
     private func refreshChapterOffsets() {
         chapterStarts = Set(session.payload.chapters.map(\.location))
         chapterDisplayOffsets = session.payload.chapters.map { displayOffset(for: $0) }
         refreshCurrentChapter()
     }
 
-    /// 当前章按滚动锚点定位；滚动/跳转时才扫一遍，body 不做线性查找。
+    /// 当前章节根据滚动锚点计算；仅在滚动或跳转时更新，避免在 body 求值时线性扫描。
     private func refreshCurrentChapter() {
         currentChapterIndex = chapterDisplayOffsets.lastIndex(where: {
             $0 <= anchorOffset + 1
         })
     }
 
-    /// 章节的 `location` 是原文里的 UTF-16 偏移。译文是把分段按顺序拼起来的，
-    /// 与正文没有字符级对齐，只能按长度比例折算出一个大致位置。
+    /// 章节 `location` 为原文 UTF-16 偏移；译文因未保持字符级严格对齐，按长度比例估算映射位置。
     private func displayOffset(for chapter: Chapter) -> Int {
         if mode == .source {
             return clamp(chapter.location)
@@ -462,7 +458,7 @@ struct ReaderPane: View {
         }
     }
 
-    /// 跳到某个偏移：先夹到正文范围内，再落到它所在那一段的段首。
+    /// 跳转至指定偏移：约束在正文有效范围内，并对齐至所在段落起点。
     private func jump(to offset: Int) {
         guard !document.blocks.isEmpty else { return }
         let index = ReaderLocator.blockIndex(for: clamp(offset), in: document.blocks)
@@ -470,7 +466,7 @@ struct ReaderPane: View {
         anchorOffset = start
         lastOffset = start
         refreshCurrentChapter()
-        // 只写滚动位置绑定：它同时也是跳转驱动，避免和 scrollTo 抢位置。
+        // 仅更新滚动位置绑定变量以驱动定位，避免与 scrollTo 冲突。
         withAnimation(Theme.motion(Theme.motionSelection, reduceMotion: reduceMotion)) {
             scrolledBlockStart = start
         }
@@ -522,7 +518,7 @@ struct ReaderPane: View {
         jump(to: matches[index].offset)
     }
 
-    /// 当前命中落在这一段的哪一段区间里，交给段落去加重底色。
+    /// 计算当前匹配项在段落内的相对区间，供段落高亮渲染。
     private func currentHighlight(in block: ReaderBlock) -> NSRange? {
         guard matches.indices.contains(matchIndex) else { return nil }
         let match = matches[matchIndex]
@@ -541,7 +537,7 @@ struct ReaderPane: View {
         scheduleRebuild(immediate: true)
     }
 
-    /// 后台重排分块与字数统计，避免长文渲染阻塞主线程。
+    /// 后台异步执行分块与字数统计，避免阻塞主线程。
     private func scheduleRebuild(immediate: Bool = false) {
         rebuildTask?.cancel()
         if document.blocks.isEmpty { isLoadingDocument = true }
@@ -557,7 +553,7 @@ struct ReaderPane: View {
                 guard !Task.isCancelled else { return }
             }
 
-            // 原文分页：块索引来自 body.meta，滚动时只解密覆盖到的页。
+            // 原文分页读取：分块索引读取自 body.meta，滚动时仅解密覆盖到的页。
             if mode == .source, session.canReadByPage, let blocks = session.bodyBlocks {
                 let readerBlocks = blocks.map {
                     ReaderBlock(start: $0.start, length: $0.length)
@@ -578,9 +574,8 @@ struct ReaderPane: View {
                 return
             }
 
-            // 译文模式只排版译文。章节位置折算所需的原文长度走元数据
-            // （`session.manuscriptLength` 在正文未加载时读 `body.meta`），
-            // 不再为了量长度去读 `session.manuscript`——那会把整本正文同步解密一遍。
+            // 译文模式仅排版译文。章节折算所需的原文长度直接读取元数据，
+            // 避免为了获取长度同步解密全量正文。
             let isTranslation = mode == .translation
             let text = isTranslation ? translationText : session.manuscript
             let sourceLength = isTranslation ? session.manuscriptLength : 0

@@ -6,24 +6,18 @@
 // 撤销栈有两处来源，优先级不同：
 // - 窗口栈：摇一摇、⌘Z、编辑菜单走的就是它。它只在响应链上有能提供栈的响应者
 //   （正在编辑的文本视图）时存在，输入框没聚焦时取不到。
-// - 兜底栈：没有窗口栈时用页面自己的一份，保证「插入 / 追加」随时撤得回来。
-// 因为兜底栈不在响应链上，摇一摇和 ⌘Z 在无输入焦点时不一定能触发，所以创作页
-// 和正文编辑页的 ⋯ 菜单里各留一个看得见的撤销入口。
+// - 兜底栈：无窗口栈时采用私有实例，并在菜单栏提供显式撤销操作入口。
 
 import UIKit
 
 /// 一次「插入正文」在系统撤销栈上的代表。
 ///
-/// 撤销用 `ProjectSession` 的插入回执；它只保证「删掉上一次插入」，
-/// 没有重做入口，所以重做在 Writer 侧用「位置 + 原文」再插一次。
-/// 这里只覆盖插入/追加正文：正文编辑器里逐字编辑的撤销与重做由 UITextView
-/// 登记在它自己的栈上，不经过这个类。
+/// 撤销操作通过 `ProjectSession` 插入回执移除文本，重做时基于原位置与内容重新插入。
+/// 文本编辑器内部的逐字符编辑撤销由 UITextView 自行管理。
 ///
-/// 传进来的栈可能是兜底栈：动作照样保留，页面上的「撤销」提示和菜单直接调用
-/// 这里，不能让插入变成撤不回去的操作。
+/// 兜底栈下同样完整保留撤销动作，确保正文插入操作始终可逆。
 ///
-/// `UndoManager` 只保存 target 的 unowned 引用，调用方必须在页面存活期间
-/// 持有这个对象；每次插入在撤销栈上是一个独立对象，避免互相串动作。
+/// UndoManager 仅持有 target 的 unowned 引用，生命周期内需维持强引用，且每次插入对应独立动作实例。
 @MainActor
 final class WriterBodyUndoAction {
     private let undoManager: UndoManager
@@ -84,8 +78,7 @@ final class WriterBodyUndoAction {
 
     /// 重做：把刚才撤掉的段落插回原位置。
     ///
-    /// 插入点由 `ProjectSession` 夹紧到当前正文范围内，用户若已改过正文，
-    /// 这一次重做仍按原偏移插回；登记到新的回执上，下一次撤销照常可用。
+    /// 插入位置限制在当前正文有效长度内，重做生成新回执以保持后续撤销链条。
     func redo() {
         guard let undone = undoneReceipt else { return }
         receipt = session.insertIntoManuscript(undone.text, at: undone.location)
@@ -100,8 +93,7 @@ final class WriterBodyUndoAction {
 
     /// 真正删掉这次插入。只有删成功才提示「已撤销」。
     ///
-    /// 没有可撤销的回执、或原位置上的文字已经变了（`undoLastBodyAppend()`
-    /// 返回 nil）都如实提示，不当成成功。
+    /// 若无有效回执或原插入位置文本已发生变更，提示对应原因。
     @discardableResult
     private func removeInsertion() -> BodyAppendReceipt? {
         guard session.payload.bodyAppendReceipts.last?.id == receipt.id else {
@@ -119,10 +111,10 @@ final class WriterBodyUndoAction {
 }
 
 enum WriterUndo {
-    /// 响应链无活跃文本视图时（如刚从气泡触发插入）使用兜底栈，确保撤销始终可用。
+    /// 响应链无活跃输入响应者时采用兜底撤销栈。
     @MainActor private static let fallback = UndoManager()
 
-    /// 撤销栈：优先窗口栈（和正文编辑器的逐字撤销共用一个），否则用兜底栈。
+    /// 优先获取当前窗口撤销栈，无可用窗口栈时返回兜底栈。
     @MainActor
     static func manager() -> UndoManager {
         windowManager() ?? fallback

@@ -139,7 +139,7 @@ struct StreamingTextView: UIViewRepresentable {
             }
         }
 
-        // 兜底：窗口截断/重置时全量重建一次。
+        // 降级保护：窗口截断或重置时执行全量重建。
         applyFullReset(rendered, to: uiView, coordinator: coordinator)
     }
 

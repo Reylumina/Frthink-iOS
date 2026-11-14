@@ -3,7 +3,7 @@ import Foundation
 /// 全书人物去重（P32 → P33 → P34）。
 ///
 /// 只让模型处理**本轮新增候选**，已有卡片作为只读身份参考：
-/// 命中 existing_id 就沿用已有卡的主名，候选之间合并；不修改、不删除已有卡。
+/// 匹配 existing_id 时沿用已有卡片标准名称并合并候选数据；不直接修改或删除既有卡片。
 /// 候选必须每个索引恰好出现一次，否则整份结果作废，保留原样。
 enum WorldDedupe {
 
@@ -15,15 +15,15 @@ enum WorldDedupe {
 
     /// 对「本轮新增候选」去重。`existing` 只读，用于 existing_id / 同名匹配。
     ///
-    /// 取消要原样抛出：去重被取消时调用方按「已停止」收尾，不能把它当成
-    /// 「去重失败」继续合并，否则用户点了停止还会写库。
+    /// 取消异常需直接外抛：去重取消时由调用方统一处理停止逻辑，
+    /// 避免误判为去重失败继续执行合并与持久化。
     static func dedupe(
         candidates: [CharacterCard],
         existing: [CharacterCard],
         client: any LLMClient,
         provider: ProviderSetting
     ) async throws -> (cards: [CharacterCard], outcome: Outcome) {
-        // 单张候选不需要分组请求；后面 WorldMerge 会按同名/别称并入已有卡。
+        // 候选数量不足 2 时无需发起分组去重请求，后续由 WorldMerge 处理同名并入。
         guard candidates.count >= 2 else {
             return (candidates, Outcome(mergedGroups: 0, removedCards: 0, note: nil))
         }
@@ -43,7 +43,7 @@ enum WorldDedupe {
             candidates: candidateLabels,
             existingNames: existingNames
         )
-        // 与其它世界任务同参数：输出至少 4096，整段 JSON 被截断时直接报错。
+        // 与其他世界设定任务配置一致：输出至少 4096，JSON 截断时触发错误处理。
         let request = WorldRequestContext.request(
             provider: provider,
             messages: messages,
@@ -84,8 +84,8 @@ enum WorldDedupe {
 
     /// 候选里出现过的所有称呼，按 `WorldMerge.normalize` 归一。
     ///
-    /// 模型常把同一名字写成大小写/空格不同的形态（`Lin Zhao` / `lin zhao`），
-    /// 原样比对会把整份去重结果判成无效。
+    /// 归一化处理大小写与空格差异（如 `Lin Zhao` 与 `lin zhao`），
+    /// 避免因格式差异误判为无效去重结果。
     static func candidateNameKeys(_ cards: [CharacterCard]) -> Set<String> {
         Set(cards.flatMap { [$0.name] + $0.aliases }.map(WorldMerge.normalize))
     }
@@ -136,7 +136,7 @@ enum WorldDedupe {
             existing.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        // 循环不变量：候选里出现过的所有称呼。每组都重算会变成 O(组 × 卡)。
+        // 提前缓存候选中出现的所有称谓键值，避免循环内部重复计算。
         let candidateNames = candidateNameKeys(cards)
 
         for group in groups {

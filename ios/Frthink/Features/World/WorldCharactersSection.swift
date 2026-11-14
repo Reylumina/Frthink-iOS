@@ -17,7 +17,7 @@ enum WorldCharacterSort: Hashable {
 
 struct WorldCharactersSection: View {
     @Bindable var session: ProjectSession
-    /// 人物卡由世界刷新流程写入；入口放在卡片列表上，不必回概览找。
+    /// 人物卡由世界刷新流程生成；操作入口置于卡片列表头部。
     var isActionDisabled: Bool = false
     var onRefresh: (() -> Void)? = nil
     var onRefreshFull: (() -> Void)? = nil
@@ -60,7 +60,7 @@ struct WorldCharactersSection: View {
             #endif
         }
         .onChange(of: session.payload.world.characterGroups) { _, groups in
-            // 当前筛选的分组被删掉后回到「全部分组」，不留一个永远空着的列表。
+            // 若当前筛选分组被删除，自动重置为「全部分组」。
             guard groupFilter != "__all__", groupFilter != "__ungrouped__",
                   !groups.contains(where: { $0.id == groupFilter })
             else { return }
@@ -142,7 +142,7 @@ struct WorldCharactersSection: View {
                 }
             }
         } label: {
-            // 进度由世界页的状态行统一报，这一行只留入口。
+            // 刷新状态由世界主视图统一展示，此处仅提供触发入口。
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(Font.caption)

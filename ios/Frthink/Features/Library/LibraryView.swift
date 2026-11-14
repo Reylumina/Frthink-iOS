@@ -1,6 +1,6 @@
-// 书架根页面：继续写作 + 全部书稿 + 回收站/设置入口。
+// 书架根页面：继续写作、全部书稿与回收站/设置入口。
 //
-// 一屏三件事：回到正在写的书、打开另一本、处理回收站。新建在右上角。
+// 提供快捷回到当前项目、切换书稿及进入回收站等核心入口；右上角提供新建入口。
 // 列表以书脊、书名和最近编辑时间作为索引。
 //
 // 宽屏（iPad、可调整大小的窗口）下列表按 `Theme.Layout.formMaxWidth` 居中，
@@ -10,10 +10,10 @@ import SwiftUI
 
 struct LibraryView: View {
     let store: AppStore
-    /// 当前正在写的书；`RootView` 传入，用来标「正在写」与顶部的继续写作。
+    /// 当前活跃书稿项目；由 `RootView` 传入，用于标明当前写作项。
     var activeProjectID: String? = nil
     let onOpen: (Project) -> Void
-    /// 从书架去设置：`RootView` 负责关掉书架并切到设置 Tab。
+    /// 跳转设置回调：由 `RootView` 负责关闭书架并切换至设置选项卡。
     var onOpenSettings: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
@@ -174,18 +174,18 @@ struct LibraryView: View {
 
     // MARK: - 数据
 
-    /// 只有「当前正在写」的那本才出现在顶部；新开书架时没有当前书就隐藏。
+    /// 仅展示当前活跃书稿；无活跃项目时隐藏顶部区域。
     private var continueProject: Project? {
         guard let activeProjectID else { return nil }
         return store.activeProjects.first { $0.id == activeProjectID }
     }
 
-    /// 进行中的书项目按最近改动时间倒序。
+    /// 进行中的书项目按最近修改时间倒序排列。
     private var sortedActiveProjects: [Project] {
         store.activeProjects.sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// 分支根 → 分支数（不含回收站）。一次算完，避免每行都 `filter` 全书架。
+    /// 分支根节点至分支数量的映射（排除回收站）；批量计算以避免列表行重复遍历。
     private var branchCounts: [String: Int] {
         var counts: [String: Int] = [:]
         for project in store.activeProjects {
@@ -241,11 +241,10 @@ struct LibraryView: View {
 
     // MARK: - 动作
 
-    /// 新建成功后直接进工作区；创建失败时 `createProject` 已经设了 `errorMessage`，这里不跳转。
+    /// 新建成功后直接进入工作区；创建失败时由 `createProject` 设置错误信息，此处不执行跳转。
     private func createProject(titled title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 空书名在列表里会显示为「未命名书项目」；直接把它写成正式标题，
-        // 避免列表与重命名弹窗里出现两种名字。
+        // 未命名项目规范写入默认标题，确保列表展示与重命名弹窗保持一致。
         let finalTitle = trimmed.isEmpty ? Project.untitledTitle : trimmed
         guard let project = store.createProject(title: finalTitle) else { return }
         guard store.activeProjects.contains(where: { $0.id == project.id }) else { return }

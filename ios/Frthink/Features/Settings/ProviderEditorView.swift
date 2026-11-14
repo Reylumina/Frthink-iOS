@@ -22,9 +22,9 @@ struct ProviderEditorView: View {
     @State private var isTesting = false
     @State private var models: [String] = []
     @State private var showingModelPicker = false
-    /// 避免同一个视图挂两个 `confirmationDialog`：用一份待确认状态驱动。
+    /// 统一由单一待确认状态驱动对话框，避免同一视图挂载多个 `confirmationDialog`。
     @State private var pendingConfirmation: EditorConfirmation?
-    /// 钥匙串写入不在 Observation 里，改完 Key 用它顶一下刷新。
+    /// Keychain 变更不触发 Observation，修改 Key 后通过该状态触发视图刷新。
     @State private var keyRevision = 0
 
     private enum EditorConfirmation {
@@ -109,7 +109,7 @@ struct ProviderEditorView: View {
 
     // MARK: - 连接
 
-    /// 新建时只给三类；旧的 OpenCode AI服务商仍可在编辑时保留。
+    /// 新建配置仅展示推荐类型；已有历史配置类型予以保留。
     private var editableKinds: [ProviderKind] {
         var kinds = ProviderKind.selectableCases
         if draft.kind == .openCodeGo, !kinds.contains(.openCodeGo) {
@@ -167,7 +167,7 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
             .onChange(of: draft.kind) { oldKind, newKind in
-                // 地址/模型还是旧类型或 OpenCode Go 预设默认值时才跟着换，用户自己填过的不动。
+                // 仅在地址与模型为旧预设默认值时联动变更，保留用户自定义输入。
                 if draft.baseURL.isEmpty
                     || draft.baseURL == oldKind.defaultBaseURL
                     || draft.baseURL == ProviderKind.openCodeGo.defaultBaseURL {
@@ -227,7 +227,7 @@ struct ProviderEditorView: View {
         }
     }
 
-    /// 已弃用的历史别名要当场提示，别让用户发出去才发现 400。
+    /// 弃用的历史别名即时校验提示，避免请求时产生 400 错误。
     private var deprecatedModelHint: String? {
         guard draft.usesDeprecatedModel else { return nil }
         let latest = ModelCatalog.latest(for: draft.kind) ?? ""
@@ -247,8 +247,7 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
 
-            // 关闭思考时要不要额外发一个「别推理」的字段。默认不发，和原版一致；
-            // 服务端默认开推理（OpenCode 这类）时才需要挑一种。
+            // 关闭思考时是否附带显式禁用推理的参数字段；默认缺省，针对默认开启推理的服务端进行适配。
             if draft.effectiveThinkingLevel == .off, !draft.isDeepSeek, draft.kind != .anthropic {
                 Picker("关闭思考时发送", selection: reasoningOffBinding) {
                     ForEach(ReasoningOffStyle.allCases) { style in
@@ -401,7 +400,7 @@ struct ProviderEditorView: View {
 
     // MARK: - 网络
 
-    /// 用「正在编辑的这份配置」造客户端，不改动当前AI服务商。
+    /// 基于当前编辑中的配置构建临时客户端，不修改当前生效的 AI 服务商。
     @MainActor
     private func makeClient() throws -> any LLMClient {
         let key = effectiveKey
@@ -552,7 +551,7 @@ struct ProviderEditorView: View {
     }
 }
 
-/// 服务端返回的模型列表选择器。OpenRouter 有几百个模型，所以带搜索。
+/// 服务端模型列表选择器，包含搜索过滤功能。
 struct ModelPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 

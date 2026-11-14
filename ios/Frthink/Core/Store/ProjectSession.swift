@@ -3,8 +3,8 @@ import Observation
 
 /// 单个书项目的编辑态。
 ///
-/// 只做三件事：持有内存里的 payload、把改动防抖落盘、提供改对话的原子操作。
-/// 生成逻辑（拼提示词、调模型）放在各自的 Feature 里，这里不掺。
+/// 负责三项核心职责：持有内存中的项目 Payload、防抖持久化状态变更、提供对话事务级原子操作。
+/// 模型调用与提示词组装逻辑由各 Feature 模块实现，本类不包含业务生成逻辑。
 @MainActor
 @Observable
 final class ProjectSession {
@@ -19,16 +19,15 @@ final class ProjectSession {
 
     /// 正文被「结构性地」改过几次（插入、撤销、导入替换）。
     ///
-    /// 用户逐字编辑走 `updateManuscript`，不算外部改动：正文编辑器自己就是那次
-    /// 编辑的发起者，不需要被回灌。插入/撤销/导入正文是外部改动，编辑器要把
-    /// 整段文字换掉。用计数而不是比较字符串——56 万字的 `==` 每次重绘都做一遍
-    /// 是纯浪费。
+    /// 用户逐字输入通过 `updateManuscript` 处理，视为内部改动：正文编辑器自身为输入源，
+    /// 无需重新回灌文本。插入、撤销及导入正文属于外部变更，编辑器需整体替换文本内容。
+    /// 采用版本计数而非字符串全量比对，避免大体量文本在视图重绘时产生不必要的等值比较开销。
     private(set) var manuscriptRevision = 0
 
     /// 正文字数缓存。
     ///
-    /// `String.count` 是 O(n)：56 万字在每次 body 求值时数一遍会白占主线程。
-    /// 这里跟章节扫描一起在后台算，界面只读这个值（允许最多滞后一个防抖窗口）。
+    /// `String.count` 时间复杂度为 O(n)，大文本高频求值会阻塞主线程。
+    /// 字数统计结合章节扫描在后台异步计算，界面读取缓存值（允许至多一个防抖周期的微小滞后）。
     private(set) var manuscriptCharacterCount: Int
 
     private let store: FileStore
@@ -47,8 +46,8 @@ final class ProjectSession {
     private var saveInFlight = false
     /// 外部要整体替换磁盘内容（导入覆盖）期间暂停一切保存。
     ///
-    /// 只在 `quiesceSaves()` 里置位：内存里的旧稿和磁盘上的新稿同时存在时，
-    /// 任何一次防抖保存都会把导入结果盖回去。
+    /// 仅在 `quiesceSaves()` 中标记：当内存旧数据与磁盘新数据并存时，
+    /// 避免防抖保存将磁盘上的导入结果误覆盖。
     @ObservationIgnored private var savesQuiesced = false
     /// 等当前写盘结束的调用方（导入覆盖前必须等它落完）。
     @ObservationIgnored private var saveCompletionWaiters: [CheckedContinuation<Void, Never>] = []
@@ -75,8 +74,8 @@ final class ProjectSession {
     @ObservationIgnored private(set) var bodyPageCount = 0
     @ObservationIgnored private(set) var bodyUTF16Length = 0
 
-    /// 编辑器窗口：只持有正文尾部若干页，起止都是整页边界。
-    /// 这样打字/保存都不必把整本书拼进内存。
+    /// 编辑器窗口状态：仅保留正文末尾指定页数，起止均对齐分页边界。
+    /// 避免编辑与保存时将全量文本加载至内存。
     @ObservationIgnored private var editorWindow: EditorWindowState?
 
     private struct EditorWindowState {
@@ -187,7 +186,7 @@ final class ProjectSession {
             prefixCharacterCount: max(0, current.prefixCharacterCount - earlierText.count),
             totalLength: newTotalLength
         )
-        // 窗口文本换了，编辑器要重灌一次。
+        // 窗口文本内容更新，通知编辑器重新加载。
         manuscriptRevision += 1
     }
 
@@ -228,7 +227,7 @@ final class ProjectSession {
         editorWindow = nil
         lastSavedManuscript = full
         manuscriptCharacterCount = payload.manuscript.count
-        // 窗口消失后编辑器的绑定源变回全文，要让 UITextView 重灌一次。
+        // 退出窗口模式后绑定数据源切回全文，通知 UITextView 重新加载内容。
         manuscriptRevision += 1
         scheduleBodySave()
     }
@@ -274,9 +273,9 @@ final class ProjectSession {
             self.project.bodyCharacterCount = meta.characterCount
             self.project.bodyUTF16Length = meta.utf16Length
         }
-        // 上次进程在生成中被杀：把断点转为可见的中断标记。
+        // 若上次进程在生成中途异常退出：将断点状态转换为明确的中断标记。
         _ = self.payload.recoverInterruptedGeneration()
-        // 章节是派生索引，缺失时在后台扫描补齐，避免阻塞打开这一帧。
+        // 章节信息属于派生索引，缺失时置于后台异步扫描补齐，避免阻塞会话初始化。
         if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
             scanChaptersIfNeeded(payload.manuscript)
         }
@@ -735,13 +734,13 @@ final class ProjectSession {
 
     /// 全屏编辑页关闭后，通知只读正文视图重新灌一次文字。
     ///
-    /// `updateManuscript` 不能自己递增 `manuscriptRevision`：编辑页也观察这个数字，
-    /// 每敲一个字都回灌整段会让 UITextView 重置光标。只在退出编辑时递增最安全。
+    /// `updateManuscript` 不递增 `manuscriptRevision`：编辑视图同样监听该属性，
+    /// 逐字重置会导致 UITextView 光标位置丢失。故仅在退出编辑时递增版本。
     func noteManuscriptEdited() {
         manuscriptRevision += 1
     }
 
-    /// 章节扫描的防抖任务。顺带把字数也算出来，界面不用再数全文。
+    /// 章节扫描的防抖调度任务，同步计算字数以避免界面重复统计全文。
     private func scheduleChapterScan() {
         scanChapters(
             source: payload.manuscript,
@@ -821,7 +820,7 @@ final class ProjectSession {
         }
     }
 
-    /// 删除整条消息（原版「删除这条消息？」）。用户指令和码字机回复都适用。
+    /// 删除单条消息，适用于用户指令与模型生成的回复。
     func deleteMessage(_ messageID: String) {
         payload.messages.removeAll { $0.id == messageID }
         scheduleSave()
@@ -829,8 +828,7 @@ final class ProjectSession {
 
     /// 撤回一条用户指令：删掉它和它之后的所有消息（含它引出的回复）。
     ///
-    /// 返回被删掉的那一段，调用方用它做「撤销」——撤回是破坏性动作，
-    /// 至少给一次反悔的机会。
+    /// 返回被删除的消息切片，供调用方实现撤销恢复。
     @discardableResult
     func withdraw(from messageID: String) -> [ChatMessage] {
         guard let index = payload.messages.firstIndex(where: { $0.id == messageID }) else { return [] }
@@ -842,8 +840,8 @@ final class ProjectSession {
 
     /// 把撤回掉的一段接回原位置。
     ///
-    /// 不能无条件接末尾：撤回后用户可能又发了一条，接末尾会把旧对话排到新对话
-    /// 之后，提示词顺序就永久错了。
+    /// 不可直接追加至末尾：若撤回后存在新产生消息，追加至末尾会导致对话时序颠倒，
+    /// 破坏上下文顺序。
     func restore(_ messages: [ChatMessage], at index: Int?) {
         guard !messages.isEmpty else { return }
         if let index, index >= 0, index <= payload.messages.count {
@@ -906,7 +904,7 @@ final class ProjectSession {
         let start = max(0, min(receipt.location, ns.length))
         let length = (receipt.text as NSString).length
         let safeLength = max(0, min(length, ns.length - start))
-        // 只有内容确实还在原位置才删，避免用户在中间编辑过之后误删。
+        // 仅在原始内容与位置严格匹配时执行移除，防止用户在插入区间编辑后误删。
         let current = ns.substring(with: NSRange(location: start, length: safeLength))
         guard current == receipt.text else {
             payload.bodyAppendReceipts.append(receipt)
@@ -927,8 +925,8 @@ final class ProjectSession {
 
     /// 追加到正文末尾（原版「追加到正文」）。仍记回执，可撤销。
     ///
-    /// 末尾插入要先补一个空行再另起一段，避免新段落和上一段粘在一起；
-    /// 撤销凭据包含这个分隔符，撤销后不会留下多余空行。
+    /// 末尾追加需补充换行以分隔段落，避免与前序段落相连；
+    /// 撤销凭据记录包含分隔符在内的完整增量，撤销时可完全还原。
     @discardableResult
     func appendToManuscript(_ text: String) -> BodyAppendReceipt {
         loadManuscriptIfNeeded()
@@ -968,17 +966,16 @@ final class ProjectSession {
     func refreshDerivedValues() {
         // 正文还没按需加载时不做任何派生计算，避免把空串当成全文。
         guard bodyLoaded || !payload.manuscript.isEmpty else { return }
-        // 章节已经扫过就不再整本重扫：56 万字的正则扫描放在每次进入写作台
-        // 的 onAppear 里，代价太大，而结果本来也会被 `isEmpty` 丢掉。
+        // 章节已存在时跳过扫描：避免每次进入工作台触发全量正则扫描而产生性能开销。
         guard payload.chapters.isEmpty else { return }
         scanChaptersIfNeeded(payload.manuscript, updatesCharacterCount: true)
     }
 
     /// 覆盖导入后，把内存态整体换成磁盘上的新内容。
     ///
-    /// 不能只替换 `payload`：正文分页缓存、编辑器窗口、上一次正文快照和挂起保存
-    /// 都还指着旧稿，下一次防抖保存会把导入内容盖回去。这里统一复位，并且不写盘
-    /// ——磁盘才是导入后的权威来源。
+    /// 需整体重置会话状态：正文分页缓存、编辑器窗口、正文快照及未决保存
+    /// 均需同步复位，防止后续的延迟保存覆盖磁盘上新导入的数据；
+    /// 本方法不触发写盘，直接以磁盘最新数据为准。
     func replaceLoadedState(project: Project, fileStore: FileStore) {
         saveTask?.cancel()
         saveTask = nil
@@ -1017,7 +1014,7 @@ final class ProjectSession {
         manuscriptRevision += 1
     }
 
-    /// 插入/撤销/导入后的章节重扫：放后台，别占用户操作这一帧。
+    /// 插入、撤销及导入后的章节重扫：置于后台执行，避免阻塞主线程响应。
     private func rescanChapters() {
         scanChapters(
             source: payload.manuscript,
@@ -1073,7 +1070,7 @@ final class ProjectSession {
         }
     }
 
-    /// 重新生成：把这条助手消息当成新分支，旧内容留在 variants 里。
+    /// 重新生成：为当前助手消息创建新分支，历史生成内容保留在 variants 中。
     func addVariant(to messageID: String) {
         mutateMessage(messageID, save: false) { message in
             message.variants.append("")
@@ -1113,8 +1110,8 @@ final class ProjectSession {
 
     /// 删除当前展示的版本（原版「删除当前版本」）。
     ///
-    /// 还有别的版本时只删这一版；只剩一版时连气泡一起删掉。会话级回退不在这里
-    /// 做——原版明确禁止「会话版本不能回退」，能回退的是气泡版本。
+    /// 存在多个版本时仅删除当前版本；若仅剩单版本则连同消息气泡一并移除。
+    /// （遵循气泡级单版本回退规则，不涉及会话级状态回滚）。
     func deleteSelectedVariant(for messageID: String) {
         guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
         else { return }
@@ -1142,9 +1139,8 @@ final class ProjectSession {
 
     /// 记录一次请求快照（「提示词回看」）。
     ///
-    /// 只按条数保留 30 条不够：一次发送 56 万字正文的快照就能让 `payload.json`
-    /// 膨胀几十 MB，之后的每次写盘都要编码这些历史。这里再加一道 token 上限
-    /// （中文约 3 字节/token），至少保留最新一条。
+    /// 仅限制 30 条数量上限可能导致大文本快照占用过多体积，增加后续序列化开销。
+    /// 引入 Token 总量预算约束（中文约 3 字节/Token），且至少保留最新一条记录。
     func recordRequestSnapshot(
         model: String,
         messages: [LLMMessage],
@@ -1172,7 +1168,7 @@ final class ProjectSession {
         scheduleSave()
     }
 
-    /// 提示词回看的总量上限（估算 token）。约 60 万中文字，够回看最近几次请求。
+    /// 提示词回看的总量预算上限（估算 Token），满足最近数次请求的回溯需求。
     private static let requestSnapshotTokenBudget = 200_000
 
     private func trimRequestSnapshots() {

@@ -3,8 +3,8 @@ import Security
 
 /// API Key 存 Keychain，不落 JSON。
 ///
-/// Android 端把 key 放在 DataStore（`deepseek_api_key` 等键）。iOS 上有
-/// Keychain 就没理由把凭据明文写进应用沙盒里的文件。
+/// Android 端将凭据保存在 DataStore（`deepseek_api_key` 等键）；
+/// iOS 端统一使用 Keychain 安全存储，避免明文持久化在沙盒文件中。
 enum Keychain {
     private static let service = "com.frthink.app.apikey"
 
@@ -28,14 +28,14 @@ enum Keychain {
         _ = delete(service: service, account: account)
     }
 
-    /// 每个供应方一个 account，避免换模型时串 key。
+    /// 各供应商独立分配 account，防止模型切换时凭据混淆。
     static func account(for providerID: String) -> String {
         "provider.\(providerID)"
     }
 
     // MARK: - 书稿加密主密钥
 
-    /// 和 API Key 分开一个 service：换 key、清 key 时不会误伤书稿。
+    /// 与 API Key 使用独立的 service 隔离命名空间，避免凭据维护操作影响书稿密钥。
     private static let payloadService = "com.frthink.app.payload"
     private static let payloadAccount = "master"
 

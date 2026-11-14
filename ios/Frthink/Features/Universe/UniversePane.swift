@@ -1,12 +1,11 @@
-// 宇宙面板：跨项目共享的全局预设、共享世界书与 Skill。
-// 和「世界」的区别是归属——宇宙资料不属于某一本书，每本书单独决定启用哪几条。
+// 宇宙面板：跨项目共享的全局预设、共享世界书与技能配置。
+// 数据归属于全局层级，独立于特定书籍项目，各书按需配置启用范围。
 
 import SwiftUI
 
 struct UniversePane: View {
     let store: AppStore
-    /// 当前书稿。传入时开关写入这本书的 enabledUniverseEntryIDs；
-    /// 不传时（没有选中书稿）才退回全局开关。
+    /// 当前项目会话：若提供则修改项目内 enabledUniverseEntryIDs，缺省时作用于全局开关。
     var session: ProjectSession? = nil
 
     @State private var isCreating = false
@@ -41,7 +40,7 @@ struct UniversePane: View {
                 list
             }
         }
-        // 整页铺满：空态靠这一层居中，底板才不会只画出内容那一窄条。
+        // 占满可用空间，使缺省空状态视图保持居中展示。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .groupedPageBackground()
         .settingsFormColumn()
@@ -72,12 +71,12 @@ struct UniversePane: View {
 
     private var deleteAlertTitle: String {
         let title = pendingDelete?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return title.isEmpty ? "删除这条资料？" : "删除「\(title)」？"
+        return title.isEmpty ? "删除此资料？" : "删除「\(title)」？"
     }
 
     // MARK: - 列表
 
-    /// 按类型分好的节。分组在 body 外算，每个 `ForEach` 元素固定产出一个 Section。
+    /// 按类型归类的分组列表，于计算属性中统一构建，避免在 body 内重复运算。
     private var sections: [UniverseSectionGroup] {
         UniverseEntry.Kind.allCases.compactMap { kind in
             let group = entries.filter { $0.kind == kind }
@@ -272,7 +271,7 @@ struct UniversePane: View {
     }
 }
 
-/// 单条宇宙资料的编辑页。新建和编辑字段一致，类型可以改。
+/// 宇宙资料编辑视图：支持编辑标题、内容与所属分类。
 private struct UniverseEntryEditor: View {
     let entry: UniverseEntry
     let onSave: (UniverseEntry) -> Void
@@ -344,7 +343,7 @@ private struct UniverseEntryEditor: View {
                 }
             }
         }        .onDisappear {
-            // 这页只有「保存」没有「取消」：左滑返回时把改动存下来，别静默丢。
+            // 返回上一级时自动保存未落盘的有效改动。
             guard !saved, hasChanges, !trimmedTitle.isEmpty else { return }
             save()
         }

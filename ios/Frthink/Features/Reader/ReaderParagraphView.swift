@@ -1,10 +1,10 @@
-// 本文件负责：阅读页的一个段落 —— 两端对齐排版，并把搜索命中刷上底色。
+// 阅读页段落视图：两端对齐排版与搜索命中背景高亮。
 
 import Foundation
 import SwiftUI
 import UIKit
 
-/// 一段正文。命中区间用背景色标出来，排版交给 `JustifiedText`（TextKit）。
+/// 正文段落视图：匹配区间高亮显示，排版通过 `JustifiedText`（TextKit）渲染。
 struct ReaderParagraphView: View, Equatable {
     /// 本段文本。阅读器只在可见段上按 range 切片，块模型不长期持有整段字符串。
     let text: String
@@ -13,9 +13,9 @@ struct ReaderParagraphView: View, Equatable {
     let darkPage: Bool
     /// 本段内的全部命中，坐标是段内的 UTF-16 相对偏移。
     let highlights: [NSRange]
-    /// 当前跳到的那一处命中。
+    /// 当前选中的搜索命中项。
     let current: NSRange?
-    /// 这一段就是章节标题所在的那一块：字号略大、字重更重。
+    /// 章节标题所在段落标识：采用放大字号与加粗字重。
     var isHeading: Bool = false
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -29,12 +29,12 @@ struct ReaderParagraphView: View, Equatable {
         JustifiedText(
             attributed: attributed,
             lineSpacing: ReaderStyle.lineSpacing(size: scaledFontSize, lineHeight: lineHeight),
-            // 段与段之间的距离由外层 LazyVStack 给，这里不再叠段距。
+            // 段间距由外层 LazyVStack 控制，此处不叠加额外边距。
             paragraphSpacing: 0,
             isSelectable: true
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-        // 章节标题上方多留一段：段间距对所有块一样时，标题会贴在上一段末尾。
+        // 章节标题上方预留额外间距，避免与上一段末尾视觉粘连。
         .padding(.top, isHeading ? Theme.Spacing.l : 0)
     }
 

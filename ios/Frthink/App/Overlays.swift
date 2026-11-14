@@ -36,8 +36,8 @@ struct ToastView: View {
     }
 }
 
-/// 轻提示的展示与自动消失。根视图和 sheet 共用一份计时逻辑，
-/// 避免两处各写一个 `Task.sleep` 又要各管一遍取消。
+/// 轻提示的展示与自动消失。根视图和 sheet 共用一套计时逻辑，
+/// 避免两处分别维护 `Task.sleep` 与取消逻辑。
 struct ToastPresenter: View {
     let text: String
     var bottomPadding: CGFloat = Theme.Spacing.xxl

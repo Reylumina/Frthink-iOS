@@ -9,8 +9,7 @@ struct WorldSettingSection: View {
     var onOpenTab: (WorldTab) -> Void = { _ in }
 
     var body: some View {
-        // 刷新入口只留在「人物」分栏：同一页两处都能刷新，用户要先分辨
-        // 「这一行刷新的是谁」。概览只负责计数与跳转。
+        // 刷新入口收拢至各专属分栏，概览页主要负责数据统计与分栏导航。
         List {
             materialSection
         }

@@ -1,8 +1,6 @@
 // 本文件负责：创作页正文与气泡的排版换算（DESIGN §2.3、§5.3）。
 //
-// 流式视图、正式气泡、行宽上限各写一套常量时，只要字号、行距或宽度差一点，
-// 生成结束换成正式气泡的那一刻整段高度就会突变，视口按旧高度落点就露出空白。
-// 换算只留这一份，三处共用。
+// 集中管理正文与气泡排版换算，确保流式视图与静态气泡具有一致的高度与行距。
 
 import SwiftUI
 import UIKit
@@ -21,8 +19,7 @@ enum WriterTypography {
 
     /// 行距换算与阅读页共用 `ReaderStyle`，不另写数值。
     ///
-    /// `lineHeight` 默认取阅读页那档 1.5；调用方传用户调过的值，创作页就和
-    /// 阅读页完全同节奏。
+    /// `lineHeight` 默认取 1.5，亦可接收自定义行高以与阅读器对齐。
     static func lineSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
         ReaderStyle.lineSpacing(size: size, lineHeight: lineHeight)
     }
@@ -37,12 +34,9 @@ enum WriterTypography {
         Theme.Layout.paragraphSpacing(fontSize: size, lineHeight: lineHeight)
     }
 
-    /// 把正文拆成段落：按行拆、丢掉空行、去掉首尾空白。
-    ///
-    /// 模型输出用空行分段，段落本身不保留缩进和空行。
+    /// 将正文拆分为独立段落，过滤空行并去除首尾空白字符。
     static func paragraphs(_ text: String) -> [String] {
-        // 按任意换行符切（\r\n 也算一次），再连空白一起剪掉：
-        // 只切 "\n" 会把 \r 留在段尾，完成态那段会多出一行，和流式对不上。
+        // 识别各类换行符并修剪多余空白，确保跨平台换行格式一致。
         text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && !MarkdownInline.isDivider($0) }

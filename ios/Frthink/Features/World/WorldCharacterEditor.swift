@@ -1,6 +1,6 @@
-// 单张人物卡的编辑页：固定字段 + 自定义词条。
+// 人物卡编辑视图：提供预设字段与自定义词条编辑能力。
 //
-// 编辑期间只改局部草稿，点「完成」或离开页面时一次写回 session，避免逐键触发整份 payload 的变更与防抖保存。
+// 编辑过程维护局部草稿，确认完成或退出页面时统一提交至 session，避免每次输入触发整份数据序列化与持久化。
 
 import SwiftUI
 import Foundation
@@ -11,10 +11,10 @@ struct WorldCharacterEditor: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var confirmingDelete = false
-    /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
+    /// 编辑期间维护局部草稿，退出或点击完成时统一提交至 payload。
     @State private var draft: CharacterCard
-    /// 打开页面那一刻的卡片。写回时靠它判断哪些字段是用户真正改过的，
-    /// 免得把刷新期间并进来的新内容用旧快照盖掉。
+    /// 打开页面时的初始卡片快照，用于判断字段实际修改项，
+    /// 避免旧快照覆盖刷新过程中并入的新数据。
     private let openedCard: CharacterCard
 
     init(session: ProjectSession, cardID: String) {
@@ -236,7 +236,7 @@ struct WorldCharacterEditor: View {
         }
     }
 
-    /// 自定义词条行只拿两个文本绑定和删除回调，回查卡片的事留在编辑器里。
+    /// 自定义词条行视图组件，接收标题、内容绑定与删除回调。
     private struct CustomEntryRow: View {
         @Binding var title: String
         @Binding var content: String
@@ -258,7 +258,7 @@ struct WorldCharacterEditor: View {
                 Button(role: .destructive) {
                     onDelete()
                 } label: {
-                    Label("删除这条词条", systemImage: "trash")
+                    Label("删除词条", systemImage: "trash")
                         .font(Font.footnote)
                         .frame(minHeight: Theme.Layout.controlHeight)
                         .contentShape(Rectangle())
@@ -284,7 +284,7 @@ struct WorldCharacterEditor: View {
         draft.name.isEmpty ? "人物卡" : draft.name
     }
 
-    /// 三路合并：只把用户动过的字段写到当前卡片上，避免用打开时的旧快照覆盖刷新期间并入的新内容。
+    /// 差异合并：仅提交发生变动的字段，防止以旧快照覆盖并发刷新的最新数据。
     private func commitDraft() {
         guard let index = session.payload.world.characters.firstIndex(where: {
             $0.id == cardID
@@ -308,7 +308,7 @@ struct WorldCharacterEditor: View {
         if draft.customEntries != openedCard.customEntries {
             merged.customEntries = draft.customEntries
         }
-        // 新建后没填任何内容就退出：把这张空卡删掉，书架/列表里不留空条目。
+        // 若新建卡片内容为空则移除该条目，保持列表数据有效。
         if Self.isBlank(merged) {
             session.payload.world.characters.remove(at: index)
             session.scheduleSave()

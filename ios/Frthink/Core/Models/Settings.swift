@@ -132,11 +132,11 @@ enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// 「关闭思考」时怎么要求服务端别推理。
+/// 「关闭思考」时向服务端声明禁用推理的字段策略。
 ///
-/// 原版请求体只有 7 个键，关闭思考就是「什么都不发」。可 OpenAI 兼容的服务
-/// 常常默认开推理，不发就等于关不掉（OpenCode 这类）。这里给一个按供应方
-/// 选择的开关位：默认仍是不发，和原版一致；需要时再让用户显式挑一种字段。
+/// 原版请求体仅包含 7 个基础键，关闭思考即不传递任何推理参数。但部分 OpenAI 兼容服务
+/// 默认启用推理，若不显式声明则无法关闭（如 OpenCode 等）。此处提供供应方维度的
+/// 字段配置：默认不传递以对齐原版行为，必要时支持显式指定禁用推理字段。
 enum ReasoningOffStyle: String, Codable, CaseIterable, Identifiable, Hashable {
     /// 不发任何字段（原版行为）。
     case none
@@ -242,8 +242,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
 
     /// 真正要发出去的模型名。
     ///
-    /// 模型字段留空时回落到目录里的最新模型，而不是发出一个空 `model`
-    /// 让服务端 400。用户填了什么就用什么，不做二次猜测。
+    /// 模型字段留空时回退至目录中的最新模型，避免发送空 `model`
+    /// 导致服务端返回 400 错误。若用户已配置则直接使用，不做额外推断。
     var resolvedModel: String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
@@ -255,11 +255,11 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         ModelCatalog.isDeprecated(resolvedModel)
     }
 
-    /// 是否走 DeepSeek 专有分支（`thinking` 字段）。
+    /// 是否走 DeepSeek 专用分支（传递 `thinking` 字段）。
     ///
-    /// 原版不是按枚举判断，而是**拿 URL 的主机名跟 `api.deepseek.com` 比**
-    /// （`L1/X.java:498-511`，忽略大小写）。照抄这条：自建反代到别的域名
-    /// 就不算 DeepSeek，哪怕后端是 DeepSeek。
+    /// 原版实现并非依据枚举判断，而是比对请求 URL 主机名与 `api.deepseek.com`
+    /// （`L1/X.java:498-511`，忽略大小写）。严格对齐该逻辑：自建反代域名
+    /// 不归入 DeepSeek 分支，即使后端接入的是 DeepSeek 服务。
     var isDeepSeek: Bool {
         guard let url = URL(string: baseURLForDisplay.trimmingCharacters(in: .whitespaces)),
               let host = url.host
@@ -306,8 +306,8 @@ struct AppSettings: Codable {
     var streamByDefault: Bool
     /// 宇宙层：跨项目共享的设定。
     var universeEntries: [UniverseEntry]
-    /// 当前书项目启用了哪些宇宙条目（按项目存一份要在 ProjectPayload 里，
-    /// 这里放全局启用的默认集合）。
+    /// 当前书项目启用的宇宙条目集合（单项目配置保存在 ProjectPayload 中，
+    /// 此处存储全局启用的默认集合）。
     var enabledUniverseEntryIDs: [String]
 
     // MARK: 提示词集成管理器

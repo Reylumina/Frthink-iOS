@@ -23,11 +23,11 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | 真实存档导入与导出 | 模拟器运行时验证通过。真机文件选择器未验证 |
 | 联网功能 | 未在真机验证，详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | 界面与交互 | 按 [docs/DESIGN.md](docs/DESIGN.md) 重写（iOS 26.2 基线）：用户气泡实底填充、书架改名「书架」、书封单色占位、系统 `UndoManager` 撤销重做、浮层玻璃「回到最新」、玻璃输入条。`UI Screenshots` 逐页目检通过；iOS 26 的 ×/✓ 与 iPad 宽度未在真机确认 |
-| 流式渲染 | `Stream Check` 用 mock SSE 连跑三次，正文行数/段落断言一致（267 行 / 18 段）。真机联网流式手感未验证 |
+| 流式渲染 | `Stream Check` 基于 mock SSE 连续执行三次，正文行数与段落断言一致（267 行 / 18 段）。真机联网流式交互体验未验证 |
 | 加密存储 | `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 落盘 AES-256-GCM，主密钥在 Keychain，导出保持原版明文 |
-| 正文分页、后台生成 | 后台生成已实现；阅读器按块取页；全屏编辑器只载入书末窗口，保存只写窗口页，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 正文分页、后台生成 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 世界设定 | `worldbook:setting` 伪词条已移除。旧设定文本迁移为世界书词条，分栏改为概览 |
-| 长期写作规则 | 手动触发整理、P54、历史版本与 `sourceHash` 门控已实现；摘要模型可单独指定，留空跟随当前供应方 |
+| 长期写作规则 | 手动触发整理、P54、历史版本与 `sourceHash` 门控已实现；摘要模型可单独指定，留空跟随当前服务提供方 |
 
 ## 环境要求
 

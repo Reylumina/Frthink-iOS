@@ -1,7 +1,7 @@
 // 本文件负责：正文页 —— 阅读为主，按需切到编辑。
 //
-// 创作页现在是 ChatBot 单栏，正文不再和对话挤在上下两半；点「正文」进入这里。
-// 阅读态不挂键盘，编辑态才成为 first responder，退出编辑立即保存并回灌只读视图。
+// 创作界面采用单栏布局，正文视图独立承载。
+// 阅读状态不唤起键盘，切换至编辑状态时激活第一响应者，退出编辑立即保存并更新只读视图。
 
 import SwiftUI
 import UIKit
@@ -146,8 +146,7 @@ struct ManuscriptReaderSheet: View {
         session.isWindowEditing && session.editorWindowStart > 0
     }
 
-    /// 只载入书末时明确告诉用户，避免误以为正文被截断；
-    /// 「加载更早」放这里比塞进底栏更容易被发现，也不和字数抢位置。
+    /// 仅加载尾部窗口时展示提示横幅，避免误认为正文截断，并提供前续内容加载入口。
     private var windowBanner: some View {
         HStack(spacing: Theme.Spacing.s) {
             Image(systemName: "text.line.first.and.arrowtriangle.forward")
@@ -250,8 +249,7 @@ struct ManuscriptReaderSheet: View {
         showRewrite = true
     }
 
-    /// 弹层关闭后收起旧的选区状态：替换成功时 `cursor` 已经在结果末尾，滚过去让用户看到；
-    /// 取消时也把 UITextView 里留着的选区折成光标，避免“界面没按钮、正文却还高亮”。
+    /// 重写面板关闭后清理选区状态，并将光标移动至相应位置滚动至视口。
     private func rewriteDidDismiss() {
         selection = NSRange(location: 0, length: 0)
         rewriteRange = NSRange(location: 0, length: 0)

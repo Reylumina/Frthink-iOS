@@ -1,16 +1,13 @@
 // 「模板与规则」分栏：文风笔记、仿写模板、长期写作规则。
 //
-// 主列表只做概览（一句预览 + 字数）和模型更新入口；正文进推入页编辑，
-// 长文编辑不再打包在 sheet 里。更新动作跟着正文分栏走，用户不用先点进
-// 编辑器再找按钮。
+// 主列表提供内容概览与更新触发入口；文本编辑收拢至子页面。
 //
-// 剧情梗概不在这一栏：写作提示词直接使用「事件」分栏的 `plotEvents`；
-// 数据模型中的 `plotOutline` 为废弃字段，不暴露编辑入口，避免两处都能改。
+// 写作提示词直接采用「事件」分栏的 `plotEvents`；`plotOutline` 为废弃字段，不提供编辑入口。
 
 import SwiftUI
 import Foundation
 
-/// 模板与规则的三个文本字段。主列表和编辑器共用这份枚举，避免两边写串。
+/// 模板与规则的文本字段定义枚举。
 enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
     case styleNotes
     case styleTemplate
@@ -67,7 +64,7 @@ struct WorldRulesSection: View {
     @Bindable var session: ProjectSession
     /// 当前运行中的世界任务；只有本分栏的任务显示进度。
     var busy: WorldBusy?
-    /// 任何世界任务在跑时都禁用 AI 入口，避免点了没反馈。
+    /// 存在进行中的世界任务时禁用 AI 操作入口。
     var isActionDisabled: Bool = false
     var onExtractStyleNotes: () -> Void
     var onUpdateRules: () -> Void
@@ -140,9 +137,7 @@ struct WorldRulesSection: View {
         .buttonStyle(.plain)
     }
 
-    /// 模型更新入口放在列表上，点正文行只负责编辑，两个动作不互相打岔。
-    /// 动作行不配图标：这里是一句命令，标题已经把动作说清楚了，再加一个小符号
-    /// 只会让人猜它和上面那些「资源行」有什么区别。
+    /// 模型更新入口置于列表层，与文本编辑入口清晰分离。
     private func updateRow(
         title: String,
         kind: WorldBusy,
@@ -172,8 +167,7 @@ struct WorldRulesSection: View {
 
 /// 规则编辑页的草稿与外部（AI 摘要）写入之间的同步判定。
 ///
-/// 页面打开时 `draft == baseline`；用户改过以后两者不再相等。只有没被用户
-/// 动过的草稿才接受外部新值，否则会把用户正在写的内容顶掉。
+/// 页面打开时 `draft == baseline`；仅在草稿未发生变动时接收外部更新，防止覆盖本地编辑内容。
 enum WorldRuleDraftSync: Equatable {
     case adoptExternal
     case keepDraft
@@ -193,7 +187,7 @@ private struct WorldRuleEditorPage: View {
     @State private var receipt: String?
     /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
     @State private var draft: String
-    /// 打开页面时的原文。用来区分「用户改过」与「后台 AI 更新过」。
+    /// 打开页面时的文本基准，用于检测本地修改与后台并发更新。
     @State private var baseline: String
 
     init(session: ProjectSession, kind: WorldRuleTextKind) {
@@ -236,8 +230,7 @@ private struct WorldRuleEditorPage: View {
             Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
             Button("取消", role: .cancel) {}
         }
-        // 页面开着时 AI 可能更新了同一字段（手动入口在列表上，自动摘要在后台跑）。
-        // 用户没动过草稿就直接换成新值，避免他看到旧内容再点「完成」把新结果盖掉。
+        // 页面处于展示状态时，若草稿未被修改，则自动同步后台生成的最新文本。
         .onChange(of: kind.text(in: session.payload.world)) { _, newValue in
             guard WorldRuleDraftSync.decision(draft: draft, baseline: baseline)
                 == .adoptExternal
@@ -253,8 +246,7 @@ private struct WorldRuleEditorPage: View {
     // MARK: - 草稿
 
     private func commitDraft() {
-        // 用户没动过就什么都不写：后台 AI 可能在编辑期间更新过同一字段，
-        // 拿打开时的旧草稿回写会把新结果覆盖掉。
+        // 未发生变动则跳过提交，避免旧草稿覆盖编辑期间后台生成的最新结果。
         guard draft != baseline else { return }
         switch kind {
         case .styleNotes:
@@ -262,7 +254,7 @@ private struct WorldRuleEditorPage: View {
         case .styleTemplate:
             session.payload.world.styleTemplate = draft
         case .longTermRules:
-            // 和设置页共用摘要写入口：记录历史版本与 updatedAt，恢复上一版才有依据。
+            // 复用摘要更新接口，记录历史快照与更新时间戳。
             let now = Int64(Date().timeIntervalSince1970 * 1000)
             _ = session.payload.world.applySummaryUpdate(
                 content: draft,

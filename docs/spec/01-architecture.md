@@ -10,21 +10,21 @@
 
 ### 0.1 三类高价值证据源（本次实际用到）
 
-| 证据源 | 位置 | 为什么好用 |
+| 证据源 | 位置 | 价值与作用 |
 |---|---|---|
-| **kotlinx.serialization 描述符** | 形如 `new P2.Q("com.frthink.app.model.ChatMessage", ...)` | R8 没有改字符串常量，**原始全限定类名和字段名全部保留**。这是还原数据模型最快的入口 |
-| **`toString()` 里的 `"类名(字段="`** | 形如 `new StringBuilder("DreamUiState(destination=")` | 一次给出 UI 状态类名 + 全部字段名 |
-| **Kotlin 函数引用元数据** | 形如 `super(1, h.class, "seekToOffset", "ReaderScreen$seekToOffset(...)V", 0)` | R8 保留了 `XxxScreen$func` 签名，**还原 Screen 级类名与真实函数名** |
+| **kotlinx.serialization 描述符** | 形如 `new P2.Q("com.frthink.app.model.ChatMessage", ...)` | R8 未修改字符串常量，**原始全限定类名和字段名全部保留**，是高效还原数据模型的关键入口 |
+| **`toString()` 里的 `"类名(字段="`** | 形如 `new StringBuilder("DreamUiState(destination=")` | 可直接获取 UI 状态类名及全部字段定义 |
+| **Kotlin 函数引用元数据** | 形如 `super(1, h.class, "seekToOffset", "ReaderScreen$seekToOffset(...)V", 0)` | R8 保留了 `XxxScreen$func` 签名，**可直接还原 Screen 级类名与真实函数名** |
 
 补充入口：
 - `out/dex-chinese.txt`（1976 条中文）用于反推界面文案与错误提示；
 - `out/dex-stringtable.txt`（18590 行）用于确认长提示词原文；
-- 反编译失败的巨型方法（如 `M1.J5.i0` 有 9923 条指令）去 `out/apktool/smali/` 读同名 smali。
+- 反编译失败的巨型方法（如 `M1.J5.i0` 有 9923 条指令）查阅 `out/apktool/smali/` 下同名 smali 字节码。
 
-### 0.2 本次踩到的两个坑（复现者注意）
+### 0.2 逆向过程注意事项
 
-1. **Windows 大小写碰撞丢文件**。`M1/v2.smali` 与 `M1/V2.smali` 只差大小写，apktool 落盘时后者覆盖前者，被重命名的幸存文件是 `out/apktool/smali/M1/v2.1.smali`（`.class public final LM1/v2;`）。主界面分发逻辑只存在于这个 `.1.smali` 里，jadx 侧 `M1/C0796v2.java` 反编译失败。
-2. **jadx 的 `renamed from` 注释会把同名字母数字类合并**，例如 `M1.C0796v2`（源自 `M1.v2`）与 `M1.V2`（协程 lambda）是两个完全不同的类。
+1. **Windows 大小写碰撞导致文件覆盖**。`M1/v2.smali` 与 `M1/V2.smali` 仅有大小写差异，apktool 落盘时后者覆盖前者，被重命名保留的文件为 `out/apktool/smali/M1/v2.1.smali`（`.class public final LM1/v2;`）。主界面分发逻辑仅存在于此 `.1.smali` 文件中，jadx 侧 `M1/C0796v2.java` 反编译失败。
+2. **jadx 的 `renamed from` 注释会将同名字母数字类合并**，例如 `M1.C0796v2`（源自 `M1.v2`）与 `M1.V2`（协程 lambda）属于两个完全不同的类。
 
 ---
 
@@ -215,7 +215,7 @@ androidx.compose.animation.a.c(!state.workspaceReady, ...)      // 启动遮罩
 
 **`L1.U2` = `com.frthink.app.runtime.DreamMachineViewModel`**。
 证据：`M1/W4.java:44` 的函数引用签名含 `Lcom/frthink/app/runtime/DreamMachineViewModel;`；`M1/C0704j5.java` 的 `SettingsScreen$refreshStorageUsage(...Lcom/frthink/app/runtime/DreamMachineViewModel;...)` 同证。
-它是 `AndroidViewModel`（`L1/m0.1.smali` 里 `iget-object p1, p1, Landroidx/lifecycle/a;->b:Landroid/app/Application;`），文件 `L1/U2.java` 558 KB、99 个方法。
+它是 `AndroidViewModel`（见 `L1/m0.1.smali` 中的 `iget-object p1, p1, Landroidx/lifecycle/a;->b:Landroid/app/Application;`），源文件 `L1/U2.java` 体积约 558 KB，包含 99 个方法。
 
 初始化（`L1/U2.java:340-366`）：
 ```java
@@ -246,7 +246,7 @@ initial state: destination=创作, ... , "本机书架"
 | `deletedChatMessageIds` | `f4964o` | 已删气泡墓碑 |
 | `task` | `f4967p` | 当前写作任务 |
 | `world` | `f4970q` | `J1.B1` 项目世界（含 `plotEvents`/`imitationTemplate`） |
-| `characterCards` / `characterGroups` / `worldbooks` | `f4976s`/`f4979t`/`f4981u` | 世界三件套 |
+| `characterCards` / `characterGroups` / `worldbooks` | `f4976s`/`f4979t`/`f4981u` | 角色与世界书设定 |
 | `enabledUniverseEntryIds` | `f4984v` | 已启用的宇宙共享条目 |
 | `requestSnapshots` | `f4987w` | `List<CloudRequestSnapshot>` 发送清单 |
 | `corpusLibrary` / `corpusReady` / `corpusBusy` / `corpusActiveCollectionId` / `corpusStatus` | `f4855A`/`f4858B`/`f4864D`/`f4867E`/`F` | 语料库 |
@@ -265,7 +265,7 @@ initial state: destination=创作, ... , "本机书架"
 | `readerFontScale` / `readerLineHeight` / `readerPanelVisible` / `readerOffset` / `readerBookmarkOffset` | `f4906S`/`f4909T`/`f4912U`/`f4914V`/`f4916W` | 阅读页 |
 | `continuationAnchorOffset` / `continuationAnchorPrefixHash` | `f4918X`/`f4920Y` | 续写锚点 |
 
-`J1.C0.a(...)` 是生成的 `copy(...)`（100+ 位置参数），全仓库到处在用——这也是为什么每次状态更新都出现极长的调用。
+`J1.C0.a(...)` 是生成的 `copy(...)`（包含 100 多个位置参数），在全工程各处广泛调用，因此状态更新均表现为超长参数列表调用。
 
 ### 3.3 持久化状态模型
 
@@ -318,7 +318,7 @@ CREATE TABLE IF NOT EXISTS `projects` (`id` TEXT NOT NULL, `title` TEXT NOT NULL
 
 ### 4.2 加密：AndroidKeyStore AES-256-GCM + GZIP（自研 sealed 容器）
 
-**不是 Tink 的业务用法**——Tink 只是传递依赖（`com.google.crypto.tink.shaded.protobuf` 在 dex 里，但没有 `AndroidKeysetManager` 调用）。真正用的是手写容器：
+**此处未采用 Tink 框架的业务用法**——Tink 仅作为传递依赖引入（dex 中包含 `com.google.crypto.tink.shaded.protobuf`，但无 `AndroidKeysetManager` 调用）。实际加密采用独立实现的密封容器：
 
 **密钥**（`I1/I.java:19-32`，函数引用名 `editorKey`）：
 ```java
@@ -345,7 +345,7 @@ identity = `"frthink:universe:corpus:v1"`（`I1/C0366y.java:56` 加密、`I1/C03
 
 **增量草稿日志（自动保存的核心）**：`IncrementalDraftJournal` 家族（`I1/W.java` = `Header`，`I1/T.java` = `Delta`，`I1/C0314l0.java` = `Snapshot`，`I1/C0264b0/C0284f0/C0299i0` = `Owner/Retired/Scope`），`IncrementalEditorBuffer.Change`（`I1/C0367y0.java`）。
 `Header(owner, epoch, snapshot, snapshotRevision, revision, lastBase, lastHash, deleted, publishedRevision, retired)`（`I1/Y.java:111`）、`Delta(owner, base, revision, changes)`（`I1/V.java:52`）、`Snapshot(owner, revision, text, baseVersion, baseText)`（`I1/C0324n0.java:53`）。
-→ **正文采用「基线快照 + 增量 delta」双层结构**，`revision` 单调递增，`base` 指向基线版本；这是断线/崩溃恢复的基础。
+→ **正文采用「基线快照 + 增量 delta」双层结构**，`revision` 单调递增，`base` 指向基线版本；此结构为断网与崩溃恢复的基础。
 
 ### 4.3 磁盘布局小结
 
@@ -444,7 +444,7 @@ c0A = J1.C0.a(c5, ...,
   ```
 - 相关护栏文案（`out/dex-chinese.txt`）：`仅删除当前展示版本`(219)、`将删除当前展示版本以外的`(745)、`这条气泡没有其他候选版本`(1864)、`当前气泡版本已变化`(910)、`当前展示版本已变化`(903)、`气泡版本已锁定`(1438)、`已生成新气泡版本`(858)、`原气泡和版本未更改`(507)、`会话版本不能回退`(256)、`已保留为未完成版本`(786)。
 - **气泡内容写入正文**走「追加 + 可撤销」：`bodyAppendReceiptIds`（幂等回执，重复追加不会写两次）+ `lastBodyAppendUndo`（`J1.C0422u` = `BodyAppendUndo`）。对应文案 `"正文写入已暂停"`(1386)、`"不代表已写入正文"`(23)、`"不会再写入"`(24)。
-- 会话级回退被显式禁止：`L1/G1.java:137,197` 抛 `IllegalStateException("会话版本不能回退")`——**能回退的是气泡版本，不是整个会话**。
+- 会话级回退被显式禁止：`L1/G1.java:137,197` 抛 `IllegalStateException("会话版本不能回退")`——系统仅支持单气泡版本切换与回退，不支持整个会话回退。
 
 ### 5.5 分支（branchRootId / branchOrder）
 
@@ -502,10 +502,10 @@ if (shelfRevision <= 0) throw new IllegalStateException("分支已写入，但�
 
 ### 6.1 为什么需要前台服务
 
-`dataSync` 类型 + `WAKE_LOCK` + `stopWithTask="false"`：**SSE 流式回复在用户切后台/锁屏时不能被杀**。写清楚的三条硬证据：
+`dataSync` 类型 + `WAKE_LOCK` + `stopWithTask="false"`：**确保 SSE 流式响应在应用退至后台或锁屏状态下不被系统中止**。关键实现依据如下：
 1. `onStartCommand` 里 `newWakeLock(1 /*PARTIAL_WAKE_LOCK*/, getPackageName() + ":llm-transfer")`，`setReferenceCounted(false)`，`acquire(TimeUnit.HOURS.toMillis(4))`（`:208-214`）；
 2. `onDestroy` 释放锁并清空请求集合（`:172-176`）；
-3. `stopWithTask=false` → 从最近任务划掉也不结束。
+3. `stopWithTask=false` → 从最近任务列表中划除亦不终止服务。
 
 ### 6.2 与 UI 的通信方式：**纯 Intent，无 Binder**
 
@@ -530,7 +530,7 @@ public final IBinder onBind(Intent intent) { return null; }   // LlmTransferServ
           .setAction("com.frthink.app.action.LLM_END").putExtra("request_id", this.f);
       app.startService(intent); } }
   ```
-  → **成功、失败、取消都会发 LLM_END**（jadx 侧这段落在反编译失败的方法里，只能从 smali 读）。
+  → **无论请求成功、失败或取消均会发送 LLM_END**（jadx 反编译此方法失败，结论由 smali 字节码直接导出）。
 
 ### 6.3 前台通知
 
@@ -552,7 +552,7 @@ public final IBinder onBind(Intent intent) { return null; }   // LlmTransferServ
 
 ### 6.4 断流与重连
 
-服务本身**不做**重连——它只负责「保活 + 通知」，网络重试在 ViewModel/网络层：
+前台服务本身**不处理**重连逻辑——其仅负责保活与前台通知，网络重试由 ViewModel 与网络层实现：
 - 服务提供 `onTimeout(int,int)`（`:224-228`）兜底：`stopForeground(1)` + 释放锁 + `stopSelf`。
 - 断流检测与重试的证据在字符串表：`"上次生成中断"`(13)、`"已保留为未完成版本"`(786)、`"人物卡工具流式响应提前结束"`(185)、`"人物卡工具流式响应未完整完成"`(186)、`"回复会自动保存"`（通知正文本身即承诺崩溃后内容不丢）。
 - SSE 解析在 `L1/X`（`text/event-stream`，终止符 `[DONE]`），`Accept: text/event-stream, application/json`（`L1/V.java:129`、`L1/U.java:129`）。
@@ -571,7 +571,7 @@ public final IBinder onBind(Intent intent) { return null; }   // LlmTransferServ
 | 诊断报告 | `"导出诊断报告"`（`M1/r.java:414`） | JSON | `DiagnosticReport` |
 
 `M1/C0777t.java:191` 另有 `"返回书架"`，说明这是一个「存档/工具」子页。
-全量备份覆盖范围由界面文案直接给出：**`"全部项目 · 正文 · 世界书 · 设置 · 不含 API 信息"`**（`M1/C0739o0.java:607`）——注意与下面 `credentialSecrets` 字段并存，说明「导出」默认不带凭据。
+全量备份覆盖范围由界面文案直接标明：**`"全部项目 · 正文 · 世界书 · 设置 · 不含 API 信息"`**（`M1/C0739o0.java:607`）——结合后文 `credentialSecrets` 字段可知，「导出」默认排除凭据信息。
 
 ### 7.2 信封格式（`FrthinkArchiveEnvelope`）
 
@@ -638,7 +638,7 @@ coverImageBase64, branchRootId, branchOrder, trashedAt, translations
 
 - `J1.C0429x0` = **`com.frthink.app.model.CorpusLibrary`**（`J1/C0429x0.java:150`）
   `CorpusLibrary(id, name, enabled, collections, revision, rules, entries, processedKeys, deletedTextKeys, classifiedKeys)`
-  注意 `collections: List<CorpusLibrary>` —— **库可以嵌套（库 / 集合）**。
+  字段 `collections: List<CorpusLibrary>` 表明：**语料库支持层级嵌套结构（库 / 集合）**。
 - `J1.C0423u0` = **`com.frthink.app.model.CorpusEntry`**
   `CorpusEntry(id, title, text, category, tags, origins, createdAt, updatedAt)`
 - `J1.A0`/`J1.C0431y0` = `com.frthink.app.model.CorpusOrigin`
@@ -666,7 +666,7 @@ coverImageBase64, branchRootId, branchOrder, trashedAt, translations
 T0.b.R(new f3("task:corpus", PromptBlockType.智能体指令, str2, true, "语料收集", J1.i1.f5238i))
 ```
 → 语料抽取任务作为 `PromptBlockType = 智能体指令`（`EnumC0389d1.f5181g`）注入。
-来源对象 `L1.V.java:64`：`"这条码字机气泡没有可入库的内容"` —— **入库源是码字机生成的气泡**。
+来源对象 `L1.V.java:64`：`"这条码字机气泡没有可入库的内容"` —— **抽取源即码字机生成的消息气泡**。
 
 **(d) 注入到写作 Prompt**（`L1/U2.java:723-768`，关键）：
 
@@ -689,7 +689,7 @@ if (lib.f5411c /*enabled*/) {
 }
 ```
 
-→ **语料以 `PromptBlockType.世界资料` 注入，key 为 `corpus:<collectionId>:<entryId>`，且正文里明写「不是本书事实，不得直接续接为已发生剧情」**。这是本应用最独特的设计：语料只作为「可选表达参考」进入提示词，避免污染正文事实。
+→ **语料以 `PromptBlockType.世界资料` 注入，key 为 `corpus:<collectionId>:<entryId>`，且提示词内容显式标注「不是本书事实，不得直接续接为已发生剧情」**。该设计的关键机制在于：语料仅作为「可选表达参考」载入上下文，以避免污染正文设定与事实。
 
 **（e）状态位**：`corpusLibrary / corpusReady / corpusBusy / corpusActiveCollectionId / corpusStatus`（§3.2），`processedKeys`（已处理气泡键）与 `deletedTextKeys`、`classifiedKeys` 用于增量去重。
 
@@ -745,11 +745,11 @@ if (lib.f5411c /*enabled*/) {
 | 阅读页（`J5.i0`）内部布局、分页与译文分段渲染算法 | **未验证** | 方法体 9923 指令，jadx 放弃；smali 可达但未逐条还原 |
 | 自动保存的去抖间隔 / 触发条件 | **未验证** | 未定位到 `delay(...)` 常量 |
 | SSE 断流重连的退避策略 | **未验证** | 重试逻辑在未反编译的方法里 |
-| `J5.c`（宇宙页）具体区块顺序 | 部分推断 | 仅从头部文案与空态文案确认语义，未逐 item 还原 |
+| `J5.c`（宇宙页）具体区块顺序 | 部分推断 | 仅依据头部文案与空状态文案推导语义，未逐项解析还原 |
 | `J1.C0387d.f5169v` == `darkThemeEnabled` | 推断 | 由「唯一主题布尔 + `L5.f8472y` 二选一」推得，未取到字段名直证 |
 | 「世界」页各区块的**显示标题**（世界书/事件卡） | 部分推断 | 区块渲染函数已确认（`C0621a2`/`Q4`），但标题字符串在未反编译方法内；`"人物卡"`、`"人物卡库"`、`"仿写模板"`、`"剧情梗概"` 有直证 |
-| `LlmTransferService` 是否还有其他 action | 未验证 | 只找到 BEGIN/END 两个 |
-| 数据库 `source_blobs` 的加密方式（是否也走 sealed 容器） | 未验证 | 表名与 SQL 已确认，blob 内容加密路径未追到 |
+| `LlmTransferService` 是否还有其他 action | 未验证 | 仅检索到 BEGIN 与 END 两类动作 |
+| 数据库 `source_blobs` 的加密方式（是否也走 sealed 容器） | 未验证 | 表名与 SQL 定义已确认，blob 内容加密链路尚未定位 |
 
 ---
 

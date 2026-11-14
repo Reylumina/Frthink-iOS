@@ -2,8 +2,7 @@ import Foundation
 
 /// 世界任务共用的一次性请求上下文：当前服务商、客户端与统一请求参数。
 ///
-/// 各 workflow 只关心 messages 和是否拦截截断，不再各自拼 `LLMRequest`
-/// 或重复取 activeProvider，减少世界刷新/素材/规则之间的耦合。
+/// 统一构建 `LLMRequest` 与获取 activeProvider，各工作流专注于上下文消息与截断控制。
 struct WorldRequestContext {
     let client: any LLMClient
     let provider: ProviderSetting
@@ -19,7 +18,7 @@ struct WorldRequestContext {
 
     /// 世界任务统一的请求参数：输出预算至少 4096，截断按 `failOnLength` 处理。
     ///
-    /// 去重等独立请求也走这里，避免各自写较小的 `maxTokens` 导致大候选批的 JSON 被截断。
+    /// 统一调用此处，确保 `maxTokens` 满足大批量 JSON 结构输出需求。
     static func request(
         provider: ProviderSetting,
         messages: [LLMMessage],

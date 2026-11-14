@@ -14,11 +14,11 @@ final class OpenAICompatibleClient: LLMClient {
     ///
     /// 复用连接池与 TLS 会话缓存，避免每次请求新建 session 持有多余连接。
     ///
-    /// - `ephemeral` + `urlCache = nil`：LLM 响应不该进 URL 缓存，SSE 更不该。
-    /// - `waitsForConnectivity = false`：交互式请求断网就立刻报错，不挂 3 分钟。
+    /// - `ephemeral` 且 `urlCache = nil`：LLM 响应不应写入 URL 缓存，SSE 流式数据亦同。
+    /// - `waitsForConnectivity = false`：交互式请求遇网络断开立即返回错误，避免长时间挂起。
     static let sharedSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        // 流式响应可能几分钟没有新字节，请求超时给足；资源超时兜住挂死的情况。
+        // 流式响应可能长时间无增量数据，设置充足的请求超时；资源超时用于防范连接异常挂起。
         config.timeoutIntervalForRequest = 180
         config.timeoutIntervalForResource = 900
         config.waitsForConnectivity = false
@@ -148,7 +148,7 @@ final class OpenAICompatibleClient: LLMClient {
         )
         let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
+            throw LLMError.decoding("未获取到 HTTP 状态码")
         }
         return (bytes, http)
     }
@@ -173,10 +173,10 @@ final class OpenAICompatibleClient: LLMClient {
         var emittedAnything = false
         var sawDone = false
         var undecodableLines = 0
-        // 收到的原始 SSE 行。判定「空响应」时一并带出去——
-        // 只说「空响应」没法区分是鉴权、参数还是模型名的问题。
+        // 记录接收到的原始 SSE 行数据。在判定「空响应」时附带输出，
+        // 便于区分鉴权失效、参数错误或模型名称不匹配等问题。
         var rawLog: [String] = []
-        // 一个解码器复用整条流：每个 chunk 新建 JSONDecoder 是纯浪费。
+        // 单条数据流复用同一个解码器实例，避免为每个 chunk 重复创建 JSONDecoder。
         let chunkDecoder = JSONDecoder()
 
         for try await line in bytes.lines {
@@ -199,8 +199,8 @@ final class OpenAICompatibleClient: LLMClient {
             if payload.isEmpty { continue }
 
             guard let data = payload.data(using: .utf8) else { continue }
-            // 长时间流式循环里每行都在产生临时对象，autoreleasepool
-            // 把每块的生命周期限制在本行，避免几万行后一起释放。
+            // 在长时间流式处理中限制临时对象的作用域，利用 autoreleasepool
+            // 及时释放单行内存，防止大量行数据累积导致内存峰值过高。
             guard let chunk = autoreleasepool(invoking: {
                 try? chunkDecoder.decode(StreamChunk.self, from: data)
             }) else {
@@ -217,7 +217,7 @@ final class OpenAICompatibleClient: LLMClient {
 
         if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
             throw LLMError.streamError(
-                detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
+                detail: "流中有 \(undecodableLines) 行无法解析，且未收到结束标记；本次回复可能不完整。"
             )
         }
 
@@ -240,8 +240,8 @@ final class OpenAICompatibleClient: LLMClient {
         finishReason: inout String?,
         emittedAnything: inout Bool
     ) throws {
-        // 200 流里也会下发错误（限流、内容过滤、上下文超限），
-        // 不能整块丢掉，否则半截正文会被当成正常结束。
+        // 状态码 200 的流式响应中亦可能下发错误信息（如限流、内容审核、上下文溢出），
+        // 必须捕获处理，防止不完整正文被误判为正常结束。
         if let streamError = chunk.error {
             throw LLMError.streamError(detail: streamError.detail)
         }
@@ -277,7 +277,7 @@ final class OpenAICompatibleClient: LLMClient {
         }
     }
 
-    /// 报错里回显的原文长度上限，够看清是哪一类错误即可。
+    /// 错误信息中回显原始响应的长度上限，确保足以识别错误分类。
     private static func clip(_ text: String) -> String {
         let limit = 600
         if text.count <= limit { return text }
@@ -286,21 +286,21 @@ final class OpenAICompatibleClient: LLMClient {
 
     // MARK: - 一次性
 
-    /// 发一次请求并把 HTTP 状态收口：取消归一、非 2xx 带原文。
-    /// 一次性补全、探针和模型列表共用，避免三处各写一遍状态码判断。
+    /// 发送单次请求并统一收口 HTTP 状态：规范化取消异常，非 2xx 附带原始响应。
+    /// 供单次补全、连通性探测及模型列表查询复用，统一状态码判定逻辑。
     private func send(_ urlRequest: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: urlRequest)
         } catch {
-            // URLSession 的取消是 URLError.cancelled，和结构化并发取消不是同一种；
-            // 统一成 LLMError.cancelled，调用方才能把「停止」和「失败」分开。
+            // URLSession 取消抛出 URLError.cancelled，与结构化并发取消类型不同；
+            // 统一映射为 LLMError.cancelled，便于调用方区分主动终止与执行失败。
             if error.isLLMCancellation { throw LLMError.cancelled }
             throw error
         }
         guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
+            throw LLMError.decoding("未获取到 HTTP 状态码")
         }
         guard (200..<300).contains(http.statusCode) else {
             throw LLMError.http(
@@ -345,8 +345,8 @@ final class OpenAICompatibleClient: LLMClient {
         let message = choice?.message
         let text = message?.content ?? message?.text ?? message?.output_text ?? ""
         if text.isEmpty {
-            // 思考型模型可能只回 reasoning_content。这不是坏响应，
-            // 是输出通道被参数关掉了，得说清楚。
+            // 推理型模型可能仅返回 reasoning_content。此情况属于正文通道未输出内容而非响应异常，
+            // 需在提示信息中明确说明。
             let reasoning = message?.reasoning_content
                 ?? message?.reasoning
                 ?? message?.analysis
@@ -355,7 +355,7 @@ final class OpenAICompatibleClient: LLMClient {
                 ?? ""
             if !reasoning.isEmpty {
                 throw LLMError.emptyResponse(
-                    detail: "只返回了思考内容（\(reasoning.count) 字），正文为空；多为 thinking / max_tokens 配置所致。"
+                    detail: "仅返回思考内容（\(reasoning.count) 字），正文为空；通常由 thinking / max_tokens 配置所致。"
                 )
             }
             throw LLMError.emptyResponse(detail: Self.clip(raw))
@@ -397,7 +397,7 @@ final class OpenAICompatibleClient: LLMClient {
             )
         }
         guard !calls.isEmpty else {
-            throw LLMError.decoding("模型没有返回人物卡工具结果")
+            throw LLMError.decoding("模型未返回人物卡工具结果")
         }
         return calls
     }
@@ -430,7 +430,7 @@ final class OpenAICompatibleClient: LLMClient {
     // MARK: - 连通性
 
     func testConnection() async throws {
-        // 探针只验证地址、Key、模型名。max_tokens 给足，避免思考型模型只回 reasoning。
+        // 探测请求仅验证服务地址、API Key 及模型有效性。分配充足的 max_tokens，避免推理型模型仅输出 reasoning。
         let probe = LLMRequest(
             model: provider.resolvedModel,
             messages: [.user("你好")],
@@ -447,7 +447,7 @@ final class OpenAICompatibleClient: LLMClient {
         guard let choice = decoded.choices?.first else {
             throw LLMError.emptyResponse(detail: Self.clip(raw))
         }
-        // 正文或思考，有一样就算这条链路是通的。
+        // 包含正文内容或思考过程之一，即表明该请求链路联通正常。
         let message = choice.message
         let text = message?.content
             ?? message?.text

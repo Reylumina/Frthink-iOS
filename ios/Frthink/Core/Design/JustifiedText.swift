@@ -9,8 +9,8 @@ import UIKit
 
 /// 一段两端对齐的正文。
 ///
-/// 传入的 `attributed` 只需要带字体与颜色，段落样式在这里统一设置——同一段里
-/// 混着两种对齐会很难看。
+/// 传入的 `attributed` 仅需包含字体与颜色，段落样式在此处统一配置，避免同一段落内
+/// 混合多种对齐方式导致视觉不一致。
 struct JustifiedText: UIViewRepresentable {
     var attributed: NSAttributedString
     /// 额外行距（字号 × (行高 − 1)）。
@@ -157,8 +157,7 @@ struct JustifiedText: UIViewRepresentable {
     ) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = alignsLastLine ? .justified : .natural
-        // pushOut：断行时尽量把整词推出去，避免靠断词凑长度——这是系统阅读器
-        // 让右边看起来整齐而不是「贪心断行」的关键。
+        // pushOut：换行时优先将完整词项推入下一行，避免通过过度断词填充行宽，确保右侧边界对齐规整。
         paragraph.lineBreakStrategy = .pushOut
         paragraph.lineSpacing = lineSpacing
         paragraph.paragraphSpacing = paragraphSpacing
@@ -166,7 +165,7 @@ struct JustifiedText: UIViewRepresentable {
         return paragraph
     }
 
-    /// 把段落样式整体套到文本上：对齐、断行策略、行距、中文禁则由 CoreText 处理。
+    /// 将段落样式应用至文本：对齐方式、换行策略、行距及中文排版禁则由 CoreText 统一处理。
     private func styled(_ source: NSAttributedString) -> NSAttributedString {
         guard !preservesParagraphStyles else { return source }
         let paragraph = Self.paragraphStyle(

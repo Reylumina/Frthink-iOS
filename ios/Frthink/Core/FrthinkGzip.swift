@@ -3,12 +3,12 @@ import Foundation
 
 /// RFC 1952 gzip 容器。
 ///
-/// Android 用 `GZIPInputStream` / `GZIPOutputStream`，两边都不认 zlib 头，所以
-/// 这里自己补 10 字节头 + CRC32/ISIZE 尾，中间的压缩数据用 `Compression` 框架
-/// 的 `COMPRESSION_ZLIB`（它给的是裸 DEFLATE，正好是 gzip 要的那段）。
+/// Android 端采用 `GZIPInputStream` / `GZIPOutputStream`，两端均不支持 zlib 头，因此
+/// 此处手动拼接 10 字节文件头与 CRC32/ISIZE 文件尾，中间压缩数据使用 `Compression` 框架
+/// 的 `COMPRESSION_ZLIB`（输出裸 DEFLATE 格式，与 gzip 数据体完全兼容）。
 ///
-/// 只处理单 member 的 gzip。Android 导出侧写出来的一定是单 member；多 member
-/// 串联（`cat a.gz b.gz`）不在支持范围，会按「备份内容损坏」报错。
+/// 仅处理单 member 的 gzip。Android 导出端生成的数据格式均为单 member；不支持多 member
+/// 串联格式（如 `cat a.gz b.gz`），此类情况按「备份内容损坏」报错处理。
 enum FrthinkGzip {
 
     /// 压缩。头部 MTIME 固定 0，同样输入产出同样字节，便于自检比对。
@@ -67,9 +67,9 @@ enum FrthinkGzip {
         let expectedCRC = littleEndian32(data, at: trailer)
         let expectedSize = littleEndian32(data, at: trailer + 4)
 
-        // 被截断的文件会把尾部的 CRC/ISIZE 读歪成天文数字。DEFLATE 的最大压缩比
-        // 约 1032:1，按压缩后的字节数反推一个上限，先挡掉明显不可能的长度，
-        // 免得把「文件损坏」报成「超过 300 MiB」。
+        // 截断的文件可能导致尾部 CRC/ISIZE 解析为异常大数值。DEFLATE 的理论极限压缩比
+        // 约为 1032:1，依据压缩后字节数反推上限并拦截异常长度，
+        // 避免将「文件损坏」误报为「超过 300 MiB」。
         let deflateCount = trailer - offset
         let plausibleMax = deflateCount * 1100 + 4096
         guard Int(expectedSize) <= plausibleMax else { throw FrthinkGzipError.truncated }
@@ -77,8 +77,8 @@ enum FrthinkGzip {
             throw FrthinkGzipError.outputLimitExceeded
         }
 
-        // ISIZE 就是解压后的长度，先按它开缓冲区：解压结果显示比它长会直接
-        // 解不开（不会留下被截断的内容）。
+        // 依据 ISIZE 初始化解压缓冲区：若解压结果超出该长度则直接判定失败，
+        // 避免产生不完整数据。
         let capacity = max(Int(expectedSize), 1)
         let destination = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
         defer { destination.deallocate() }
@@ -134,7 +134,7 @@ enum FrthinkGzip {
         guard !data.isEmpty else { return Data([0x03, 0x00]) }
 
         // zlib 的 compressBound 是 n + n/4096*5 + 6，这里按 n/8 留足余量；
-        // 万一还不够就翻倍重试。
+        // 若缓冲区不足则容量翻倍重试。
         var capacity = data.count + data.count / 8 + 1024
         while capacity <= data.count * 8 + 1024 {
             let destination = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)

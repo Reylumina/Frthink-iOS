@@ -8,7 +8,7 @@ import SwiftUI
 import UIKit
 
 enum DynamicTypeFont {
-    /// 把设置里的字号基数按指定 Dynamic Type 档位缩放。
+    /// 将设置中的字号基数按指定 Dynamic Type 档位进行缩放。
     static func bodySize(_ base: Double, dynamicTypeSize: DynamicTypeSize) -> CGFloat {
         let traits = UITraitCollection(
             preferredContentSizeCategory: dynamicTypeSize.contentSizeCategory
@@ -42,7 +42,7 @@ extension DynamicTypeSize {
 }
 
 extension View {
-    /// 正文/气泡字号：设置值是基数，再按 Dynamic Type 放大。
+    /// 正文/气泡字号：设置值为基础字号，根据系统 Dynamic Type 缩放。
     func dynamicBodyFont(_ baseSize: Double) -> some View {
         modifier(DynamicBodyFontModifier(baseSize: baseSize))
     }

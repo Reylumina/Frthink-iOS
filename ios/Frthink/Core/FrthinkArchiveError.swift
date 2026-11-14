@@ -1,6 +1,6 @@
 import Foundation
 
-/// 存档层错误。文案逐字取自 Android 的 `dex-chinese.txt`，导入失败时直接上屏。
+/// 存档层错误定义。文案严格对齐 Android 端 `dex-chinese.txt`，供导入失败时在界面展示。
 enum FrthinkArchiveError: LocalizedError {
     case emptyOrDamaged
     case fileTooLarge(isFull: Bool)
@@ -9,13 +9,13 @@ enum FrthinkArchiveError: LocalizedError {
     case unsupportedCompression
     case decompressedTooLarge
     case corrupted(isFull: Bool)
-    /// 解码失败，带上具体原因（缺哪个键、哪段类型不对）。
+    /// 解码失败，附带具体原因（缺失键名或字段类型异常）。
     case corruptedDetail(isFull: Bool, detail: String)
     case payloadVersionUnsupported
     case projectVersionUnsupported
     case duplicateProjects(isFull: Bool)
     case duplicateTranslations
-    /// 项目 id 会被当成目录名，绝不能让存档用它做路径穿越。
+    /// 项目 id 用作存储目录名，严禁允许存档数据通过该字段进行路径遍历。
     case invalidProjectID(String)
     case emptyProjectArchive
     case createFailed
@@ -50,7 +50,7 @@ enum FrthinkArchiveError: LocalizedError {
         case .duplicateTranslations:
             return "备份含重复译文分段"
         case .invalidProjectID(let id):
-            return "备份里的项目 id 无效：\(id)"
+            return "备份中的项目 ID 无效：\(id)"
         case .emptyProjectArchive:
             return "书项目存档为空"
         case .createFailed:

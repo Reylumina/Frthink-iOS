@@ -2,7 +2,7 @@ import Foundation
 
 /// 提示词集成管理器里的一条「技能」（规格 D · P04，原版 `SkillProfile`）。
 ///
-/// 技能是跨项目复用的指令模板：启用后按 `# <技能名>\n<内容>` 包成技能块，
+/// 技能是跨项目复用的指令模板：启用后按 `# <技能名>\n<内容>` 封装为技能块，
 /// 顺序在「全局预设」之后、「去 AI 味规则」之前（规格 §1 第 3 块）。
 struct Skill: Identifiable, Codable, Hashable {
     var id: String
@@ -51,8 +51,8 @@ struct Skill: Identifiable, Codable, Hashable {
 
 /// 提示词集成管理器负责的四类可编辑指令（P02 / P03 / P04 / P05）。
 ///
-/// 装配顺序完全照规格 §1：项目补充指令 → 全局预设 → 技能 → 去 AI 味规则。
-/// 这里不自己拼字符串，而是构造 `PromptAssembly` 交给 `PromptComposer`，
+/// 装配顺序严格遵循规格 §1：项目补充指令 → 全局预设 → 技能 → 去 AI 味规则。
+/// 此处不手动拼接字符串，而是构造 `PromptAssembly` 委托 `PromptComposer` 处理，
 /// 保证预览与真正发出去的提示词逐字一致。
 enum PromptIntegration {
     static func blocks(

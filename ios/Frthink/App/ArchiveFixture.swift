@@ -2,7 +2,7 @@
 //
 // 真实备份 9.3 MB 且含用户作品，不能进仓库。这里按 2026-10-30 那份备份的实际
 // 键名和类型造一份小样本（54 键快照、全量信封、gzip+base64、顶层 corpusLibrary），
-// 让「导入」这条链路在模拟器里真的跑一遍。内容全部是占位文本。
+// 用于在模拟器中完整执行导入链路验证。内容全部为占位文本。
 
 import Foundation
 
@@ -144,7 +144,7 @@ enum ArchiveFixture {
 
     // MARK: - 快照
 
-    /// 第一本书：54 个键全部给齐，覆盖消息版本、人物卡、世界书、剧情事件、
+    /// 第一本书：包含完整的 54 个键，覆盖消息版本、人物卡、世界书、剧情事件、
     /// 长期规则、原文、请求快照、分析断点、阅读位置。
     private static func firstSnapshot() -> [String: Any] {
         let body = """
@@ -219,11 +219,11 @@ enum ArchiveFixture {
                 "id": "m-deleted-1",
                 "kind": "ASSISTANT",
                 "title": "码字机",
-                "content": "这条已被删除",
+                "content": "此消息已删除",
                 "versions": [
                     [
                         "id": "v-del-1",
-                        "content": "这条已被删除",
+                        "content": "此消息已删除",
                         "createdAt": 1_791_340_800_000,
                     ]
                 ],

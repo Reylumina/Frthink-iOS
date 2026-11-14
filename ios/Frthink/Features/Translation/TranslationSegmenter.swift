@@ -1,10 +1,9 @@
 import Foundation
 
-/// 译文分段：把原文切成「一段」翻译单元，并给出 `ContentHash` 缓存键。
+/// 译文分段处理：将原文拆分为翻译单元，并计算对应的 `ContentHash` 缓存键。
 ///
-/// 切法参考 Android 端：先按空行分块，块内按句末标点断句；太短的句子并进上一段
-/// 以免请求数爆炸，超长的段落再按标点截断。同一段原文每次切出来的结果都一样，
-/// 所以按 `ContentHash.of(segment)` 就能稳定命中缓存。
+/// 分段策略：优先按空行分块，块内按句末标点切分；较短句子与前段合并以控制请求频次，
+/// 超长文本按标点进一步截断。相同原文切分结果确定，基于 `ContentHash.of(segment)` 实现稳定缓存命中。
 enum TranslationSegmenter {
 
     /// 正文译文目标标记。
@@ -19,11 +18,11 @@ enum TranslationSegmenter {
         var id: String { "\(index)-\(hash)" }
     }
 
-    /// 单段上限。太长模型容易截断，太短请求数太多。
+    /// 单段字符数上限，平衡模型输出完整性与调用频次。
     private static let maxSegmentLength = 600
-    /// 低于这个长度的句子并进相邻段一起翻。
+    /// 最小段落字符阈值，低于此长度将并入相邻段落合并翻译。
     private static let minSegmentLength = 40
-    /// 句末标点。`.`/`;`/`!`/`?` 照顾英文原文。
+    /// 句末标点集合，包含中英文常用终止符号。
     private static let sentenceEnders: Set<Character> = [
         "。", "！", "？", "…", "；", ".", "!", "?", ";",
     ]
@@ -67,9 +66,8 @@ enum TranslationSegmenter {
         return result
     }
 
-    /// 已存译文整理成 `sourceHash -> payload` 查表；同 hash 取 `updatedAt` 最新的那条。
-    /// 查表不看 `owner`：原文和译文都在这台机器上，设置被重置、ownerID 换了也照样
-    /// 能复用；只有写入时才用当前的 ownerID。
+    /// 汇总已保存译文为 `sourceHash -> payload` 索引字典；相同哈希保留 `updatedAt` 最新记录。
+    /// 检索忽略 `owner`：本地译文在设置重置或账号更迭后保持可复用性，仅写入操作绑定当前 ownerID。
     static func cache(from translations: [TranslationSegment], project: String) -> [String: String] {
         var map: [String: String] = [:]
         for item in translations.sorted(by: { $0.updatedAt < $1.updatedAt }) {
@@ -96,7 +94,7 @@ enum TranslationSegmenter {
             }
             if justEnded {
                 if trailingClosers.contains(character) {
-                    // 收尾的引号/括号跟上一句走，然后整句结束。
+                    // 后置引号/括号合并至当前句尾，结束当前分句。
                     current.append(character)
                     flush(&current, into: &result)
                     justEnded = false
@@ -147,7 +145,7 @@ enum TranslationSegmenter {
         return result
     }
 
-    /// 中文标点直接贴，英文句号后面补一个空格。
+    /// 拼接两段文本：中文字符直接连接，西文字符间插入单空格。
     private static func join(_ first: String, _ second: String) -> String {
         guard let last = first.last, let next = second.first else { return first + second }
         if last.isWhitespace || next.isWhitespace { return first + second }

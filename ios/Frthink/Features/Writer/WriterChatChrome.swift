@@ -1,7 +1,6 @@
 // 写作台聊天区的布局常量与可复用 chrome。
 //
-// 从 WriterPane 拆出来，避免选择条、滚动跟随和主页面互相耦合；
-// 行为不变，只把“只做一件事”的视图放到独立类型里。
+// 从 WriterPane 拆离，降低组件耦合。
 
 import SwiftUI
 
@@ -12,13 +11,11 @@ enum WriterChatLayout {
 
 /// 多选的选择集运算。
 ///
-/// 多选只作用于当前已加载的消息：对话按窗口只渲染最近 N 条，隐藏的历史行
-/// 既看不到也点不到，不能因为「全选」就被一起删掉。
+/// 多选操作范围限定在当前窗口已加载的消息集合内。
 enum WriterSelection {
     /// 「全选 / 取消全选」后的选择集。
     ///
-    /// 当前选择集恰好就是可见集合时清空，否则只选可见的那些——
-    /// 历史里没显示的消息永远不会进选择集。
+    /// 当当前选择集等于可见集合时清空，否则全选可见集合。
     static func togglingAll(current: Set<String>, visible: Set<String>) -> Set<String> {
         current == visible ? [] : visible
     }
@@ -84,8 +81,7 @@ struct WriterSelectionBar: View {
 /// 读它的小视图只让这一层重算，不会把整列气泡和正文栏一起拉进高频更新
 /// （PERFORMANCE.md §2.1）。
 ///
-/// 滚动不在 onChange 的同一轮布局里做：先让本轮文本追加完成排版，下一轮再滚，
-/// 否则 scrollTo 可能按旧内容高度落点，表现为底部空白或跳一下。
+/// 滚动操作推迟至下一事件循环执行，等待文本追加完成排版后计算准确的滚动目标。
 struct WriterStreamingFollower: View {
     let controller: WriterController
     let proxy: ScrollViewProxy

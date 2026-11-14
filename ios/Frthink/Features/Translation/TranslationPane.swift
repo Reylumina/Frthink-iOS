@@ -3,32 +3,32 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
-/// 翻译面板：原文编辑/导入 → 分段 → 逐段调模型，按 `ContentHash` 复用已翻好的段落。
+/// 翻译面板：原文编辑/导入 → 分段 → 逐段请求模型，基于 `ContentHash` 复用已有译文。
 ///
-/// 缓存键是原文分段的哈希，不是段号：原文只改了一句时，其余段落照样命中缓存，
-/// 不会重新请求。切段/查表这类纯逻辑在 `TranslationSegmenter` 里，这里只管界面和跑批。
+/// 缓存键采用原文分段哈希而非段落序号：原文局部调整时其余未变动段落仍命中缓存，
+/// 避免重复请求。切段与查表逻辑封装于 `TranslationSegmenter`，视图层负责界面交互与批量任务调度。
 ///
-/// 原文编辑器固定高度、自己滚动，和下方的分段列表分开，避免两层滚动抢手势。
+/// 原文编辑器采用固定高度独立滚动，与分段列表分层解耦，避免嵌套滚动冲突。
 struct TranslationPane: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     private let session: ProjectSession
 
-    /// 当前分段结果。只在点「分段」或首次进入时重建，不跟着每个按键重算。
+    /// 当前分段结果：仅在主动触发分段或初次进入时重构，避免输入过程频繁重算。
     @State private var plan: [TranslationSegmenter.PlannedSegment] = []
-    /// 这份 plan 是按哪份原文切的，用来提示「原文已修改」。
+    /// 记录当前分段计划对应的原文基准，用于检测原文修改状态。
     @State private var planSource: String = ""
-    /// sourceHash -> 最新译文。命中就直接显示，不再请求。
+    /// sourceHash -> 最新译文映射：命中缓存直接渲染，不发起网络请求。
     @State private var cache: [String: String] = [:]
     @State private var isRunning = false
     @State private var runTask: Task<Void, Never>?
-    /// 每轮跑批一个 token。中止后立刻再开一轮时，旧任务的收尾不会把新任务的状态抹掉。
+    /// 批量任务执行标识：中断并立即重启新批次时，防止旧任务回调覆盖新状态。
     @State private var runID = UUID()
     @State private var importing = false
-    /// 跑批中点「关闭」先确认，不静默停掉一轮翻译。
+    /// 翻译进行中触发关闭需二次确认，防止误触中断未完成任务。
     @State private var confirmingStop = false
-    /// 原文编辑区高度。@ScaledMetric 让大字号下它也随内容变高，不写死。
+    /// 原文编辑区域基准高度，适配动态字体。
     @ScaledMetric(relativeTo: .body) private var sourceEditorHeight: CGFloat = 160
 
     init(session: ProjectSession) {
@@ -53,11 +53,11 @@ struct TranslationPane: View {
         .groupedPageBackground()
         .onAppear { bootstrap() }
         .onDisappear { shutdown() }
-        // 翻译进行中下滑关闭会中止这一轮；用「关闭」明确退出。
+        // 任务进行中禁用手势下滑，防止意外中断批处理。
         .interactiveDismissDisabled(isRunning)
         .sheetToast()
         .onChange(of: isRunning) { _, running in
-            // 跑批自己结束（或已在别处停掉）时，不再留着「停止并关闭？」。
+            // 批量任务自然结束或已停止时，重置停止确认弹窗状态。
             if !running { confirmingStop = false }
         }
         .onChange(of: session.sourceText) { _, _ in
@@ -194,7 +194,7 @@ struct TranslationPane: View {
                     StatusPill(text: "已缓存", tone: .success)
                 }
                 Spacer(minLength: 0)
-                // 逐段操作是低频动作，收进一个菜单，不和一屏唯一的主操作抢注意力。
+                // 单段操作收拢至次级菜单，突出主操作入口。
                 Menu {
                     Button("重译这一段") {
                         start(indices: [item.index], force: true)
@@ -263,7 +263,7 @@ struct TranslationPane: View {
         session.saveTranslations()
     }
 
-    /// 点「关闭」：跑批中先确认，不静默中止这一轮；空闲时直接关。
+    /// 关闭操作：任务执行中提示确认，空闲状态直接退出。
     @MainActor
     private func requestClose() {
         if isRunning {
@@ -273,8 +273,7 @@ struct TranslationPane: View {
         }
     }
 
-    /// 明确停止并关闭。`stop()` 会保留已完成段落、复位进度并给出结果句；
-    /// 若跑批在确认框打开期间已自行结束，就只关闭，不再多报一次「已停止」。
+    /// 停止任务并退出：保留已完成段落译文，若任务已自然完成则直接关闭。
     @MainActor
     private func stopRunningAndClose() {
         if isRunning {
@@ -416,7 +415,7 @@ struct TranslationPane: View {
             }
 
             session.saveTranslations()
-            // 被中止或被新的一轮顶掉时，状态归新任务管，这里不要再动。
+            // 任务已被取消或被新批次取代时，状态由新任务接管，直接返回。
             guard runID == thisRun else { return }
             isRunning = false
             runTask = nil
@@ -436,7 +435,7 @@ struct TranslationPane: View {
         store.toast = "已停止翻译"
     }
 
-    /// 写回一段译文：同一个 owner/project/target/段号就覆盖，否则追加。
+    /// 持久化单段译文：相同 owner/project/target/段序号则覆盖，否则新增记录。
     @MainActor
     private func apply(
         _ text: String,

@@ -65,11 +65,10 @@ struct FileStore {
 
     // MARK: - 原子写
 
-    /// 先写临时文件再 `replaceItemAt`，避免中途崩溃留下半个 JSON。
+    /// 采用先写入临时文件后执行 `replaceItemAt` 的原子写入策略，防止异常中断导致数据损坏。
     ///
-    /// 临时文件名带 UUID：会话自动保存和导入写盘可能同时写同一个目标
-    /// （例如覆盖导入时旧会话的挂起保存），固定名会让两个写者互相覆盖临时文件，
-    /// 一路传成「文件不存在」或写到对方的内容。
+    /// 临时文件名附带 UUID：避免会话自动保存与导入写盘并发写入同一目标路径时
+    /// （如覆盖导入期间旧会话的延迟保存），因固定文件名引发临时文件竞争覆盖与数据错乱。
     func write(_ data: Data, to url: URL) throws {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(
@@ -96,8 +95,8 @@ struct FileStore {
 
     /// 导入时先写这一份暂存根目录，成功后才整体换进 `projects/`。
     ///
-    /// 直接往正式目录写，任何一步失败都会让「恢复存档」变成「删掉旧书再留一堆
-    /// 半个文件」；覆盖导入尤其致命，旧稿已经没了，新稿又没写完。
+    /// 若直接写入正式目录，中途失败将导致原有数据丢失且残留未完成文件；
+    /// 在覆盖导入场景下尤需避免此问题，以防旧数据清除后新数据写入不全。
     func makeImportStagingRoot() throws -> URL {
         let root = self.root
             .appendingPathComponent("staging", isDirectory: true)
@@ -180,7 +179,7 @@ struct FileStore {
         return .loaded(fileData)
     }
 
-    /// 读一个加密文件；没有魔数的旧明文按原样返回并顺手加密写回。
+    /// 读取加密文件；若为缺少魔数的旧明文数据，则原样返回并迁移写回加密格式。
     ///
     /// 返回 nil 表示文件不存在或密文损坏，调用方按空值处理。
     private func readEncrypted(_ url: URL) -> Data? {
@@ -242,7 +241,7 @@ struct FileStore {
         // 正文独立成文件后，payload.json 里的 manuscript 只是旧数据或兜底。
         // `body.meta.json` 只含长度和章节，打开书不需要解密整份正文。
         if let meta = loadBodyMeta(projectID) {
-            // 上一版只有 body.json、meta 里没有页信息：顺手迁成页文件。
+            // 兼容旧版仅有 body.json 且元数据缺少页信息的情况：迁移为分页文件结构。
             if meta.pageCount == nil, let legacy = loadLegacyBody(projectID) {
                 try? saveBody(
                     legacy.text,
@@ -299,8 +298,8 @@ struct FileStore {
 
     /// 导出用：拼回全文并校验页数与 UTF-16 长度。
     ///
-    /// `loadFullPayload` 缺页时只返回 `nil` 再静默留下空正文；导出如果照此打包，
-    /// 用户会拿到一份「成功」但没有正文的备份。这里把缺页和长度不符报出来。
+    /// `loadFullPayload` 缺页时静默回退可能导致正文缺失；导出备份时若忽略该错误，
+    /// 会产生正文丢失的无效备份包。此处显式抛出缺页与长度校验不匹配异常。
     func loadVerifiedFullPayload(_ projectID: String) throws -> ProjectPayload {
         let state = loadPayloadState(projectID)
         var payload: ProjectPayload
@@ -637,10 +636,10 @@ struct FileStore {
         guard let data = try? Data(contentsOf: url),
               let decoded = try? decoder.decode(AppSettings.self, from: data)
         else { return AppSettings() }
-        // `providers` 在 AppSettings 里是整组解码：只要一条坏掉（字段类型变化、
-        // 手工改档），整份设置仍能解，但供应方会变成空数组，下一次保存又把空列表
-        // 写回。读本机设置时逐条补解，至少保住能解的那几条；全坏才补回出厂供应方，
-        // ownerID 与其它设置保持原样（换 ownerID 会让译文归属对不上）。
+        // `providers` 在 AppSettings 中为整组解码：单条配置损坏（如字段类型变更、
+        // 外部修改）会导致供应商列表全部被置空并在此后写回。
+        // 读取配置时逐项尝试解析以保留有效条目；全部损坏时才恢复默认供应商配置，
+        // 保持 ownerID 及其他配置不变（变更 ownerID 会导致译文归属校验失效）。
         guard decoded.providers.isEmpty else { return decoded }
         let rawProviders = Self.providerObjects(in: data)
         guard !rawProviders.isEmpty else { return decoded }
@@ -676,7 +675,7 @@ struct FileStore {
 /// 文本哈希。Android 端 `contentHash` / `sourceHash` 用于判断内容是否变化，
 /// 译文分段靠它做缓存命中；`sourceSha256` 字段要求完整 SHA-256。
 enum ContentHash {
-    /// 完整 SHA-256 的小写十六进制。CryptoKit 实现，不再手写短哈希。
+    /// 基于 CryptoKit 生成完整 SHA-256 小写十六进制字符串。
     static func of(_ text: String) -> String {
         let digest = SHA256.hash(data: Data(text.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()

@@ -2,10 +2,9 @@
 
 import Foundation
 
-/// 弹出输入框时，这次要改的是哪个字段。
+/// 编辑目标枚举，标识待修改的字段与目标项目。
 ///
-/// 用 `Project` 快照而不是 id：弹窗关闭前用户可能已经在别处改动过书架，
-/// 快照保证输入框里显示的是用户点开时看到的那本书。
+/// 传入 `Project` 快照而非 ID：防止弹窗期间外部数据变动引起状态不一致，确保展示触发时的项目状态。
 enum LibraryEditTarget: Identifiable {
     case newProject
     case rename(Project)
@@ -31,10 +30,9 @@ extension Project {
     }
 }
 
-/// 书架上的时间文案。
+/// 书架上的时间文案格式化。
 ///
-/// 不走 `DateFormatter`：这里只需要「刚刚 / n 分钟前 / n 小时前 / 年月日」，
-/// 手写既省掉 locale 依赖，也不会在静态缓存上碰并发检查。
+/// 自定义相对时间格式化：提供精简的时间描述，避免 `DateFormatter` 的 Locale 依赖与并发缓存开销。
 enum LibraryFormat {
     static func updatedText(_ date: Date) -> String {
         "更新于 " + relativeText(date)

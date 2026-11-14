@@ -1,7 +1,7 @@
-// 本文件负责：设置二级页「连接与模型」—— 当前AI服务商、AI服务商列表、翻译模型、生成参数入口。
+// 设置二级页「连接与模型」：当前 AI 服务商、服务商列表、翻译模型及生成参数入口。
 //
-// 层级刻意压平：本页只做「看当前 / 选当前 / 进编辑」，具体参数都进三级页。
-// 这样一屏最多一个主操作（测试连接），AI服务商再多也不会把页面撑成表单。
+// 结构优化：本页面提供当前服务商查看、切换及编辑入口，详细参数收拢至三级页面，
+// 保持主操作清晰明确。
 
 import SwiftUI
 import UIKit
@@ -13,7 +13,7 @@ struct SettingsConnectionPage: View {
     @State private var isTesting = false
     @State private var testMessage: String?
     @State private var testFailed = false
-    /// 钥匙串缓存变化后顶一下刷新。
+    /// Keychain 缓存变更后触发视图刷新。
     @State private var keyRevision = 0
 
     var body: some View {
@@ -239,9 +239,9 @@ struct SettingsConnectionPage: View {
     }
 }
 
-/// 三级页：翻译任务用哪个AI服务商。
+/// 三级子页面：翻译服务商选择器。
 ///
-/// 只有「跟随当前」与各个具体AI服务商；选中即写入并返回，不再需要保存按钮。
+/// 提供「跟随当前」及各独立服务商选项；选中即时生效并返回。
 struct TranslationProviderPicker: View {
     let store: AppStore
 

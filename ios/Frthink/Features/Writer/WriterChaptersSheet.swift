@@ -79,7 +79,7 @@ struct WriterChaptersSheet: View {
         }
     }
 
-    /// 章节字数 = 本章标题到下一章标题之间的字符数。只算一次，别放进 body。
+    /// 计算各章节字符区间与字数统计，并在挂载时执行一次。
     private func buildRows() {
         guard rows.isEmpty else { return }
         let length = max(0, totalLength)

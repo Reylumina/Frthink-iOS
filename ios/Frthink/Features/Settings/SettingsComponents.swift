@@ -6,8 +6,7 @@ import UniformTypeIdentifiers
 
 /// 二级、三级页的导航行：标题 + 行尾的值。
 ///
-/// 二级页不放图标：那些页面里每行都挂一个色块时，图标既不对应功能，
-/// 又把注意力从「标题 + 值」上带走。和系统设置的二级页一致。
+/// 二级页面采用简洁导航行样式，避免无明确语义的图标干扰内容展示，与系统设置保持一致。
 struct SettingsLabelRow: View {
     let title: String
     var detail: String? = nil
@@ -58,10 +57,9 @@ struct SettingsLabelRow: View {
 
 // MARK: - 长文编辑页
 
-/// 长文编辑页：整页只有一个多行编辑框，自动保存（停手 0.6 秒），离开页面强制落盘。
+/// 文本编辑页：提供多行输入，支持 0.6 秒输入防抖自动保存及离开页面强制落盘。
 ///
-/// 长文编辑不进 sheet，列表里只留一行入口；只有「保存」没有
-/// 「取消」，所以左滑返回也保存非空改动。
+/// 采用导航页面承载，左滑返回时自动持久化非空修改。
 struct SettingsTextEditorPage: View {
     let title: String
     var placeholder: String = ""
@@ -117,9 +115,9 @@ struct SettingsTextEditorPage: View {
 // MARK: - 宽度
 
 extension View {
-    /// 常规宽度下把表单收窄到 640pt 并居中。
+    /// 常规宽度下将表单限制为 640pt 并水平居中。
     ///
-    /// 紧凑宽度原样返回；iPad 宽窗口下两侧露出分组页底，不把行宽拉长。
+    /// 紧凑模式下自适应宽度，宽屏模式下限制表单最大宽度以优化可读性。
     @ViewBuilder
     func settingsFormColumn() -> some View {
         modifier(SettingsFormColumnModifier())
@@ -142,10 +140,9 @@ private struct SettingsFormColumnModifier: ViewModifier {
     }
 }
 
-/// 把一个 `AppSettings` 字段包成 Binding，写入就落盘。
+/// 将 `AppSettings` 字段包装为 Binding，值变更时触发持久化。
 ///
-/// 用于开关/离散选择这类一次只改一个值的控件；连续拖动（滑块）不要用它，
-/// 否则每个 tick 都会编码整份 settings.json。
+/// 适用于离散单值控件；连续变化的滑块控件需避免使用，以防止高频序列化写入配置文件。
 @MainActor
 func settingsBinding<T>(
     _ store: AppStore,
@@ -179,13 +176,13 @@ extension AppTheme {
     }
 }
 
-/// 文件面板被取消时也会走 failure；这不是错误，直接吞掉。
+/// 文件选择器取消时回调返回 failure，判定是否为用户主动取消以忽略该事件。
 func settingsIsUserCancelled(_ error: Error) -> Bool {
     guard let cocoa = error as? CocoaError else { return false }
     return cocoa.code == .userCancelled
 }
 
-/// `.frthink` 的 FileDocument 包装，只为走系统的保存面板。
+/// `.frthink` 文件的 FileDocument 包装类型，用于系统保存面板。
 struct ArchiveFileDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.data] }
     static var writableContentTypes: [UTType] { [.data] }

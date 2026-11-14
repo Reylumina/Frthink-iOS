@@ -1,7 +1,7 @@
 // 提示词集成管理器：技能、全局预设、去 AI 味规则、项目补充指令四类可编辑指令。
 //
-// 列表只做入口与开关；长文一律点进推入页编辑，
-// 预览直接走 `PromptComposer`，和真正发出去的内容一致。
+// 列表仅提供入口与开关；详细内容推入二级页面编辑，
+// 预览调用 `PromptComposer`，与实际发送内容保持一致。
 
 import SwiftUI
 
@@ -13,11 +13,10 @@ struct PromptManagerPane: View {
     @State private var showingPreview = false
     @State private var pendingDelete: Skill?
     @State private var pickedProjectID: String?
-    /// 从设置页进来时没有现成会话；在 `.task` 里按所选书项目异步打开，不在 body 里读盘。
+    /// 从设置页进入时无现成会话；在 `.task` 中按所选书项目异步读取，避免在 body 中执行磁盘 I/O。
     @State private var resolvedSession: ProjectSession?
 
-    /// 技能编辑页的推入路由。新建时点一次只生成一条空白技能，id 在这里就定下来，
-    /// 避免推入过程中重复求值换掉身份。
+    /// 技能编辑页的导航路由：新建操作固定生成单个空白技能并确定 ID，避免导航跳转时重复求值导致 ID 变动。
     private enum SkillRoute: Hashable {
         case create(Skill)
         case edit(Skill)

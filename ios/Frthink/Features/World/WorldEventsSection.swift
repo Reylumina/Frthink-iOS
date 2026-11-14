@@ -6,7 +6,7 @@ import Foundation
 struct WorldEventsSection: View {
     @Bindable var session: ProjectSession
     var isBusy: Bool
-    /// 任何世界任务在跑时都禁用抽取，避免点了没反馈。
+    /// 存在进行中的世界任务时禁用抽取操作。
     var isActionDisabled: Bool = false
     var onExtract: () -> Void
 
@@ -51,12 +51,12 @@ struct WorldEventsSection: View {
         .padding(.vertical, Theme.Spacing.s)
     }
 
-    /// 抽取是低频动作，用次要按钮，高度与搜索框一致。
+    /// 抽取按钮：次要操作样式，高度与搜索输入框保持一致。
     private var extractButton: some View {
         Button {
             onExtract()
         } label: {
-            // 进度由世界页的状态行统一报，按钮这里不再挂第二个转圈。
+            // 任务进度由主状态栏统一呈现。
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "wand.and.stars")
                     .font(Font.footnote)
@@ -155,14 +155,14 @@ struct WorldEventsSection: View {
     @ViewBuilder
     private var emptyState: some View {
         if session.payload.world.events.isEmpty {
-            // 整页空态只留一套组件，和「宇宙」「没有匹配」两处一致。
+            // 采用统一空状态组件风格。
             EmptyStateView(
                 symbol: "calendar",
                 title: "还没有事件卡",
                 actionTitle: "新建事件",
                 action: addEvent
             )
-            // 撑满剩余高度，空态在列表区居中，不贴在搜索栏下面。
+            // 占满可用高度，保持空状态内容垂直居中。
             .frame(maxHeight: .infinity)
         } else {
             InlineEmptyState(symbol: "magnifyingglass", message: "没有匹配的事件")
@@ -182,8 +182,7 @@ struct WorldEventsSection: View {
     }
 
     private func addEvent() {
-        // 事件卡按标题唯一：新建时直接给一个不重复的默认名，避免刚建出来
-        // 就因为同名被保存校验挡住。
+        // 事件卡标题要求唯一：新建时自动生成不重复的默认标题。
         var title = "新事件"
         var suffix = 2
         while session.payload.world.events.contains(where: { $0.title == title }) {

@@ -3,19 +3,19 @@ import Foundation
 
 /// 书稿落盘加密。
 ///
-/// 原版把正文放在 Room 里，并用 AndroidKeyStore 里的主密钥加密；iOS 这边
-/// 对应 Keychain + CryptoKit。落盘文件是「魔数 + nonce + 密文 + 标签」，
-/// 魔数用来区分密文和迁移前的明文 JSON。
+/// 原版将正文持久化于 Room，并通过 AndroidKeyStore 中的主密钥加密；iOS 端
+/// 对应采用 Keychain + CryptoKit。落盘文件格式为「魔数 + nonce + 密文 + 标签」，
+/// 魔数用于区分密文与迁移前的明文 JSON。
 ///
 /// 加密项目正文与配置数据（含 `payload.json`、`source.json`、`translations.json`、`body.meta.json` 及 `body.pages/*.bin`）。
 /// `project.json` 只有书名和计数，明文便于排查。
 enum PayloadCipher {
-    /// 文件头。长度固定 8 字节，改动它就等于换格式，旧文件会按明文重新迁移。
+    /// 文件头标识。固定 8 字节；变更该标识将视为格式变更，旧文件将按明文触发重新迁移。
     private static let magic = Data("FRTHENC1".utf8)
 
     private static let lock = NSLock()
-    /// 主密钥只在进程内缓存一次；Keychain 每次读写都要进系统调用，
-    /// 而书稿保存是每 2 秒一次的后台任务，不值得每次都查。
+    /// 主密钥在进程内单例缓存；Keychain 读写涉及跨进程系统调用，
+    /// 缓存可避免高频自动保存任务产生不必要的系统调用开销。
     private static var cachedKey: SymmetricKey?
 
     static func isEncrypted(_ data: Data) -> Bool {
@@ -53,10 +53,10 @@ enum PayloadCipher {
     }
     #endif
 
-    /// 取主密钥，没有就生成一个并存进 Keychain。
+    /// 获取主密钥；若不存在则生成并持久化至 Keychain。
     ///
-    /// 写回后要再读一次：如果 Keychain 写入失败却继续用只存在于内存里的
-    /// 密钥加密，重启后这本书就再也解不开了。宁可这次保存失败。
+    /// 写入后执行回读校验：防止 Keychain 写入失败而仅使用内存临时密钥加密，
+    /// 避免应用重启后导致加密数据无法解密。
     private static func masterKey() throws -> SymmetricKey {
         lock.lock()
         defer { lock.unlock() }

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 软件占用：`Application Support/Frthink` 的目录大小与项目数。
 ///
-/// 只走文件元数据（不读正文内容），所以能在设置页出现时直接算。
+/// 仅读取文件元数据（不解析正文内容），可在页面呈现时高效计算。
 struct SettingsStorageSection: View {
     let store: AppStore
 
@@ -121,8 +121,7 @@ struct SettingsTokenUsageSection: View {
         Task { @MainActor in
             let total = await Task.detached(priority: .utility) {
                 projects.reduce(0) { partial, project in
-                    // 正文是分页存的，payload.manuscript 在分页存储后恒为空；
-                    // 这里必须按正文读，否则永远算出 0。
+                    // 正文采用分页存储，直接通过分页数据计算长度，避免因内存 payload 字段为空导致统计为 0。
                     partial + TokenEstimator.estimate(files.loadBody(project.id)?.text ?? "")
                 }
             }.value

@@ -1,16 +1,16 @@
-// 本文件负责：阅读页的目录 —— 列出正文里扫出来的章节，点一下跳到对应位置。
+// 阅读页目录：展示正文解析出的章节列表，支持点击跳转至对应位置。
 //
-// 章节行同时给写作台的章节表复用（`WriterChaptersSheet`），两处不要再各画一套。
+// 章节行复用于写作工作台章节表（`WriterChaptersSheet`），保证展示一致。
 
 import SwiftUI
 
 /// 目录。章节来自 `ChapterScanner` 扫出的 `session.payload.chapters`，只读索引。
 ///
-/// 章节是后台派生数据：正文还没排完时先显示加载态，确认扫不出章节之后再报空，
-/// 不把「还没扫完」误报成「没有章节」。
+/// 章节为后台计算数据：排版未完成时展示加载状态，确认无章节后展示空状态，
+/// 避免误报。
 struct ReaderChapterList: View {
     let chapters: [Chapter]
-    /// 正文/章节索引还在准备。
+    /// 正文或章节索引准备中。
     let isLoading: Bool
     let currentChapterID: String?
     let onSelect: (Chapter) -> Void

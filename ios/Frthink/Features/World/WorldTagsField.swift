@@ -1,7 +1,6 @@
 // 用「、」分隔的字符串数组编辑框：别称、事件人物等字段共用。
 //
-// 内部保留用户的原始输入，只在内容变化时写回数组；否则边输入分隔符、
-// 边解析、边重新拼回显示，会把刚打的分隔符吃掉。
+// 内部维护输入草稿，内容变动时解析并更新数组，避免输入分隔符时被即时格式化吞没。
 
 import SwiftUI
 import Foundation
@@ -65,7 +64,7 @@ struct WorldTagsField: View {
             loaded = true
         }
         .onChange(of: values) { _, newValue in
-            // 焦点内以用户输入为准；外部刷新（AI 合并/撤销）时才回灌草稿。
+            // 处于输入焦点时优先保持当前输入；外部数据变动时同步更新草稿。
             guard loaded, !focused else { return }
             let joined = newValue.joined(separator: separator)
             if joined != draft {

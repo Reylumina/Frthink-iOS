@@ -1,12 +1,12 @@
-// 本文件负责：长期规则摘要的查看、全文编辑与恢复上一版。
-// 自动摘要的触发与请求在 `WorldRulesWorkflow`，这里只处理展示与手改。
+// 长期规则摘要的查看、全文编辑与恢复上一版。
+// 自动摘要触发与请求封装于 `WorldRulesWorkflow`，此处处理展示与手动编辑。
 
 import Foundation
 import SwiftUI
 
 // MARK: - 长期规则
 
-/// 三级页：当前书的长期规则摘要。默认只读，可进编辑页手改或恢复上一版。
+/// 三级页：当前书的长期规则摘要；默认只读，支持进入编辑页修改或恢复历史版本。
 struct SettingsLongTermRulesPage: View {
     let store: AppStore
 
@@ -99,7 +99,7 @@ struct SettingsLongTermRulesPage: View {
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    /// 走会话读，刚改完还在防抖窗口里时也能看到最新内容。
+    /// 从内存会话读取，确保防抖窗口期内仍能展示最新修改。
     @MainActor
     private func reloadRules() async {
         reloadGeneration &+= 1
@@ -161,7 +161,7 @@ struct SettingsLongTermRulesPage: View {
     }
 }
 
-/// 长期规则全文编辑。长文不用 sheet；保存后由上一页写回摘要元数据。
+/// 长期规则全文编辑页；保存后由父级页面写回摘要元数据。
 struct LongTermRulesEditorPage: View {
     let initialText: String
     let onSave: (String) -> Void
@@ -196,7 +196,7 @@ struct LongTermRulesEditorPage: View {
                 }
             }
             .onDisappear {
-                // 只有「保存」没有「取消」：左滑返回时自动存下改动（包括清空）。
+                // 仅提供保存操作：左滑返回时自动持久化修改（含清空操作）。
                 guard !saved, trimmedText != initialText else { return }
                 onSave(trimmedText)
             }
