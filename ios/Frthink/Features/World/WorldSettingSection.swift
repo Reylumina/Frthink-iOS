@@ -40,28 +40,28 @@ struct WorldSettingSection: View {
             materialRow(
                 "事件卡",
                 value: "\(session.payload.world.events.count) 张",
-                symbol: "list.bullet.rectangle",
+                symbol: "calendar",
                 tint: .orange,
                 tab: .events
             )
             materialRow(
                 "文风笔记",
                 value: "\(WorldRuleTextKind.lineCount(of: session.payload.world.styleNotes)) 行",
-                symbol: "text.magnifyingglass",
+                symbol: "paintbrush.pointed",
                 tint: .purple,
                 tab: .rules
             )
             materialRow(
                 "仿写模板",
                 value: styleTemplateValue,
-                symbol: "doc.text",
+                symbol: "doc.on.doc",
                 tint: .pink,
                 tab: .rules
             )
             materialRow(
                 "长期写作规则",
                 value: WorldRuleTextKind.longTermRules.valueLabel(in: session.payload.world),
-                symbol: "list.bullet",
+                symbol: "checklist",
                 tint: .teal,
                 tab: .rules
             )
