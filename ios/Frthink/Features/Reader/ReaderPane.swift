@@ -17,7 +17,6 @@ struct ReaderPane: View {
 
     @AppStorage(ReaderStorageKey.fontSize) private var fontSize: Double = 18
     @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
-    @AppStorage(ReaderStorageKey.darkPage) private var darkPage = false
     @AppStorage(ReaderStorageKey.mode) private var modeRaw = ReaderMode.source.rawValue
     @AppStorage private var bookmarkOffset: Int
     @AppStorage private var lastOffset: Int
@@ -166,8 +165,7 @@ struct ReaderPane: View {
     private var settingsSheet: some View {
         ReaderDisplaySettingsSheet(
             fontSize: $fontSize,
-            lineHeight: $lineHeight,
-            darkPage: $darkPage
+            lineHeight: $lineHeight
         )
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -311,7 +309,7 @@ struct ReaderPane: View {
                         text: document.text(for: block),
                         fontSize: CGFloat(fontSize),
                         lineHeight: lineHeight,
-                        darkPage: darkPage,
+                        darkPage: false,
                         highlights: highlightMap[block.start] ?? [],
                         current: currentHighlight(in: block),
                         isHeading: chapterStarts.contains(block.start)
@@ -321,13 +319,13 @@ struct ReaderPane: View {
                 }
             }
             .scrollTargetLayout()
-            // 每行不超过 36 个汉字：正文栏封顶后居中，两侧露出纸色/黑底（§2.3、§5.3）。
+            // 每行不超过 36 个汉字：正文栏封顶后居中（§2.3、§5.3）。
             .frame(maxWidth: bodyColumnMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.vertical, Theme.Spacing.l)
         }
-        .background(ReaderStyle.page(dark: darkPage))
+        .background(ReaderStyle.page(dark: false))
         .scrollDismissesKeyboard(.interactively)
         .scrollIndicators(.hidden)
         .softScrollEdge()
@@ -355,8 +353,8 @@ struct ReaderPane: View {
 
     private var emptyState: some View {
         EmptyStateView(
-            symbol: mode == .source ? "doc.text" : "character.book.closed",
-            title: mode == .source ? "正文还是空的" : "还没有译文"
+            symbol: mode == .source ? "doc.text" : "globe",
+            title: mode == .source ? "暂无正文" : "暂无译文"
         )
         .frame(maxWidth: .infinity)
     }

@@ -1,4 +1,4 @@
-// 流式输出的 UITextView：平时只追加尾部增量，窗口攒满后才整体重置一次。
+// 流式输出的 UITextView：按段落增量更新，平时只重排最后一个未落定段落，窗口切换时才整体重置。
 
 import SwiftUI
 import UIKit
@@ -10,9 +10,6 @@ struct StreamingTextView: UIViewRepresentable {
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
     /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
-    ///
-    /// 两处不一致时，生成结束换成普通气泡的那一刻整段会突然变高，
-    /// 视口还停在旧高度上，底部就露出一片空白。
     var lineSpacing: CGFloat
 
     func makeUIView(context: Context) -> UITextView {
@@ -26,17 +23,11 @@ struct StreamingTextView: UIViewRepresentable {
         view.textContainer.widthTracksTextView = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
-        let rendered = context.coordinator.window.rendered(text, characterCount: characterCount).text
-        view.attributedText = Self.attributed(
-            rendered,
-            fontSize: fontSize,
-            lineSpacing: lineSpacing
-        )
-        context.coordinator.appliedText = rendered
-        context.coordinator.fontSignature = Self.signature(
-            fontSize: fontSize,
-            lineSpacing: lineSpacing
-        )
+
+        let coordinator = context.coordinator
+        coordinator.fontSignature = Self.signature(fontSize: fontSize, lineSpacing: lineSpacing)
+        let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
+        applyFullReset(rendered, to: view, coordinator: coordinator)
         return view
     }
 
@@ -47,59 +38,164 @@ struct StreamingTextView: UIViewRepresentable {
             coordinator.fontSignature = signature
             coordinator.window = StreamingTextWindow()
             let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
-            uiView.attributedText = Self.attributed(
-                rendered,
-                fontSize: fontSize,
-                lineSpacing: lineSpacing
-            )
-            coordinator.appliedText = rendered
-            coordinator.textRevision += 1
-            uiView.invalidateIntrinsicContentSize()
+            applyFullReset(rendered, to: view(uiView), coordinator: coordinator)
             return
         }
 
         let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
         guard coordinator.appliedText != rendered else { return }
 
-        // 按显示串求公共前缀，只替换尾部差异（通常只有最后一段），避免整段重排。
-        let newAttributed = Self.attributed(
-            rendered,
-            fontSize: fontSize,
-            lineSpacing: lineSpacing
-        )
-        let oldString = uiView.attributedText?.string ?? "" as String
-        let newString = newAttributed.string
-        let changed = oldString != newString
-        if changed {
-            let oldNS = oldString as NSString
-            let newNS = newString as NSString
-            let maxCommon = min(oldNS.length, newNS.length)
-            var common = 0
-            while common < maxCommon, oldNS.character(at: common) == newNS.character(at: common) {
-                common += 1
-            }
-            // 退回到上一个换行符之后：换行可能刚把前一段从左对齐切到两端对齐，
-            // 同时也能避开 UTF-16 代理对边界。
-            if common > 0 {
-                let searchRange = NSRange(location: 0, length: common)
-                let prevNewline = oldNS.range(of: "\n", options: .backwards, range: searchRange)
-                common = prevNewline.location == NSNotFound ? 0 : prevNewline.location + 1
-            }
-            let replaceRange = NSRange(location: common, length: oldNS.length - common)
-            let replacement = newAttributed.attributedSubstring(
-                from: NSRange(location: common, length: newNS.length - common)
+        let paragraphs = WriterTypography.paragraphs(rendered)
+        let completed = paragraphs.count > 1 ? Array(paragraphs.dropLast()) : []
+        let trailing = paragraphs.last ?? ""
+
+        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: WriterTypography.lineHeight)
+
+        // 快路径：已落定段落前缀完全未变，只替换最后一个正在流式增长的段落，O(末段) 而非 O(全窗口)。
+        if completed.count == coordinator.completedParagraphs.count,
+           completed == coordinator.completedParagraphs,
+           coordinator.completedUTF16Length <= uiView.textStorage.length {
+            let replaceRange = NSRange(
+                location: coordinator.completedUTF16Length,
+                length: uiView.textStorage.length - coordinator.completedUTF16Length
+            )
+            let tailAttr = WriterTypography.attributedParagraph(
+                trailing,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                paragraphSpacing: 0,
+                justified: false
             )
             uiView.textStorage.beginEditing()
-            uiView.textStorage.replaceCharacters(in: replaceRange, with: replacement)
+            uiView.textStorage.replaceCharacters(in: replaceRange, with: tailAttr)
             uiView.textStorage.endEditing()
-        }
-        coordinator.appliedText = rendered
-        // 只有真的变了才重新测量：每帧都 invalidate 会让 SwiftUI 反复比对高度，
-        // 表现为整块文字轻微抖动。
-        if changed {
+
+            coordinator.appliedText = rendered
             coordinator.textRevision += 1
             uiView.invalidateIntrinsicContentSize()
+            return
         }
+
+        // 次快路径：新增了已落定段落（刚跨过换行），从公共已落定段落之后增量追加。
+        var commonCompleted = 0
+        let maxCommon = min(completed.count, coordinator.completedParagraphs.count)
+        while commonCompleted < maxCommon,
+              completed[commonCompleted] == coordinator.completedParagraphs[commonCompleted] {
+            commonCompleted += 1
+        }
+
+        if commonCompleted > 0, commonCompleted == coordinator.completedUTF16PrefixEnds.count {
+            let prefixEnd = coordinator.completedUTF16PrefixEnds[commonCompleted - 1]
+            if prefixEnd <= uiView.textStorage.length {
+                let tailBuild = NSMutableAttributedString()
+                var newPrefixEnds = coordinator.completedUTF16PrefixEnds
+                var runningEnd = prefixEnd
+
+                for idx in commonCompleted..<completed.count {
+                    let paraAttr = WriterTypography.attributedParagraph(
+                        completed[idx],
+                        fontSize: fontSize,
+                        lineSpacing: lineSpacing,
+                        paragraphSpacing: spacing,
+                        justified: true
+                    )
+                    let sepAttr = WriterTypography.newlineSeparator(
+                        fontSize: fontSize,
+                        lineSpacing: lineSpacing,
+                        paragraphSpacing: spacing,
+                        justified: true
+                    )
+                    tailBuild.append(paraAttr)
+                    tailBuild.append(sepAttr)
+                    runningEnd += paraAttr.length + sepAttr.length
+                    newPrefixEnds.append(runningEnd)
+                }
+
+                if !trailing.isEmpty {
+                    tailBuild.append(WriterTypography.attributedParagraph(
+                        trailing,
+                        fontSize: fontSize,
+                        lineSpacing: lineSpacing,
+                        paragraphSpacing: 0,
+                        justified: false
+                    ))
+                }
+
+                let replaceRange = NSRange(
+                    location: prefixEnd,
+                    length: uiView.textStorage.length - prefixEnd
+                )
+                uiView.textStorage.beginEditing()
+                uiView.textStorage.replaceCharacters(in: replaceRange, with: tailBuild)
+                uiView.textStorage.endEditing()
+
+                coordinator.completedParagraphs = completed
+                coordinator.completedUTF16PrefixEnds = newPrefixEnds
+                coordinator.completedUTF16Length = runningEnd
+                coordinator.appliedText = rendered
+                coordinator.textRevision += 1
+                uiView.invalidateIntrinsicContentSize()
+                return
+            }
+        }
+
+        // 兜底：窗口截断/重置时全量重建一次。
+        applyFullReset(rendered, to: uiView, coordinator: coordinator)
+    }
+
+    private func view(_ uiView: UITextView) -> UITextView { uiView }
+
+    private func applyFullReset(
+        _ rendered: String,
+        to uiView: UITextView,
+        coordinator: Coordinator
+    ) {
+        let paragraphs = WriterTypography.paragraphs(rendered)
+        let completed = paragraphs.count > 1 ? Array(paragraphs.dropLast()) : []
+        let trailing = paragraphs.last ?? ""
+        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: WriterTypography.lineHeight)
+
+        let full = NSMutableAttributedString()
+        var prefixEnds: [Int] = []
+        prefixEnds.reserveCapacity(completed.count)
+
+        for paragraph in completed {
+            let paraAttr = WriterTypography.attributedParagraph(
+                paragraph,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                paragraphSpacing: spacing,
+                justified: true
+            )
+            let sepAttr = WriterTypography.newlineSeparator(
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                paragraphSpacing: spacing,
+                justified: true
+            )
+            full.append(paraAttr)
+            full.append(sepAttr)
+            prefixEnds.append(full.length)
+        }
+
+        let completedEnd = full.length
+        if !trailing.isEmpty {
+            full.append(WriterTypography.attributedParagraph(
+                trailing,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+                paragraphSpacing: 0,
+                justified: false
+            ))
+        }
+
+        uiView.attributedText = full
+        coordinator.completedParagraphs = completed
+        coordinator.completedUTF16PrefixEnds = prefixEnds
+        coordinator.completedUTF16Length = completedEnd
+        coordinator.appliedText = rendered
+        coordinator.textRevision += 1
+        uiView.invalidateIntrinsicContentSize()
     }
 
     func sizeThatFits(
@@ -131,99 +227,16 @@ struct StreamingTextView: UIViewRepresentable {
         var appliedText = ""
         var fontSignature = ""
         var window = StreamingTextWindow()
+        var completedParagraphs: [String] = []
+        var completedUTF16PrefixEnds: [Int] = []
+        var completedUTF16Length = 0
         var textRevision = 0
         var cachedWidth: CGFloat = 0
         var cachedRevision = -1
         var cachedHeight: CGFloat = 0
     }
 
-    // MARK: - 排版
-
     private static func signature(fontSize: CGFloat, lineSpacing: CGFloat) -> String {
         "\(fontSize)-\(lineSpacing)"
-    }
-
-    /// 流式期间的排版：Markdown 照常渲染，最后一段先左对齐、落定后再两端对齐。
-    private static func attributed(
-        _ text: String,
-        fontSize: CGFloat,
-        lineSpacing: CGFloat
-    ) -> NSAttributedString {
-        let paragraphs = WriterTypography.paragraphs(text)
-        let result = NSMutableAttributedString()
-
-        for (index, paragraphText) in paragraphs.enumerated() {
-            // 最后一段还在变长：先左对齐，落定后再两端对齐。否则每帧都在给
-            // 不断变长的行重新分配字距，观感是行内轻微抖动。
-            let isLast = index == paragraphs.count - 1
-            let style = paragraphStyle(justified: !isLast, lineSpacing: lineSpacing)
-            let body: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: style,
-            ]
-
-            if index > 0 {
-                var separator = body
-                separator[.paragraphStyle] = paragraphStyle(
-                    justified: !isLast,
-                    lineSpacing: lineSpacing
-                )
-                result.append(NSAttributedString(string: "\n", attributes: separator))
-            }
-
-            if let level = MarkdownInline.headingLevel(paragraphText) {
-                var heading = body
-                heading[.font] = UIFont.systemFont(
-                    ofSize: fontSize * Self.headingScale(level),
-                    weight: .semibold
-                )
-                result.append(NSAttributedString(
-                    string: MarkdownInline.strippingHeadingMarker(paragraphText),
-                    attributes: heading
-                ))
-            } else {
-                for (run, style) in MarkdownInline.runs(paragraphText) {
-                    var attributes = body
-                    if style != .normal {
-                        attributes[.font] = Self.font(size: fontSize, style: style)
-                    }
-                    result.append(NSAttributedString(string: run, attributes: attributes))
-                }
-            }
-        }
-        return result
-    }
-
-    private static func paragraphStyle(
-        justified: Bool,
-        lineSpacing: CGFloat
-    ) -> NSParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.alignment = justified ? .justified : .natural
-        // pushOut 让断行把整词推出去，而不是靠断词凑长度。
-        style.lineBreakStrategy = .pushOut
-        style.hyphenationFactor = 0.85
-        style.lineSpacing = lineSpacing
-        style.paragraphSpacing = lineSpacing * 1.4
-        return style
-    }
-
-    /// 行内样式对应的字体。
-    private static func font(size: CGFloat, style: MarkdownInline.InlineStyle) -> UIFont {
-        let base = UIFont.systemFont(ofSize: size, weight: .regular)
-        guard let descriptor = base.fontDescriptor.withSymbolicTraits(
-            style == .bold ? .traitBold : (style == .italic ? .traitItalic : [])
-        ) else { return UIFont.systemFont(ofSize: size, weight: .bold) }
-        return UIFont(descriptor: descriptor, size: size)
-    }
-
-    /// 标题相对正文的缩放，和完成态气泡保持同一组数字。
-    private static func headingScale(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: return 1.45
-        case 2: return 1.26
-        default: return 1.12
-        }
     }
 }

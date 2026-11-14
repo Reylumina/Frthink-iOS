@@ -30,9 +30,6 @@ final class WriterController {
     /// 已生成字符数；增量累加，避免气泡每帧对全文做一次 `count`。
     private(set) var streamingCharacterCount = 0
 
-    /// 落盘刷新的次数。
-    private(set) var streamFlushTick = 0
-
     /// 气泡显示刷新的次数（按 `displayInterval` 节流）。
     private(set) var displayTick = 0
 
@@ -692,7 +689,6 @@ final class WriterController {
         streamingCharacterCount = 0
         streamingReasoning = nil
         streamingReasoningCharacterCount = 0
-        streamFlushTick = 0
         displayTick = 0
         pendingDelta = ""
         reasoningBuffer = ""
@@ -904,7 +900,6 @@ final class WriterController {
             streamingReasoning = reasoningBuffer
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
         }
-        streamFlushTick += 1
         // 每次落盘（约 3 秒）都把已收内容并回会话；进程被杀最多丢这一段。
         checkpoint(session: session)
     }

@@ -97,9 +97,9 @@ struct WriterStreamingFollower: View {
         Color.clear
             .allowsHitTesting(false)
             .onChange(of: controller.displayTick) { _, _ in
-                guard isAtBottom else { return }
-                pendingScroll?.cancel()
+                guard isAtBottom, pendingScroll == nil else { return }
                 pendingScroll = Task { @MainActor in
+                    defer { pendingScroll = nil }
                     await Task.yield()
                     guard !Task.isCancelled else { return }
                     proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)

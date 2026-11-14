@@ -1405,7 +1405,16 @@ private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.hostingController.rootView = content
         context.coordinator.sections = sections
-        uiView.invalidateIntrinsicContentSize()
+        let measured = context.coordinator.hostingController.sizeThatFits(
+            in: CGSize(
+                width: uiView.bounds.width > 0 ? uiView.bounds.width : UIView.layoutFittingCompressedSize.width,
+                height: UIView.layoutFittingCompressedSize.height
+            )
+        )
+        if abs(measured.height - context.coordinator.lastMeasuredHeight) > 0.5 {
+            context.coordinator.lastMeasuredHeight = measured.height
+            uiView.invalidateIntrinsicContentSize()
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
@@ -1413,6 +1422,7 @@ private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
         let measured = context.coordinator.hostingController.sizeThatFits(
             in: CGSize(width: targetWidth, height: UIView.layoutFittingCompressedSize.height)
         )
+        context.coordinator.lastMeasuredHeight = measured.height
         return CGSize(width: proposal.width ?? measured.width, height: measured.height)
     }
 
@@ -1420,6 +1430,7 @@ private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
         let hostingController: UIHostingController<Content>
         let anchorView = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         var sections: [[UIMenuElement]]
+        var lastMeasuredHeight: CGFloat = 0
 
         init(content: Content, sections: [[UIMenuElement]]) {
             let controller = UIHostingController(rootView: content)

@@ -211,90 +211,17 @@ private struct WriterAssistantBodyView: View, Equatable {
     var body: some View {
         let lineSpacing = WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight)
         JustifiedText(
-            attributed: attributedText(lineSpacing: lineSpacing),
+            attributed: WriterTypography.attributedDocument(
+                text,
+                fontSize: fontSize,
+                lineHeight: lineHeight,
+                alignsLastLine: true
+            ),
             lineSpacing: lineSpacing,
             paragraphSpacing: WriterTypography.paragraphSpacing(size: fontSize, lineHeight: lineHeight),
             preservesParagraphStyles: true
         )
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func attributedText(lineSpacing: CGFloat) -> NSAttributedString {
-        let paragraphs = WriterTypography.paragraphs(text)
-        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: lineHeight)
-        let result = NSMutableAttributedString()
-        for (index, paragraphText) in paragraphs.enumerated() {
-            let isLast = index == paragraphs.count - 1
-            let style = JustifiedText.paragraphStyle(
-                lineSpacing: lineSpacing,
-                paragraphSpacing: isLast ? 0 : spacing
-            )
-            let level = MarkdownInline.headingLevel(paragraphText)
-            let plain = level == nil
-                ? paragraphText
-                : MarkdownInline.strippingHeadingMarker(paragraphText)
-            let size = level.map(headingSize) ?? fontSize
-            let baseWeight: UIFont.Weight = level == nil ? .regular : .semibold
-
-            if level != nil {
-                let font = UIFont.systemFont(ofSize: size, weight: baseWeight)
-                result.append(NSAttributedString(
-                    string: plain,
-                    attributes: [
-                        .font: font,
-                        .foregroundColor: UIColor.label,
-                        .paragraphStyle: style,
-                    ]
-                ))
-            } else {
-                for (run, inlineStyle) in MarkdownInline.runs(plain) {
-                    result.append(NSAttributedString(
-                        string: run,
-                        attributes: [
-                            .font: inlineFont(size: size, baseWeight: baseWeight, style: inlineStyle),
-                            .foregroundColor: UIColor.label,
-                            .paragraphStyle: style,
-                        ]
-                    ))
-                }
-            }
-            if !isLast {
-                result.append(NSAttributedString(
-                    string: "\n",
-                    attributes: [
-                        .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-                        .foregroundColor: UIColor.label,
-                        .paragraphStyle: style,
-                    ]
-                ))
-            }
-        }
-        return result
-    }
-
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: return fontSize * 1.45
-        case 2: return fontSize * 1.26
-        default: return fontSize * 1.12
-        }
-    }
-
-    private func inlineFont(
-        size: CGFloat,
-        baseWeight: UIFont.Weight,
-        style: MarkdownInline.InlineStyle
-    ) -> UIFont {
-        switch style {
-        case .normal:
-            return .systemFont(ofSize: size, weight: baseWeight)
-        case .bold:
-            return .systemFont(ofSize: size, weight: .bold)
-        case .italic:
-            let base = UIFont.systemFont(ofSize: size, weight: baseWeight)
-            return base.fontDescriptor.withSymbolicTraits(.traitItalic)
-                .map { UIFont(descriptor: $0, size: size) } ?? base
-        }
     }
 }
 

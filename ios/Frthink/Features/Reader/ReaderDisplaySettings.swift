@@ -53,7 +53,6 @@ enum ReaderStyle {
 struct ReaderDisplaySettingsSheet: View {
     @Binding var fontSize: Double
     @Binding var lineHeight: Double
-    @Binding var darkPage: Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -97,17 +96,6 @@ struct ReaderDisplaySettingsSheet: View {
                 }
 
                 Section {
-                    Picker("背景", selection: $darkPage) {
-                        Text("纸色").tag(false)
-                        Text("黑").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                } header: {
-                    AppSectionHeader(title: "背景")
-                }
-
-                Section {
                     previewBlock
                 } header: {
                     AppSectionHeader(title: "预览")
@@ -140,11 +128,11 @@ struct ReaderDisplaySettingsSheet: View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
         return Text(Self.previewLine)
             .font(ReaderStyle.bodyFont(size: previewFontSize))
-            .foregroundStyle(ReaderStyle.ink(dark: darkPage))
+            .foregroundStyle(ReaderStyle.ink(dark: false))
             .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: lineHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Spacing.m)
-            .background(ReaderStyle.page(dark: darkPage))
+            .background(ReaderStyle.page(dark: false))
             .clipShape(shape)
             // 内容表面默认不描边；增强对比度时补一圈系统分隔线（§1.5、§5.6）。
             .overlay {
@@ -158,7 +146,6 @@ struct ReaderDisplaySettingsSheet: View {
     private func restoreDefaults() {
         fontSize = 18
         lineHeight = 1.5
-        darkPage = false
     }
 }
 

@@ -171,7 +171,7 @@ struct WriterComposerBar: View {
         }
         return store.settings.activeProvider == nil
             ? "先在设置里添加 AI 服务商"
-            : "告诉码字机你想写什么、修改什么或重写什么…"
+            : "告诉码字机你的创作想法…"
     }
 
     private func send() {
