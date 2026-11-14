@@ -191,9 +191,9 @@ enum WorldMerge {
                     merged.scene = raw.scene
                 }
                 merged.characters = uniqueStrings(before.characters + raw.characters)
-                merged.cause = appended(before.cause, raw.cause)
-                merged.development = appended(before.development, raw.development)
-                merged.consequence = appended(before.consequence, raw.consequence)
+                merged.cause = appended(before.cause, raw.cause, separator: "")
+                merged.development = appended(before.development, raw.development, separator: "")
+                merged.consequence = appended(before.consequence, raw.consequence, separator: "")
                 let changed = merged.scene != before.scene
                     || merged.characters != before.characters
                     || merged.cause != before.cause
@@ -249,8 +249,8 @@ enum WorldMerge {
     // MARK: - 文本追加
 
     /// 旧文本只读：新文本按换行与句末标点切分，过滤已在旧文本出现的句子，
-    /// 保留原有标点与逗号从句并换行追加。
-    static func appended(_ existing: String, _ incoming: String) -> String {
+    /// 保留原有标点与逗号从句并追加；事件字段传空分隔符以保持同轮段落连贯。
+    static func appended(_ existing: String, _ incoming: String, separator: String = "\n") -> String {
         let oldText = existing.trimmingCharacters(in: .whitespacesAndNewlines)
         let newText = incoming.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newText.isEmpty else { return existing }
@@ -266,7 +266,20 @@ enum WorldMerge {
             additions.append(piece)
         }
         guard !additions.isEmpty else { return existing }
-        return oldText + "\n" + additions.joined(separator: "\n")
+        let block = separator.isEmpty ? joinParagraph(additions) : additions.joined(separator: separator)
+        return oldText + "\n" + block
+    }
+
+    private static func joinParagraph(_ sentences: [String]) -> String {
+        var out = ""
+        for sentence in sentences {
+            if !out.isEmpty, let last = out.last,
+               !sentenceTerminators.contains(last), !trailingClosers.contains(last) {
+                out.append("。")
+            }
+            out.append(sentence)
+        }
+        return out
     }
 
     // MARK: - 别称 / 自定义词条
