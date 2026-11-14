@@ -464,8 +464,11 @@ private struct FieldChrome: ViewModifier {
             if flat {
                 padded
                     .overlay(alignment: .bottom) {
-                        Divider()
-                            .overlay(focused ? Theme.accent.opacity(0.6) : Color.clear)
+                        if focused {
+                            Rectangle()
+                                .fill(Theme.accent.opacity(0.6))
+                                .frame(height: 1)
+                        }
                     }
             } else {
                 let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)

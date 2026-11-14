@@ -797,9 +797,9 @@ struct WriterPane: View {
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
         if message.role == .user {
-            menuAnchor(row) { userContextMenu(for: message) }
+            menuAnchor(row, message: message) { userContextMenu(for: message) }
         } else {
-            menuAnchor(row) { assistantContextMenu(for: message) }
+            menuAnchor(row, message: message) { assistantContextMenu(for: message) }
         }
     }
 
@@ -901,22 +901,30 @@ struct WriterPane: View {
         .disabled(controller.isBusy)
     }
 
-    /// 长按菜单挂在透明的命中层上。
-    ///
-    /// 直接挂在气泡上时，系统会把整条气泡提起来缩成一张预览图——文字一多就像
-    /// 消息被压成缩略图。挂到透明层后长按仍然在原位置触发，屏幕内容不动。
+    /// 用有限高度的摘要卡片作为 contextMenu 预览，避免长篇回复被系统拉成长条状玻璃。
     @ViewBuilder
     private func menuAnchor<Row: View, Menu: View>(
         _ row: Row,
+        message: ChatMessage,
         @ViewBuilder menu: @escaping () -> Menu
     ) -> some View {
         if selectionMode {
             row
         } else {
-            row.overlay {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .contextMenu(menuItems: menu)
+            row.contextMenu(menuItems: menu) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text(message.role == .user ? "我的指令" : "码字机回复")
+                        .font(Font.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(Font.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(6)
+                        .multilineTextAlignment(.leading)
+                }
+                .padding(Theme.Spacing.l)
+                .frame(width: 320, alignment: .leading)
+                .background(Theme.card)
             }
         }
     }

@@ -124,21 +124,20 @@ struct PromptAssembly {
         return ids
     }
 
-    /// 从 iOS 的 `WorldBook` 映射。规格 §1 没有对应槽位的字段在这里说明去处。
+    /// 从 iOS 的 `WorldBook` 映射，统一复用完整装配逻辑以保证门控规则一致。
     static func from(
         world: WorldBook,
         manuscript: String,
         bodyRange: PromptLibrary.BodyRange = .full
     ) -> PromptAssembly {
-        var assembly = PromptAssembly()
-        // 第 8 槽（语料条目）不由 WorldBook 映射：iOS 的 `world.corpus` 是「已收集的条目」，
-        // 不是 Android 那种「本次启用的语料库」。需要注入时由调用方填 `corpus`。
-        assembly.imitationTemplate = world.styleTemplate
-        assembly.plotOutline = PromptComposer.renderEvents(world.events)
-        assembly.characters = PromptComposer.activeCharacters(in: world)
-        assembly.conversationSummary = world.longTermRules
-        assembly.body = manuscript
-        assembly.bodyRange = bodyRange
-        return assembly
+        from(
+            world: world,
+            manuscript: manuscript,
+            assistantSupplement: "",
+            settings: AppSettings(),
+            projectID: "",
+            enabledUniverseEntryIDs: [],
+            bodyRange: bodyRange
+        )
     }
 }

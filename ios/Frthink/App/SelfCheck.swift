@@ -2172,9 +2172,9 @@ enum SelfCheck {
             let continuation = WriterPromptBuilder.prepare(snapshot)
             try expect(
                 continuation.messages.contains {
-                    $0.role == "assistant" && $0.content.hasSuffix("末尾片段")
+                    $0.role == "assistant" && $0.content.hasSuffix("上一段回复")
                 },
-                "续写没有把正文片段回灌成 assistant"
+                "续写没有把最近助手片段回灌成 assistant"
             )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }

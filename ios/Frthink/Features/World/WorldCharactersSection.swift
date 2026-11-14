@@ -55,14 +55,12 @@ struct WorldCharactersSection: View {
                 WorldGroupEditor(session: session)
             }
         }
-        .confirmationDialog(
-            "刷新人物卡",
-            isPresented: $showingRefreshOptions,
-            titleVisibility: .visible
-        ) {
-            Button("刷新人物卡") { onRefresh?() }
+        .alert("刷新人物卡", isPresented: $showingRefreshOptions) {
+            Button("增量刷新") { onRefresh?() }
             Button("从头整理（重新分析全部正文）") { onRefreshFull?() }
             Button("取消", role: .cancel) {}
+        } message: {
+            Text("增量刷新会从上次断点继续；从头整理会重新分析全书正文。")
         }
         .onAppear {
             #if DEBUG
