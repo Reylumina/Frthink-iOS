@@ -204,13 +204,16 @@ struct WorldCharactersSection: View {
     // MARK: - 列表
 
     private func cardList(_ cards: [CharacterCard]) -> some View {
-        List {
+        let colorIndexByID = Dictionary(
+            uniqueKeysWithValues: session.payload.world.characters.enumerated().map { ($1.id, $0) }
+        )
+        return List {
             Section {
                 ForEach(cards) { card in
                     Button {
                         route = Route(id: card.id)
                     } label: {
-                        CharacterRow(card: card)
+                        CharacterRow(card: card, colorIndex: colorIndexByID[card.id] ?? 0)
                     }
                     .buttonStyle(.plain)
                 }
@@ -233,6 +236,7 @@ struct WorldCharactersSection: View {
     /// 列表行只依赖卡片本身，和分栏的搜索、路由状态解耦。
     private struct CharacterRow: View {
         let card: CharacterCard
+        let colorIndex: Int
 
         /// 头像圆圈的尺寸是控件尺寸，跟随 Dynamic Type 缩放。
         @ScaledMetric(relativeTo: .body) private var avatarSize: CGFloat = 44
@@ -248,8 +252,7 @@ struct WorldCharactersSection: View {
                 .red, .orange, .yellow, .mint,
                 .teal, .cyan, .green, .brown,
             ]
-            let index = session.payload.world.characters.firstIndex(where: { $0.id == card.id }) ?? 0
-            return palette[index % palette.count]
+            return palette[colorIndex % palette.count]
         }
 
         var body: some View {
