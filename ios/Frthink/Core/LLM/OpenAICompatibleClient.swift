@@ -247,10 +247,10 @@ final class OpenAICompatibleClient: LLMClient {
         }
 
         if let choice = chunk.choices?.first {
-            if finishReason == nil {
-                finishReason = choice.finish_reason
-                    ?? choice.delta?.stop_reason
-                    ?? chunk.stop_reason
+            if finishReason == nil,
+               let rawReason = choice.finish_reason ?? choice.delta?.stop_reason ?? chunk.stop_reason,
+               !rawReason.isEmpty {
+                finishReason = rawReason
             }
             let delta = choice.delta
             let content = delta?.contentText ?? chunk.contentText

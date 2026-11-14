@@ -65,7 +65,7 @@ final class AnthropicClient: LLMClient {
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
 
-        // Anthropic 要求非 system 消息从 user 开始且尽量交替；连续同角色合并。
+        // Anthropic 要求非 system 消息从 user 开始且角色交替；连续同角色合并。
         var chatMessages: [[String: Any]] = []
         for msg in request.messages where msg.role != "system" {
             let role = msg.role == "assistant" ? "assistant" : "user"
@@ -76,8 +76,11 @@ final class AnthropicClient: LLMClient {
                 chatMessages.append(["role": role, "content": msg.content])
             }
         }
+        if chatMessages.first?["role"] as? String == "assistant" {
+            chatMessages.insert(["role": "user", "content": " "], at: 0)
+        }
         if chatMessages.isEmpty {
-            chatMessages.append(["role": "user", "content": ""])
+            chatMessages.append(["role": "user", "content": " "])
         }
 
         var body: [String: Any] = [
@@ -90,7 +93,22 @@ final class AnthropicClient: LLMClient {
             body["system"] = systemText
         }
 
-        let level = effectiveThinkingLevel(request: request, providerLevel: providerLevel)
+        let mappedTools: [[String: Any]] = (request.tools ?? []).compactMap { tool in
+            guard let data = tool.parametersJSON.data(using: .utf8),
+                  let params = try? JSONSerialization.jsonObject(with: data) else {
+                return nil
+            }
+            return [
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": params,
+            ]
+        }
+        let forcesTool = !mappedTools.isEmpty
+            && !(request.toolChoiceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+
+        // Anthropic 不允许在强制 tool_choice 时开启 thinking。
+        let level = forcesTool ? .off : effectiveThinkingLevel(request: request, providerLevel: providerLevel)
         if level != .off, request.maxTokens > 1024 {
             let rawBudget: Int
             switch level {
@@ -111,27 +129,17 @@ final class AnthropicClient: LLMClient {
             body["temperature"] = min(max(request.temperature, 0.0), 1.0)
         }
 
-        if let tools = request.tools, !tools.isEmpty {
-            body["tools"] = tools.compactMap { tool -> [String: Any]? in
-                guard let data = tool.parametersJSON.data(using: .utf8),
-                      let params = try? JSONSerialization.jsonObject(with: data) else {
-                    return nil
+        if !mappedTools.isEmpty {
+            body["tools"] = mappedTools
+            if let toolChoiceName = request.toolChoiceName, !toolChoiceName.isEmpty {
+                var choice: [String: Any] = ["type": "tool", "name": toolChoiceName]
+                if request.parallelToolCalls == false {
+                    choice["disable_parallel_tool_use"] = true
                 }
-                return [
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": params,
-                ]
+                body["tool_choice"] = choice
+            } else if request.parallelToolCalls == false {
+                body["tool_choice"] = ["type": "auto", "disable_parallel_tool_use": true]
             }
-        }
-        if let toolChoiceName = request.toolChoiceName, !toolChoiceName.isEmpty {
-            var choice: [String: Any] = ["type": "tool", "name": toolChoiceName]
-            if request.parallelToolCalls == false {
-                choice["disable_parallel_tool_use"] = true
-            }
-            body["tool_choice"] = choice
-        } else if request.parallelToolCalls == false, request.tools?.isEmpty == false {
-            body["tool_choice"] = ["type": "auto", "disable_parallel_tool_use": true]
         }
 
         return (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
@@ -203,6 +211,8 @@ final class AnthropicClient: LLMClient {
     ) async throws {
         var stopReason: String?
         var emittedAnything = false
+        var sawStop = false
+        var undecodableLines = 0
         var rawLog: [String] = []
         let decoder = JSONDecoder()
 
@@ -219,6 +229,7 @@ final class AnthropicClient: LLMClient {
             if payload.isEmpty { continue }
             guard let data = payload.data(using: .utf8),
                   let event = autoreleasepool(invoking: { try? decoder.decode(StreamEvent.self, from: data) }) else {
+                undecodableLines += 1
                 continue
             }
 
@@ -236,14 +247,20 @@ final class AnthropicClient: LLMClient {
                     continuation.yield(.delta(text))
                 }
             case "message_delta":
-                if let reason = event.delta?.stop_reason {
+                if let reason = event.delta?.stop_reason, !reason.isEmpty {
                     stopReason = reason == "max_tokens" ? "length" : reason
                 }
             case "message_stop":
-                break
+                sawStop = true
             default:
                 break
             }
+        }
+
+        if emittedAnything, undecodableLines > 0, stopReason == nil, !sawStop {
+            throw LLMError.streamError(
+                detail: "流里有 \(undecodableLines) 行无法解析，且没有收到结束标记；本次回复可能不完整。"
+            )
         }
 
         if !emittedAnything {
@@ -278,7 +295,16 @@ final class AnthropicClient: LLMClient {
     }
 
     func completeToolCall(_ request: LLMRequest) async throws -> [LLMToolCall] {
-        let response = try await sendMessage(request)
+        let response: MessageResponse
+        do {
+            response = try await sendMessage(request)
+        } catch let LLMError.http(status, body) where status == 400
+            && body.lowercased().contains("thinking")
+            && !request.omitThinking {
+            var retry = request
+            retry.omitThinking = true
+            response = try await sendMessage(retry)
+        }
         if request.failOnLength, response.stop_reason == "max_tokens" {
             throw LLMError.truncated(detail: "finish_reason=max_tokens")
         }
@@ -305,15 +331,13 @@ final class AnthropicClient: LLMClient {
             v1Subpath: "/messages",
             body: Self.requestBody(for: req, providerLevel: provider.effectiveThinkingLevel)
         )
-        let (data, response) = try await session.data(for: urlRequest)
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
+        let data = try await performData(urlRequest)
+        let decoded: MessageResponse
+        do {
+            decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
+        } catch {
+            throw LLMError.decoding(error.localizedDescription)
         }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw LLMError.http(status: http.statusCode, body: body)
-        }
-        let decoded = try JSONDecoder().decode(MessageResponse.self, from: data)
         if let error = decoded.error {
             throw LLMError.streamError(detail: error.detail)
         }
@@ -324,22 +348,21 @@ final class AnthropicClient: LLMClient {
 
     func listModels() async throws -> [String] {
         let urlRequest = try makeRequest(v1Subpath: "/models", body: nil)
-        let (data, response) = try await session.data(for: urlRequest)
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("拿不到 HTTP 状态码")
+        let data = try await performData(urlRequest)
+        let decoded: ModelListResponse
+        do {
+            decoded = try JSONDecoder().decode(ModelListResponse.self, from: data)
+        } catch {
+            throw LLMError.decoding(error.localizedDescription)
         }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw LLMError.http(status: http.statusCode, body: body)
-        }
-        let decoded = try JSONDecoder().decode(ModelListResponse.self, from: data)
-        return (decoded.data ?? []).map(\.id).sorted()
+        return Array(Set((decoded.data ?? []).map(\.id))).sorted()
     }
 
     func testConnection() async throws {
-        let model = provider.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let resolved = provider.resolvedModel
+        let model = resolved.isEmpty
             ? (ModelCatalog.latest(for: .anthropic) ?? "claude-sonnet-4-5")
-            : provider.model
+            : resolved
         let probe = LLMRequest(
             model: model,
             messages: [.user("hi")],
@@ -349,6 +372,24 @@ final class AnthropicClient: LLMClient {
             thinking: false
         )
         _ = try await complete(probe)
+    }
+
+    private func performData(_ urlRequest: URLRequest) async throws -> Data {
+        do {
+            let (data, response) = try await session.data(for: urlRequest)
+            guard let http = response as? HTTPURLResponse else {
+                throw LLMError.decoding("拿不到 HTTP 状态码")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                throw LLMError.http(status: http.statusCode, body: body)
+            }
+            return data
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            throw LLMError.cancelled
+        } catch is CancellationError {
+            throw LLMError.cancelled
+        }
     }
 
     // MARK: - 响应模型

@@ -50,7 +50,7 @@ struct ChatMessage                 // id, role(.user/.assistant/.system), varian
                                    // content 是计算属性，读写当前选中变体
 struct TranslationSegment          // id, owner, project, target, sourceHash, segment, payload, updatedAt
 
-enum ProviderKind                  // .deepseek / .openRouter / .openAICompatible
+enum ProviderKind                  // .deepseek / .openRouter / .anthropic / .openAICompatible
 struct ProviderSetting             // id, kind, baseURL, model, temperature, maxTokens, stream, enabled
 struct AppSettings                 // providers[], activeProviderID, corpusEnabled, ownerID, streamByDefault
                                    // .activeProvider 取当前供应方

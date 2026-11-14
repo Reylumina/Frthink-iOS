@@ -186,7 +186,7 @@ struct SettingsConnectionPage: View {
                   $0.id == store.settings.translationProviderID
               })
         else { return "跟随当前" }
-        return provider.model.isEmpty ? provider.kind.displayName : provider.model
+        return provider.resolvedModel.isEmpty ? provider.kind.displayName : provider.resolvedModel
     }
 
     private var summaryModelShortLabel: String {
@@ -216,6 +216,7 @@ struct SettingsConnectionPage: View {
     @MainActor
     private func testActiveConnection() {
         guard !isTesting else { return }
+        let testedID = store.settings.activeProviderID
         isTesting = true
         testMessage = nil
         testFailed = false
@@ -223,11 +224,15 @@ struct SettingsConnectionPage: View {
             do {
                 let client = try store.clientForActiveProvider()
                 try await client.testConnection()
-                testMessage = "连接成功"
-                testFailed = false
+                if store.settings.activeProviderID == testedID {
+                    testMessage = "连接成功"
+                    testFailed = false
+                }
             } catch {
-                testMessage = error.localizedDescription
-                testFailed = true
+                if store.settings.activeProviderID == testedID {
+                    testMessage = error.localizedDescription
+                    testFailed = true
+                }
             }
             isTesting = false
         }
@@ -346,7 +351,7 @@ private struct ConnectionProviderRow: View {
                         }
                     }
 
-                    Text(provider.model.isEmpty ? "未填写模型" : provider.model)
+                    Text(provider.resolvedModel.isEmpty ? "未填写模型" : provider.resolvedModel)
                         .font(Theme.labelSmall)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

@@ -18,7 +18,7 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 
 | 约束 | 来源 | 影响 |
 |---|---|---|
-| 只发 `POST /chat/completions` 和 `GET /models` | 反编译确认 | 不能用 provider SDK |
+| 只发 `POST /chat/completions`（OpenAI 兼容）或 `POST /v1/messages`（Anthropic）与 `GET /models` | 反编译确认 + iOS 扩展 | 不能用 provider SDK |
 | 基础请求体 7 个键，没有 `top_p`、`stop`、`response_format` | 反编译确认 | 结构化输出只能靠提示词约束 JSON，思考档位开启时按 provider 追加 reasoning 字段 |
 | `thinking` 只对 `api.deepseek.com` 发，OpenRouter 用 `reasoning`，OpenAI 兼容用 `reasoning_effort` | 反编译和官方 API | provider 抽象要知道供应方类型和思考档位 |
 | 存档格式是 JSON 包 gzip 再 base64 | 反编译确认 | Foundation 的 `.zlib` 是 RFC1950，不能直接用 |
@@ -35,7 +35,7 @@ Core/
   Models/       值类型：Project、World、Chat、Settings、Archive 快照
   Store/        AppStore（全局）、ProjectSession（单书）、FileStore（落盘）、Keychain
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）
-  LLM/          协议抽象、OpenAI 兼容实现、token 估算
+  LLM/          协议抽象、OpenAI 兼容与 Anthropic 实现、token 估算
   Archive.swift 信封、编解码、导入导出；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
   Design/       token 与容器
 ```

@@ -143,30 +143,31 @@ struct LLMRequest {
             }
         }
 
-        if let tools, !tools.isEmpty {
-            body["tools"] = tools.compactMap { tool -> [String: Any]? in
-                guard let data = tool.parametersJSON.data(using: .utf8),
-                      let params = try? JSONSerialization.jsonObject(with: data) else {
-                    return nil
-                }
-                return [
-                    "type": "function",
-                    "function": [
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": params,
-                    ] as [String: Any],
-                ]
+        let mappedTools: [[String: Any]] = (tools ?? []).compactMap { tool in
+            guard let data = tool.parametersJSON.data(using: .utf8),
+                  let params = try? JSONSerialization.jsonObject(with: data) else {
+                return nil
             }
-        }
-        if let toolChoiceName, !toolChoiceName.isEmpty {
-            body["tool_choice"] = [
+            return [
                 "type": "function",
-                "function": ["name": toolChoiceName],
-            ] as [String: Any]
+                "function": [
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": params,
+                ] as [String: Any],
+            ]
         }
-        if let parallelToolCalls {
-            body["parallel_tool_calls"] = parallelToolCalls
+        if !mappedTools.isEmpty {
+            body["tools"] = mappedTools
+            if let toolChoiceName, !toolChoiceName.isEmpty {
+                body["tool_choice"] = [
+                    "type": "function",
+                    "function": ["name": toolChoiceName],
+                ] as [String: Any]
+            }
+            if let parallelToolCalls {
+                body["parallel_tool_calls"] = parallelToolCalls
+            }
         }
 
         body["max_tokens"] = maxTokens

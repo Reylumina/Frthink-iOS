@@ -13,6 +13,21 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        if raw == "CUSTOM_OPENAI_COMPATIBLE" {
+            self = .openAICompatible
+        } else if let matched = ProviderKind(rawValue: raw) {
+            self = matched
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown ProviderKind: \(raw)"
+            )
+        }
+    }
+
     /// 新建供应方时可选类型；OpenCode 已并入 OpenAI 兼容预设。
     static var selectableCases: [ProviderKind] {
         [.deepseek, .openRouter, .anthropic, .openAICompatible]
@@ -61,8 +76,9 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
               !raw.isEmpty else {
             return nil
         }
+        // 有合法 host 时只匹配 host，避免代理路径里出现 `/openai/`、`/claude/` 误判。
         let host = URL(string: raw)?.host?.lowercased() ?? ""
-        let target = host.isEmpty ? raw : "\(host) \(raw)"
+        let target = host.isEmpty ? raw : host
 
         let rules: [(keywords: [String], asset: String)] = [
             (["deepseek"], "ProviderDeepSeek"),
@@ -205,6 +221,22 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.thinking = thinking
         self.thinkingLevel = thinkingLevel
         self.reasoningOffStyle = reasoningOffStyle
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decode(ProviderKind.self, forKey: .kind)
+        self.id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        self.kind = kind
+        self.baseURL = (try? c.decode(String.self, forKey: .baseURL)) ?? kind.defaultBaseURL
+        self.model = (try? c.decode(String.self, forKey: .model)) ?? kind.defaultModel
+        self.temperature = (try? c.decode(Double.self, forKey: .temperature)) ?? 1.0
+        self.maxTokens = (try? c.decode(Int.self, forKey: .maxTokens)) ?? 30000
+        self.stream = (try? c.decode(Bool.self, forKey: .stream)) ?? true
+        self.enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
+        self.thinking = try? c.decodeIfPresent(Bool.self, forKey: .thinking)
+        self.thinkingLevel = try? c.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
+        self.reasoningOffStyle = try? c.decodeIfPresent(ReasoningOffStyle.self, forKey: .reasoningOffStyle)
     }
 
     var effectiveThinkingLevel: ThinkingLevel {

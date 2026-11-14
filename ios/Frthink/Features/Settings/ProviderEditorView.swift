@@ -63,6 +63,7 @@ struct ProviderEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     SheetConfirmButton(title: "保存") { save() }
+                        .disabled(isBusy)
                 }
             }
             .sheet(isPresented: $showingModelPicker) {
@@ -166,11 +167,15 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
             .onChange(of: draft.kind) { oldKind, newKind in
-                // 地址/模型还是旧类型的默认值时才跟着换，用户自己填过的不动。
-                if draft.baseURL.isEmpty || draft.baseURL == oldKind.defaultBaseURL {
+                // 地址/模型还是旧类型或 OpenCode Go 预设默认值时才跟着换，用户自己填过的不动。
+                if draft.baseURL.isEmpty
+                    || draft.baseURL == oldKind.defaultBaseURL
+                    || draft.baseURL == ProviderKind.openCodeGo.defaultBaseURL {
                     draft.baseURL = newKind.defaultBaseURL
                 }
-                if draft.model.isEmpty || draft.model == oldKind.defaultModel {
+                if draft.model.isEmpty
+                    || draft.model == oldKind.defaultModel
+                    || draft.model == ProviderKind.openCodeGo.defaultModel {
                     draft.model = newKind.defaultModel
                 }
                 models = []
@@ -244,7 +249,7 @@ struct ProviderEditorView: View {
 
             // 关闭思考时要不要额外发一个「别推理」的字段。默认不发，和原版一致；
             // 服务端默认开推理（OpenCode 这类）时才需要挑一种。
-            if draft.effectiveThinkingLevel == .off, !draft.isDeepSeek {
+            if draft.effectiveThinkingLevel == .off, !draft.isDeepSeek, draft.kind != .anthropic {
                 Picker("关闭思考时发送", selection: reasoningOffBinding) {
                     ForEach(ReasoningOffStyle.allCases) { style in
                         Text(style.displayName).tag(style)
@@ -485,6 +490,9 @@ struct ProviderEditorView: View {
     private func commit() -> Bool {
         var normalized = draft
         normalized.baseURL = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.baseURL.isEmpty, !normalized.kind.defaultBaseURL.isEmpty {
+            normalized.baseURL = normalized.kind.defaultBaseURL
+        }
         normalized.model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: normalized.baseURL),
               let scheme = url.scheme?.lowercased(),

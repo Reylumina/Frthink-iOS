@@ -1094,6 +1094,56 @@ enum SelfCheck {
             return "off/deep/router/compat/explicit-close/offStyle ok"
         }
 
+        // Anthropic /v1/messages 请求体与供应方品牌识别
+        check("llm.anthropicAndBranding") {
+            let leadingAssistant = LLMRequest(
+                model: "claude-sonnet-4-5",
+                messages: [.system("sys"), .assistant("prev"), .user("u1"), .user("u2")],
+                stream: false,
+                temperature: 0.7,
+                maxTokens: 4096
+            )
+            let data = AnthropicClient.requestBody(for: leadingAssistant, providerLevel: .high)
+            let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            try expect(obj["system"] as? String == "sys", "Anthropic 应把 system 拆到顶层字段")
+            let msgs = obj["messages"] as? [[String: Any]] ?? []
+            try expect(msgs.first?["role"] as? String == "user", "Anthropic 首条非 system 消息必须为 user")
+            try expect(msgs.count == 3, "连续两条 user 应合并为一条")
+            try expect((obj["thinking"] as? [String: Any])?["type"] as? String == "enabled",
+                       "Anthropic 开启思考应发 thinking.enabled")
+            try expect(obj["temperature"] as? Double == 1.0,
+                       "Anthropic 开启思考时 temperature 应为 1.0")
+
+            let toolReq = LLMRequest(
+                model: "claude-sonnet-4-5",
+                messages: [.user("extract")],
+                stream: false,
+                maxTokens: 4096,
+                tools: [LLMToolDefinition(name: "create_character_card", description: "d", parametersJSON: #"{"type":"object"}"#)],
+                toolChoiceName: "create_character_card",
+                parallelToolCalls: false
+            )
+            let toolData = AnthropicClient.requestBody(for: toolReq, providerLevel: .max)
+            let toolObj = try JSONSerialization.jsonObject(with: toolData) as? [String: Any] ?? [:]
+            try expect(toolObj["thinking"] == nil, "强制 tool_choice 时不应发 thinking")
+            try expect((toolObj["tool_choice"] as? [String: Any])?["name"] as? String == "create_character_card",
+                       "Anthropic tool_choice 应指定工具名")
+
+            // 品牌识别与旧版枚举兼容
+            try expect(ProviderKind.anthropic.logoAssetName(forBaseURL: nil) == "ProviderAnthropic",
+                       "Anthropic 应使用 ProviderAnthropic")
+            try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://api.kimi.com/coding/v1") == "ProviderKimi",
+                       "Kimi Coding Plan 应识别为 ProviderKimi")
+            try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://open.bigmodel.cn/api/coding/paas/v4") == "ProviderZai",
+                       "GLM Coding Plan 应识别为 ProviderZai")
+            try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://proxy.example.com/openai/v1") == "ProviderOpenAI",
+                       "未知 host 不应受路径 /openai/ 干扰，应回落 ProviderOpenAI")
+            let decodedKind = try JSONDecoder().decode(ProviderKind.self, from: Data(#""CUSTOM_OPENAI_COMPATIBLE""#.utf8))
+            try expect(decodedKind == .openAICompatible, "CUSTOM_OPENAI_COMPATIBLE 应兼容解码为 openAICompatible")
+
+            return "anthropic request + 17 brand rules + legacy decode ok"
+        }
+
         // 200 流里的 error 块不能被静默丢弃
         check("llm.streamError") {
             let errorJSON = #"{"error":{"message":"rate limit exceeded","type":"rate_limit"}}"#

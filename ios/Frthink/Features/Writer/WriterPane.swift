@@ -1414,14 +1414,15 @@ private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.hostingController.rootView = content
         context.coordinator.sections = sections
+        uiView.invalidateIntrinsicContentSize()
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
-        let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
+        let targetWidth = proposal.width ?? UIView.layoutFittingCompressedSize.width
         let measured = context.coordinator.hostingController.sizeThatFits(
-            in: CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
+            in: CGSize(width: targetWidth, height: UIView.layoutFittingCompressedSize.height)
         )
-        return CGSize(width: width, height: measured.height)
+        return CGSize(width: proposal.width ?? measured.width, height: measured.height)
     }
 
     final class Coordinator: NSObject, UIContextMenuInteractionDelegate {

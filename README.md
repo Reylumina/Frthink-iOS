@@ -46,7 +46,8 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 |---|---|
 | DeepSeek | [Simple Icons](https://simpleicons.org/?q=deepseek)（CC0），填充官方蓝 `#4D6BFE` |
 | OpenRouter | [官方品牌页](https://openrouter.ai/brand) glyph，浅色 Grape / 深色 Volt |
-| OpenAI 兼容 / OpenCode | SF Symbol，无官方品牌标 |
+| Anthropic (Claude) | 内置 Claude 官方品牌 SVG（`ProviderAnthropic`） |
+| OpenAI 兼容 | 内置 16 家厂商 SVG（DeepSeek、Kimi、Zai/GLM、混元、Qwen、豆包、MiniMax、OpenCode、Command Code、OpenDesign、Ollama、OpenAI、Claude、Gemini、Grok、Mistral），按服务地址自动匹配并默认回落 OpenAI |
 
 品牌标只用于标识对应服务商，不拉伸、不改色。商标归各自所有者。
 
@@ -73,7 +74,7 @@ ios/
     Core/
       Models/                  Project、WorldBook、CharacterCard、EventCard、Universe
       Store/                   文件持久化、Keychain、@Observable 状态
-      LLM/                     OpenAI 兼容客户端、SSE 解析、token 估算
+      LLM/                     OpenAI 兼容与 Anthropic 客户端、SSE 解析、token 估算
       Prompts/                 提示词与拼装逻辑
       Design/                  主题与通用容器
     Features/
@@ -117,6 +118,7 @@ script/            本地校验脚本与一次性迁移脚本
 |---|---|
 | DeepSeek | `https://api.deepseek.com` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
+| Anthropic | `https://api.anthropic.com` |
 | OpenAI 兼容 | 由用户填写，提供 OpenCode Go 预设 |
 
 应用不内置凭据，不上报数据。

@@ -348,7 +348,13 @@ struct WorldCharactersSection: View {
     }
 
     private func addCard() {
-        let card = CharacterCard(name: "")
+        let initialGroupID: String?
+        if let groupFilter, groupFilter != Self.ungroupedFilterKey {
+            initialGroupID = groupFilter
+        } else {
+            initialGroupID = nil
+        }
+        let card = CharacterCard(name: "", groupId: initialGroupID)
         session.payload.world.characters.append(card)
         session.scheduleSave()
         route = Route(id: card.id)
@@ -368,7 +374,8 @@ struct WorldCharactersSection: View {
     }
 
     private func deleteCards(at offsets: IndexSet) {
-        pendingDeleteIDs = Set(offsets.map { filteredCards[$0].id })
+        let cards = filteredCards
+        pendingDeleteIDs = Set(offsets.map { cards[$0].id })
     }
 
     private func confirmDelete() {
