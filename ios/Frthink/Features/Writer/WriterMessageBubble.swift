@@ -89,20 +89,30 @@ struct WriterMessageBubble: View {
     }
 
     /// 用户气泡：实底 + 反色文字（§1.3）。收发关系由实底/无底表达，
-    /// 和系统「信息」一致；不加描边、不加投影，宽度不超过列宽 80%（§5.3）。
+    /// 和系统「信息」一致；不加描边、不加投影，宽度不超过列宽 80%（§5.3），文本采用两端对齐。
     private var userRow: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: Theme.Spacing.xxl)
-            MarkdownInline.text(message.content)
-                .font(Font.body)
-                .dynamicBodyFont(store.settings.bodyFontSize)
-                .foregroundStyle(Theme.bubbleForeground)
-                .lineSpacing(bodyLineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, Theme.Spacing.m)
-                .padding(.vertical, Theme.Spacing.s)
-                .background(Theme.bubbleFill, in: Theme.containerShape())
-                .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
+            JustifiedText(
+                attributed: WriterTypography.attributedDocument(
+                    message.content,
+                    fontSize: bodyFontSize,
+                    lineHeight: lineHeight,
+                    alignsLastLine: true,
+                    foregroundColor: UIColor(Theme.bubbleForeground)
+                ),
+                lineSpacing: bodyLineSpacing,
+                paragraphSpacing: WriterTypography.paragraphSpacing(
+                    size: bodyFontSize,
+                    lineHeight: lineHeight
+                ),
+                preservesParagraphStyles: true,
+                shrinksToFitWidth: true
+            )
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.s)
+            .background(Theme.bubbleFill, in: Theme.containerShape())
+            .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }

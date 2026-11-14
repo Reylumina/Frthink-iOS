@@ -50,7 +50,8 @@ enum WriterTypography {
         fontSize: CGFloat,
         lineSpacing: CGFloat,
         paragraphSpacing: CGFloat,
-        justified: Bool
+        justified: Bool,
+        foregroundColor: UIColor = .label
     ) -> NSAttributedString {
         let style = makeParagraphStyle(
             justified: justified,
@@ -70,7 +71,7 @@ enum WriterTypography {
                 string: plain,
                 attributes: [
                     .font: UIFont.systemFont(ofSize: size, weight: baseWeight),
-                    .foregroundColor: UIColor.label,
+                    .foregroundColor: foregroundColor,
                     .paragraphStyle: style,
                 ]
             ))
@@ -80,7 +81,7 @@ enum WriterTypography {
                     string: run,
                     attributes: [
                         .font: inlineFont(size: size, baseWeight: baseWeight, style: inlineStyle),
-                        .foregroundColor: UIColor.label,
+                        .foregroundColor: foregroundColor,
                         .paragraphStyle: style,
                     ]
                 ))
@@ -94,7 +95,8 @@ enum WriterTypography {
         _ text: String,
         fontSize: CGFloat,
         lineHeight: Double,
-        alignsLastLine: Bool
+        alignsLastLine: Bool,
+        foregroundColor: UIColor = .label
     ) -> NSAttributedString {
         let paragraphs = paragraphs(text)
         let lineSpacing = lineSpacing(size: fontSize, lineHeight: lineHeight)
@@ -110,7 +112,8 @@ enum WriterTypography {
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 paragraphSpacing: paraSpacing,
-                justified: justified
+                justified: justified,
+                foregroundColor: foregroundColor
             ))
             if !isLast {
                 let sepStyle = makeParagraphStyle(
@@ -122,7 +125,7 @@ enum WriterTypography {
                     string: "\n",
                     attributes: [
                         .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
-                        .foregroundColor: UIColor.label,
+                        .foregroundColor: foregroundColor,
                         .paragraphStyle: sepStyle,
                     ]
                 ))
@@ -152,18 +155,110 @@ enum WriterTypography {
         )
     }
 
-    private static func makeParagraphStyle(
+    static func makeParagraphStyle(
         justified: Bool,
         lineSpacing: CGFloat,
         paragraphSpacing: CGFloat
     ) -> NSParagraphStyle {
-        let style = NSMutableParagraphStyle()
-        style.alignment = justified ? .justified : .natural
-        style.lineBreakStrategy = .pushOut
-        style.hyphenationFactor = 0.85
-        style.lineSpacing = lineSpacing
-        style.paragraphSpacing = paragraphSpacing
-        return style
+        JustifiedText.paragraphStyle(
+            lineSpacing: lineSpacing,
+            paragraphSpacing: paragraphSpacing,
+            alignsLastLine: justified
+        )
+    }
+
+    /// 正文编辑器输入态默认属性：复用阅读页与气泡的同款两端对齐与行距。
+    static func manuscriptTypingAttributes(
+        fontSize: CGFloat,
+        lineHeight: Double
+    ) -> [NSAttributedString.Key: Any] {
+        let line = lineSpacing(size: fontSize, lineHeight: lineHeight)
+        let para = paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        return [
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: makeParagraphStyle(
+                justified: true,
+                lineSpacing: line,
+                paragraphSpacing: para
+            ),
+        ]
+    }
+
+    /// 将阅读页同款两端对齐、行距与段落间距应用至正文 `UITextView`（不改变底层 UTF-16 字符偏移）。
+    ///
+    /// 正文段间若存在 `\n\n` 空行（如插入正文或常见小说格式），将前一段的 `paragraphSpacing` 置 0，
+    /// 并把空行高度约束为 `paragraphSpacing`，使视觉段距与阅读页完全一致且光标偏移零误差。
+    static func applyManuscriptTypography(
+        to textView: UITextView,
+        fontSize: CGFloat,
+        lineHeight: Double
+    ) {
+        let storage = textView.textStorage
+        let totalLength = storage.length
+        let line = lineSpacing(size: fontSize, lineHeight: lineHeight)
+        let spacing = paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
+
+        let standardStyle = makeParagraphStyle(
+            justified: true,
+            lineSpacing: line,
+            paragraphSpacing: spacing
+        )
+        textView.typingAttributes = [
+            .font: font,
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: standardStyle,
+        ]
+        guard totalLength > 0 else { return }
+
+        let beforeBlankStyle = makeParagraphStyle(
+            justified: true,
+            lineSpacing: line,
+            paragraphSpacing: 0
+        )
+        let blankLineStyle = NSMutableParagraphStyle()
+        blankLineStyle.alignment = .justified
+        blankLineStyle.lineBreakStrategy = .pushOut
+        blankLineStyle.hyphenationFactor = 0.85
+        blankLineStyle.minimumLineHeight = spacing
+        blankLineStyle.maximumLineHeight = spacing
+        blankLineStyle.lineSpacing = 0
+        blankLineStyle.paragraphSpacing = 0
+
+        let ns = storage.string as NSString
+        let fullRange = NSRange(location: 0, length: totalLength)
+        storage.beginEditing()
+        storage.addAttributes(
+            [
+                .font: font,
+                .foregroundColor: UIColor.label,
+                .paragraphStyle: standardStyle,
+            ],
+            range: fullRange
+        )
+        var index = 0
+        while index < totalLength {
+            let lineRange = ns.lineRange(for: NSRange(location: index, length: 0))
+            let contentEnd = NSMaxRange(lineRange)
+            let trimmedLen = lineRange.length
+            let isBlankLine = trimmedLen == 0
+                || (trimmedLen == 1 && ns.character(at: lineRange.location) == 10)
+                || (trimmedLen == 2
+                    && ns.character(at: lineRange.location) == 13
+                    && ns.character(at: lineRange.location + 1) == 10)
+            if isBlankLine {
+                storage.addAttribute(.paragraphStyle, value: blankLineStyle, range: lineRange)
+            } else if contentEnd < totalLength {
+                let nextChar = ns.character(at: contentEnd)
+                if nextChar == 10 || nextChar == 13 {
+                    storage.addAttribute(.paragraphStyle, value: beforeBlankStyle, range: lineRange)
+                }
+            }
+            guard contentEnd > index else { break }
+            index = contentEnd
+        }
+        storage.endEditing()
     }
 
     private static func headingScale(_ level: Int) -> CGFloat {

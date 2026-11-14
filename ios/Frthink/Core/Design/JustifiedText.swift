@@ -22,6 +22,8 @@ struct JustifiedText: UIViewRepresentable {
     var alignsLastLine = true
     /// true 时保留调用方逐段设置的 `.paragraphStyle`。
     var preservesParagraphStyles = false
+    /// true 时气泡宽度按实际文本内容收缩（上限仍为提案宽度），用于短文本用户气泡。
+    var shrinksToFitWidth = false
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -80,16 +82,22 @@ struct JustifiedText: UIViewRepresentable {
         let coordinator = context.coordinator
         if coordinator.cachedRevision == coordinator.revision,
            abs(coordinator.cachedWidth - width) < 0.5 {
-            return CGSize(width: width, height: coordinator.cachedHeight)
+            let finalWidth = shrinksToFitWidth
+                ? min(width, coordinator.cachedMeasuredWidth)
+                : width
+            return CGSize(width: finalWidth, height: coordinator.cachedHeight)
         }
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
         let height = max(1, measured.height)
+        let measuredWidth = max(1, ceil(measured.width))
         coordinator.cachedWidth = width
         coordinator.cachedRevision = coordinator.revision
         coordinator.cachedHeight = height
-        return CGSize(width: width, height: height)
+        coordinator.cachedMeasuredWidth = measuredWidth
+        let finalWidth = shrinksToFitWidth ? min(width, measuredWidth) : width
+        return CGSize(width: finalWidth, height: height)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -106,6 +114,7 @@ struct JustifiedText: UIViewRepresentable {
         var cachedWidth: CGFloat = 0
         var cachedRevision = -1
         var cachedHeight: CGFloat = 0
+        var cachedMeasuredWidth: CGFloat = 0
 
         func matches(
             attributed: NSAttributedString,

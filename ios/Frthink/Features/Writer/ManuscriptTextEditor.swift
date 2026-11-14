@@ -31,6 +31,9 @@ struct ManuscriptTextEditor: UIViewRepresentable {
     /// 正文字号，来自「外观」设置（`AppSettings.bodyFontSize`）。
     var fontSize: CGFloat = 18
 
+    /// 正文行高倍数，与阅读页、创作页气泡共用同一配置。
+    var lineHeight: Double = WriterTypography.lineHeight
+
     /// 正文被外部改动过的次数（`ProjectSession.manuscriptRevision`）。
     ///
     /// 仅在版本号递增时全量同步文本至 UITextView，避免常规输入引发频繁文本比较与光标重置。
@@ -58,17 +61,29 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         view.font = Self.manuscriptFont(ofSize: fontSize)
         view.backgroundColor = .clear
         view.textColor = UIColor.label
-        view.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 20, right: 8)
-        view.textContainer.lineFragmentPadding = 4
+        view.textContainerInset = UIEdgeInsets(
+            top: Theme.Spacing.l,
+            left: Theme.Spacing.l,
+            bottom: Theme.Spacing.xl,
+            right: Theme.Spacing.l
+        )
+        view.textContainer.lineFragmentPadding = 0
         view.alwaysBounceVertical = true
         view.keyboardDismissMode = .interactive
         view.isEditable = isEditable
         view.isSelectable = true
         view.text = text
+        WriterTypography.applyManuscriptTypography(
+            to: view,
+            fontSize: fontSize,
+            lineHeight: lineHeight
+        )
         // 打开书稿时光标落在末尾：写作时继续往下写的概率最高。
         let end = (text as NSString).length
         view.selectedRange = NSRange(location: end, length: 0)
         context.coordinator.appliedRevision = revision
+        context.coordinator.appliedFontSize = fontSize
+        context.coordinator.appliedLineHeight = lineHeight
         // 延迟绑定代理，防止初始化设置触发状态同步回调。
         view.delegate = context.coordinator
         context.coordinator.reportUndoManagerIfNeeded(view.undoManager)
@@ -94,10 +109,8 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             }
         }
 
-        // 「外观」里的字号改了就跟着改，不用重进页面。
-        if uiView.font?.pointSize != fontSize {
-            uiView.font = Self.manuscriptFont(ofSize: fontSize)
-        }
+        let typographyChanged = context.coordinator.appliedFontSize != fontSize
+            || context.coordinator.appliedLineHeight != lineHeight
 
         // 只有外部改动（插入正文 / 撤销 / 导入正文）才回灌文字。
         if context.coordinator.appliedRevision != revision {
@@ -106,10 +119,29 @@ struct ManuscriptTextEditor: UIViewRepresentable {
             // 这里改文字/选区会同步回调 delegate，回调里不能反过来改 SwiftUI 状态。
             context.coordinator.isUpdating = true
             context.coordinator.appliedRevision = revision
+            context.coordinator.appliedFontSize = fontSize
+            context.coordinator.appliedLineHeight = lineHeight
             uiView.text = text
+            WriterTypography.applyManuscriptTypography(
+                to: uiView,
+                fontSize: fontSize,
+                lineHeight: lineHeight
+            )
             let length = (text as NSString).length
             let safe = cursor < 0 ? length : min(cursor, length)
             uiView.selectedRange = NSRange(location: safe, length: 0)
+            context.coordinator.isUpdating = false
+        } else if typographyChanged {
+            context.coordinator.isUpdating = true
+            context.coordinator.appliedFontSize = fontSize
+            context.coordinator.appliedLineHeight = lineHeight
+            let selected = uiView.selectedRange
+            WriterTypography.applyManuscriptTypography(
+                to: uiView,
+                fontSize: fontSize,
+                lineHeight: lineHeight
+            )
+            uiView.selectedRange = selected
             context.coordinator.isUpdating = false
         }
 
@@ -131,6 +163,8 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         var isUpdating = false
         /// 已经回灌给 UITextView 的外部改动版本。
         var appliedRevision = -1
+        var appliedFontSize: CGFloat = 0
+        var appliedLineHeight: Double = 0
         /// 上一次回调过的选区长度；用来区分「光标移动」和「选区变化」。
         var lastSelectionLength = 0
         /// 正文提交防抖：停止输入 400ms 才把整串交给 session。

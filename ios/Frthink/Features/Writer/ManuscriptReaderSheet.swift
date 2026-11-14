@@ -10,6 +10,7 @@ struct ManuscriptReaderSheet: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
 
     @Bindable var session: ProjectSession
     @Binding var cursor: Int
@@ -32,6 +33,10 @@ struct ManuscriptReaderSheet: View {
                     windowBanner
                 }
 
+                let scaledFontSize = DynamicTypeFont.bodySize(
+                    store.settings.bodyFontSize,
+                    dynamicTypeSize: dynamicTypeSize
+                )
                 ManuscriptTextEditor(
                     text: Binding(
                         get: { session.editorText },
@@ -39,10 +44,8 @@ struct ManuscriptReaderSheet: View {
                     ),
                     cursor: editorCursor,
                     scrollRequest: scrollRequest,
-                    fontSize: DynamicTypeFont.bodySize(
-                        store.settings.bodyFontSize,
-                        dynamicTypeSize: dynamicTypeSize
-                    ),
+                    fontSize: scaledFontSize,
+                    lineHeight: lineHeight,
                     revision: session.manuscriptRevision,
                     isEditable: editing,
                     onCursorInteraction: onCursorInteraction,
@@ -54,6 +57,8 @@ struct ManuscriptReaderSheet: View {
                         undoState = WriterUndoState(manager: manager)
                     }
                 )
+                .frame(maxWidth: WriterTypography.bodyMaxWidth(size: scaledFontSize))
+                .frame(maxWidth: .infinity)
 
                 if selection.length > 0 {
                     rewriteBar
