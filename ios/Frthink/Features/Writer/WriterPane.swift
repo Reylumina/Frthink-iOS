@@ -792,144 +792,125 @@ struct WriterPane: View {
         )
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
-        if message.role == .user {
-            menuAnchor(row) { userContextMenu(for: message) }
-        } else {
-            menuAnchor(row) { assistantContextMenu(for: message) }
-        }
+        menuAnchor(row, message: message)
     }
 
+    /// 长按弹出无预览卡片、无空白玻璃的原生液态玻璃 UIMenu（原地就近弹出）。
     @ViewBuilder
-    private func userContextMenu(for message: ChatMessage) -> some View {
-        Button {
-            copyToClipboard(message.content)
-        } label: {
-            Label("复制", systemImage: "doc.on.doc")
-        }
-        Button(role: .destructive) {
-            if controller.isBusy {
-                controller.stop()
-            }
-            let index = session.payload.messages.firstIndex { $0.id == message.id }
-            let removed = session.withdraw(from: message.id)
-            presentUndoPrompt("已撤回这条指令") {
-                session.restore(removed, at: index)
-            }
-        } label: {
-            Label("撤回", systemImage: "arrow.uturn.backward")
-        }
-        Button(role: .destructive) {
-            messageAction = .deleteMessage(message)
-        } label: {
-            Label("删除这条消息", systemImage: "trash")
-        }
-        .disabled(controller.isBusy)
-    }
-
-    @ViewBuilder
-    private func assistantContextMenu(for message: ChatMessage) -> some View {
-        Button {
-            copyToClipboard(message.content)
-        } label: {
-            Label("复制", systemImage: "doc.on.doc")
-        }
-        Button {
-            insertIntoManuscript(message.content)
-        } label: {
-            Label("插入到光标处", systemImage: "text.insert")
-        }
-        Button {
-            messageAction = .append(message)
-        } label: {
-            Label("追加到正文末尾", systemImage: "text.append")
-        }
-        if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Button {
-                let text = message.content
-                Task { @MainActor in
-                    do {
-                        let result = try await WorldWorkflow.ingestCharacterFromBubble(
-                            text,
-                            session: session,
-                            store: store
-                        )
-                        store.toast = result.isNew
-                            ? "已新建人物卡：\(result.cardName)"
-                            : "已更新人物卡：\(result.cardName)"
-                    } catch {
-                        if !error.isLLMCancellation {
-                            store.errorMessage = error.localizedDescription
-                        }
-                    }
-                }
-            } label: {
-                Label("提取为人物卡", systemImage: "person.crop.rectangle.badge.plus")
-            }
-            .disabled(controller.isBusy)
-        }
-        Button {
-            controller.regenerate(messageID: message.id, session: session, store: store)
-        } label: {
-            Label("重新生成", systemImage: "arrow.clockwise")
-        }
-        .disabled(controller.isBusy)
-        Button {
-            messageAction = .rollback(message)
-        } label: {
-            Label("回退到此", systemImage: "arrow.uturn.backward")
-        }
-        .disabled(controller.isBusy)
-        if message.variants.count > 1 {
-            Button {
-                messageAction = .cleanup(message)
-            } label: {
-                Label("清理历史版本", systemImage: "archivebox")
-            }
-        }
-        Button(role: .destructive) {
-            messageAction = .delete(message)
-        } label: {
-            Label(
-                message.variants.count > 1 ? "删除当前版本" : "删除气泡",
-                systemImage: "trash"
-            )
-        }
-        .disabled(controller.isBusy)
-    }
-
-    /// 保留系统液态玻璃长按菜单与按压回弹动效，并用 1×1 透明预览屏蔽长条缩略卡片。
-    @ViewBuilder
-    private func menuAnchor<Row: View, Menu: View>(
-        _ row: Row,
-        @ViewBuilder menu: @escaping () -> Menu
-    ) -> some View {
+    private func menuAnchor<Row: View>(_ row: Row, message: ChatMessage) -> some View {
         if selectionMode {
             row
         } else {
-            BubbleContextMenuContainer(content: row, menu: menu)
+            NoPreviewContextMenu(sections: contextMenuSections(for: message)) {
+                row
+            }
         }
     }
 
-    private struct BubbleContextMenuContainer<Content: View, Menu: View>: View {
-        let content: Content
-        @ViewBuilder let menu: () -> Menu
+    private func contextMenuSections(for message: ChatMessage) -> [[UIMenuElement]] {
+        let isBusy = controller.isBusy
 
-        @GestureState private var isPressing = false
-
-        var body: some View {
-            content
-                .scaleEffect(isPressing ? 0.97 : 1.0)
-                .animation(.easeOut(duration: 0.15), value: isPressing)
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.25)
-                        .updating($isPressing) { current, state, _ in
-                            state = current
-                        }
-                )
-                .contextMenu(menuItems: menu) {
-                    Color.clear.frame(width: 1, height: 1)
+        if message.role == .user {
+            let primaryGroup: [UIMenuElement] = [
+                UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
+                    copyToClipboard(message.content)
                 }
+            ]
+            let withdraw = UIAction(
+                title: "撤回",
+                image: UIImage(systemName: "arrow.uturn.backward"),
+                attributes: .destructive
+            ) { _ in
+                if controller.isBusy {
+                    controller.stop()
+                }
+                let index = session.payload.messages.firstIndex { $0.id == message.id }
+                let removed = session.withdraw(from: message.id)
+                presentUndoPrompt("已撤回这条指令") {
+                    session.restore(removed, at: index)
+                }
+            }
+            let delete = UIAction(
+                title: "删除这条消息",
+                image: UIImage(systemName: "trash"),
+                attributes: isBusy ? [.destructive, .disabled] : .destructive
+            ) { _ in
+                messageAction = .deleteMessage(message)
+            }
+            return [primaryGroup, [withdraw, delete]]
         }
+
+        var group1: [UIMenuElement] = [
+            UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
+                copyToClipboard(message.content)
+            },
+            UIAction(title: "插入到光标处", image: UIImage(systemName: "text.insert")) { _ in
+                insertIntoManuscript(message.content)
+            },
+            UIAction(title: "追加到正文末尾", image: UIImage(systemName: "text.append")) { _ in
+                messageAction = .append(message)
+            },
+        ]
+        if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            group1.append(
+                UIAction(
+                    title: "提取为人物卡",
+                    image: UIImage(systemName: "person.crop.rectangle.badge.plus"),
+                    attributes: isBusy ? .disabled : []
+                ) { _ in
+                    let text = message.content
+                    Task { @MainActor in
+                        do {
+                            let result = try await WorldWorkflow.ingestCharacterFromBubble(
+                                text,
+                                session: session,
+                                store: store
+                            )
+                            store.toast = result.isNew
+                                ? "已新建人物卡：\(result.cardName)"
+                                : "已更新人物卡：\(result.cardName)"
+                        } catch {
+                            if !error.isLLMCancellation {
+                                store.errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            )
+        }
+
+        var group2: [UIMenuElement] = [
+            UIAction(
+                title: "重新生成",
+                image: UIImage(systemName: "arrow.clockwise"),
+                attributes: isBusy ? .disabled : []
+            ) { _ in
+                controller.regenerate(messageID: message.id, session: session, store: store)
+            },
+            UIAction(
+                title: "回退到此",
+                image: UIImage(systemName: "arrow.uturn.backward"),
+                attributes: isBusy ? .disabled : []
+            ) { _ in
+                messageAction = .rollback(message)
+            },
+        ]
+        if message.variants.count > 1 {
+            group2.append(
+                UIAction(title: "清理历史版本", image: UIImage(systemName: "archivebox")) { _ in
+                    messageAction = .cleanup(message)
+                }
+            )
+        }
+
+        let deleteAction = UIAction(
+            title: message.variants.count > 1 ? "删除当前版本" : "删除气泡",
+            image: UIImage(systemName: "trash"),
+            attributes: isBusy ? [.destructive, .disabled] : .destructive
+        ) { _ in
+            messageAction = .delete(message)
+        }
+        return [group1, group2, [deleteAction]]
     }
 
     // MARK: - 输入区
@@ -1387,5 +1368,112 @@ private enum BodyImportError: LocalizedError {
 
     var errorDescription: String? {
         "文件不是 UTF-8 文本，请另存为 UTF-8 后再导入。"
+    }
+}
+
+/// 桥接 UIKit `UIContextMenuInteraction`：长按原地就近弹出原生 Liquid Glass `UIMenu`，
+/// 并通过空 `visiblePath` 彻底屏蔽预览卡片与空白缩略玻璃。
+private struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
+    let sections: [[UIMenuElement]]
+    let content: Content
+
+    init(sections: [[UIMenuElement]], @ViewBuilder content: () -> Content) {
+        self.sections = sections
+        self.content = content()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(content: content, sections: sections)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .clear
+
+        let hostView = context.coordinator.hostingController.view!
+        hostView.backgroundColor = .clear
+        hostView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hostView)
+
+        let anchor = context.coordinator.anchorView
+        anchor.backgroundColor = .clear
+        anchor.isUserInteractionEnabled = false
+        container.addSubview(anchor)
+
+        NSLayoutConstraint.activate([
+            hostView.topAnchor.constraint(equalTo: container.topAnchor),
+            hostView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            hostView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+
+        container.addInteraction(UIContextMenuInteraction(delegate: context.coordinator))
+        return container
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.hostingController.rootView = content
+        context.coordinator.sections = sections
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
+        let measured = context.coordinator.hostingController.sizeThatFits(
+            in: CGSize(width: width, height: UIView.layoutFittingCompressedSize.height)
+        )
+        return CGSize(width: width, height: measured.height)
+    }
+
+    final class Coordinator: NSObject, UIContextMenuInteractionDelegate {
+        let hostingController: UIHostingController<Content>
+        let anchorView = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        var sections: [[UIMenuElement]]
+
+        init(content: Content, sections: [[UIMenuElement]]) {
+            let controller = UIHostingController(rootView: content)
+            controller.sizingOptions = [.intrinsicContentSize]
+            self.hostingController = controller
+            self.sections = sections
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            configurationForMenuAtLocation location: CGPoint
+        ) -> UIContextMenuConfiguration? {
+            anchorView.center = location
+            return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+                guard let self else { return UIMenu(children: []) }
+                if self.sections.count <= 1 {
+                    return UIMenu(title: "", children: self.sections.first ?? [])
+                }
+                let groups = self.sections.map {
+                    UIMenu(title: "", options: .displayInline, children: $0)
+                }
+                return UIMenu(title: "", children: groups)
+            }
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            emptyPreview(in: interaction.view)
+        }
+
+        func contextMenuInteraction(
+            _ interaction: UIContextMenuInteraction,
+            previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+        ) -> UITargetedPreview? {
+            emptyPreview(in: interaction.view)
+        }
+
+        private func emptyPreview(in container: UIView?) -> UITargetedPreview? {
+            guard let container else { return nil }
+            let parameters = UIPreviewParameters()
+            parameters.backgroundColor = .clear
+            parameters.visiblePath = UIBezierPath()
+            let target = UIPreviewTarget(container: container, center: anchorView.center)
+            return UITargetedPreview(view: anchorView, parameters: parameters, target: target)
+        }
     }
 }
