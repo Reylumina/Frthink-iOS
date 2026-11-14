@@ -919,14 +919,14 @@ struct WriterPane: View {
 
     // MARK: - 输入区
 
-    /// 顶栏标题：书名 + 当前模型；点开在启用的服务商之间切换。
+    /// 顶栏标题：书名 + 当前模型；点开在已配置 API Key 的启用服务商之间切换。
     private var modelMenu: some View {
         Menu {
-            if enabledProviders.isEmpty {
-                Text("还没有AI服务商")
+            if configuredProviders.isEmpty {
+                Text("请先在设置中配置 API Key")
             } else {
                 Picker(selection: activeProviderBinding) {
-                    ForEach(enabledProviders) { provider in
+                    ForEach(configuredProviders) { provider in
                         Text(providerModelLabel(provider)).tag(provider.id)
                     }
                 } label: {
@@ -964,8 +964,8 @@ struct WriterPane: View {
         )
     }
 
-    private var enabledProviders: [ProviderSetting] {
-        store.settings.providers.filter(\.enabled)
+    private var configuredProviders: [ProviderSetting] {
+        store.settings.providers.filter { store.isProviderConfigured($0) }
     }
 
     private func providerModelLabel(_ provider: ProviderSetting) -> String {
@@ -974,8 +974,11 @@ struct WriterPane: View {
     }
 
     private var modelLabel: String {
-        guard let provider = store.settings.activeProvider else { return "选择模型" }
-        return providerModelLabel(provider)
+        if let provider = store.settings.activeProvider,
+           store.isProviderConfigured(provider) {
+            return providerModelLabel(provider)
+        }
+        return configuredProviders.isEmpty ? "未配置模型" : "选择模型"
     }
 
     @ViewBuilder

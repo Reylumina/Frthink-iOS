@@ -361,7 +361,7 @@ final class AnthropicClient: LLMClient {
     func testConnection() async throws {
         let resolved = provider.resolvedModel
         let model = resolved.isEmpty
-            ? (ModelCatalog.latest(for: .anthropic) ?? "claude-sonnet-4-5")
+            ? (ModelCatalog.latest(for: .anthropic) ?? "claude-sonnet-5-5")
             : resolved
         let probe = LLMRequest(
             model: model,

@@ -1097,7 +1097,7 @@ enum SelfCheck {
         // Anthropic /v1/messages 请求体与供应方品牌识别
         check("llm.anthropicAndBranding") {
             let leadingAssistant = LLMRequest(
-                model: "claude-sonnet-4-5",
+                model: "claude-sonnet-5-5",
                 messages: [.system("sys"), .assistant("prev"), .user("u1"), .user("u2")],
                 stream: false,
                 temperature: 0.7,
@@ -1115,7 +1115,7 @@ enum SelfCheck {
                        "Anthropic 开启思考时 temperature 应为 1.0")
 
             let toolReq = LLMRequest(
-                model: "claude-sonnet-4-5",
+                model: "claude-sonnet-5-5",
                 messages: [.user("extract")],
                 stream: false,
                 maxTokens: 4096,
@@ -1140,6 +1140,10 @@ enum SelfCheck {
                        "OpenAI 兼容不应再匹配 DeepSeek")
             try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://proxy.example.com/openai/v1") == "ProviderOpenAI",
                        "未知 host 不应受路径 /openai/ 干扰，应回落 ProviderOpenAI")
+            try expect(ModelCatalog.latest(for: .anthropic) == "claude-sonnet-5-5",
+                       "Anthropic 默认模型应为最新 claude-sonnet-5-5")
+            try expect(TokenEstimator.contextWindow(for: "claude-sonnet-5-5") == 1_000_000,
+                       "Claude 5.5 上下文窗口应为 1M")
 
             return "anthropic request + brand rules ok"
         }

@@ -429,6 +429,16 @@ final class AppStore {
         return settings.providers.contains { !apiKey(for: $0.id).isEmpty }
     }
 
+    /// 判断服务商是否已启用且已填齐地址、模型与 API Key（用于创作页模型切换菜单过滤）。
+    func isProviderConfigured(_ provider: ProviderSetting) -> Bool {
+        _ = apiKeyRevision
+        guard provider.enabled else { return false }
+        let base = provider.baseURLForDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = provider.resolvedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = apiKey(for: provider.id).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !base.isEmpty && !model.isEmpty && !key.isEmpty
+    }
+
     /// 供应方列表变化（新增/覆盖）后把缓存补齐。已有缓存不重复读钥匙串。
     func refreshAPIKeyCache() {
         for provider in settings.providers where apiKeyCache[provider.id] == nil {

@@ -109,15 +109,6 @@ struct ProviderEditorView: View {
 
     // MARK: - 连接
 
-    /// 新建配置仅展示推荐类型；已有历史配置类型予以保留。
-    private var editableKinds: [ProviderKind] {
-        var kinds = ProviderKind.selectableCases
-        if draft.kind == .openCodeGo, !kinds.contains(.openCodeGo) {
-            kinds.append(.openCodeGo)
-        }
-        return kinds
-    }
-
     private enum ProviderPreset: String, CaseIterable, Identifiable {
         case custom
         case openCodeGo
@@ -155,31 +146,14 @@ struct ProviderEditorView: View {
 
     private var connectionSection: some View {
         Section {
-            Picker(selection: $draft.kind) {
-                ForEach(editableKinds) { kind in
-                    Text(kind.displayName).tag(kind)
-                }
-            } label: {
-                HStack(spacing: Theme.Spacing.m) {
-                    ProviderIcon(kind: draft.kind, baseURL: draft.baseURL)
-                    Text("类型")
-                }
+            HStack(spacing: Theme.Spacing.m) {
+                ProviderIcon(kind: draft.kind, baseURL: draft.baseURL)
+                Text("类型")
+                Spacer(minLength: Theme.Spacing.s)
+                Text(draft.kind.displayName)
+                    .foregroundStyle(.secondary)
             }
-            .pickerStyle(.menu)
-            .onChange(of: draft.kind) { oldKind, newKind in
-                // 仅在地址与模型为旧预设默认值时联动变更，保留用户自定义输入。
-                if draft.baseURL.isEmpty
-                    || draft.baseURL == oldKind.defaultBaseURL
-                    || draft.baseURL == ProviderKind.openCodeGo.defaultBaseURL {
-                    draft.baseURL = newKind.defaultBaseURL
-                }
-                if draft.model.isEmpty
-                    || draft.model == oldKind.defaultModel
-                    || draft.model == ProviderKind.openCodeGo.defaultModel {
-                    draft.model = newKind.defaultModel
-                }
-                models = []
-            }
+            .frame(minHeight: Theme.Layout.rowContentHeight)
 
             if draft.kind == .openAICompatible {
                 Picker("预设", selection: presetBinding) {
