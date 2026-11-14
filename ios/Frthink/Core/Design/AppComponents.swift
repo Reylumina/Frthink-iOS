@@ -180,10 +180,10 @@ struct ProviderIcon: View {
     let kind: ProviderKind
     var baseURL: String? = nil
     var tint: Color = Theme.accent
-    /// 显式尺寸（可选）。不传就按与概览/设置页 `IconTile` 一致的 28pt 基准随字号缩放。
+    /// 显式尺寸（可选）。默认比 `IconTile` 大 4pt 容纳外框留白，使内部品牌标视觉尺寸与 28pt `IconTile` 一致。
     var size: CGFloat? = nil
 
-    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = Theme.Layout.iconTileSize
+    @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = Theme.Layout.iconTileSize + 4
 
     private var resolvedSize: CGFloat { size ?? scaledSize }
     private var resolvedAsset: String? { kind.logoAssetName(forBaseURL: baseURL) }
@@ -194,7 +194,7 @@ struct ProviderIcon: View {
                 Image(asset)
                     .resizable()
                     .scaledToFit()
-                    .padding(resolvedSize * 0.04)
+                    .padding(2)
             } else {
                 Image(systemName: kind.symbolName)
                     .font(.system(size: resolvedSize * 0.54, weight: .medium))
@@ -967,10 +967,9 @@ struct FloatingGlassButton: View {
                 .contentShape(Rectangle())
             } else {
                 Image(systemName: symbol)
-                    .font(Font.subheadline.weight(.semibold))
-                    // 圆形按钮视觉上窄于 44pt，外层热区补到 44pt（§5.1）。
-                    .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)
-                    .contentShape(Rectangle())
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: Theme.Layout.inlineControl, height: Theme.Layout.inlineControl)
+                    .contentShape(Circle())
             }
         }
         .disabled(!isEnabled)

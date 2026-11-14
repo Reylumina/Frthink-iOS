@@ -493,22 +493,6 @@ struct WriterPane: View {
                     contentOverflowsViewport = overflows
                 }
             }
-            // 键盘弹起时右侧浮一个圆形 X：点一下收起，和系统搜索的关闭键同形状。
-            // 滚动收起由下面的 .scrollDismissesKeyboard 负责（§5.9）。
-            .overlay(alignment: .topTrailing) {
-                if composer.isEditing {
-                    Button {
-                        composer.dismissRequest += 1
-                    } label: {
-                        ToolbarCircleIcon(symbol: "xmark")
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, Theme.Spacing.l)
-                    .padding(.top, Theme.Spacing.s)
-                    .accessibilityLabel("收起键盘")
-                    .transition(.opacity)
-                }
-            }
             .scrollDismissesKeyboard(.interactively)
             .scrollIndicators(.hidden)
             // iOS 26 的滚动边缘柔化；更早的系统由 Theme 回落成无操作（§5.2）。
@@ -585,11 +569,10 @@ struct WriterPane: View {
             }
             .overlay(alignment: .bottom) {
                 jumpToLatestOverlay(proxy)
+                    .zIndex(10)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture { dismissKeyboard() }
     }
 
     @ViewBuilder
@@ -602,10 +585,7 @@ struct WriterPane: View {
                     label: "回到最新"
                 ) {
                     isAtBottom = true
-                    scrollToBottom(
-                        proxy,
-                        animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
-                    )
+                    forceJumpToBottom(proxy)
                 }
                 .padding(.bottom, Theme.Spacing.s)
                 .transition(
@@ -695,6 +675,17 @@ struct WriterPane: View {
     private func scrollToBottom(_ proxy: ScrollViewProxy, animation: Animation?) {
         withAnimation(animation) {
             proxy.scrollTo(WriterChatLayout.bottomAnchor, anchor: .bottom)
+        }
+    }
+
+    /// 「回到最新」专用回底：先让出一步停下惯性滚动，再补一次对齐，避免惯性减速期间 scrollTo 失效。
+    private func forceJumpToBottom(_ proxy: ScrollViewProxy) {
+        let animation = Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
+        scrollToBottom(proxy, animation: animation)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            scrollToBottom(proxy, animation: animation)
         }
     }
 

@@ -1129,19 +1129,19 @@ enum SelfCheck {
             try expect((toolObj["tool_choice"] as? [String: Any])?["name"] as? String == "create_character_card",
                        "Anthropic tool_choice 应指定工具名")
 
-            // 品牌识别与旧版枚举兼容
+            // 品牌识别（OpenAI 兼容不包含 DeepSeek / OpenRouter / Claude，未知 host 回落 ProviderOpenAI）
             try expect(ProviderKind.anthropic.logoAssetName(forBaseURL: nil) == "ProviderAnthropic",
-                       "Anthropic 应使用 ProviderAnthropic")
+                       "Claude 应使用 ProviderAnthropic")
             try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://api.kimi.com/coding/v1") == "ProviderKimi",
                        "Kimi Coding Plan 应识别为 ProviderKimi")
             try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://open.bigmodel.cn/api/coding/paas/v4") == "ProviderZai",
                        "GLM Coding Plan 应识别为 ProviderZai")
+            try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://api.deepseek.com") == "ProviderOpenAI",
+                       "OpenAI 兼容不应再匹配 DeepSeek")
             try expect(ProviderKind.openAICompatible.logoAssetName(forBaseURL: "https://proxy.example.com/openai/v1") == "ProviderOpenAI",
                        "未知 host 不应受路径 /openai/ 干扰，应回落 ProviderOpenAI")
-            let decodedKind = try JSONDecoder().decode(ProviderKind.self, from: Data(#""CUSTOM_OPENAI_COMPATIBLE""#.utf8))
-            try expect(decodedKind == .openAICompatible, "CUSTOM_OPENAI_COMPATIBLE 应兼容解码为 openAICompatible")
 
-            return "anthropic request + 17 brand rules + legacy decode ok"
+            return "anthropic request + brand rules ok"
         }
 
         // 200 流里的 error 块不能被静默丢弃

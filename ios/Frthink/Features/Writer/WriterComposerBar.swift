@@ -36,23 +36,33 @@ struct WriterComposerBar: View {
     /// 输入条里控件的行内高度，跟随字号缩放（§2.4、§5.9）。
     @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = Theme.Layout.inlineControl
 
+    /// 键盘弹起时右侧关闭按钮的直径：与胶囊总高（34pt 控件 + 上下各 4pt 内边距 = 42pt）一致，视觉同高。
+    private var dismissButtonSize: CGFloat { controlSize + Theme.Spacing.xs * 2 }
+
     var body: some View {
         // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。
         WriterComposerShell {
-            // 一块输入区域把续写、输入、发送包在一起（§5.9）：三件控件共用同一个
-            // 胶囊表面，不再各自成块。行内控件同一条中轴，输入框长高时两侧跟着居中。
-            HStack(alignment: .center, spacing: Theme.Spacing.xs) {
-                continuationButton
-                TextField(inputPlaceholder, text: $model.text, axis: .vertical)
-                    .font(Font.body)
-                    .lineLimit(1...5)
-                    .focused($focused)
-                primaryControl
+            HStack(alignment: .center, spacing: Theme.Spacing.s) {
+                // 一块输入区域把续写、输入、发送包在一起（§5.9）：三件控件共用同一个
+                // 胶囊表面，不再各自成块。行内控件同一条中轴，输入框长高时两侧跟着居中。
+                HStack(alignment: .center, spacing: Theme.Spacing.xs) {
+                    continuationButton
+                    TextField(inputPlaceholder, text: $model.text, axis: .vertical)
+                        .font(Font.body)
+                        .lineLimit(1...5)
+                        .focused($focused)
+                    primaryControl
+                }
+                .padding(Theme.Spacing.xs)
+                .frame(minHeight: dismissButtonSize)
+                .modifier(WriterComposerFieldSurface())
+
+                if focused {
+                    keyboardDismissButton
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
             }
-            .padding(.horizontal, Theme.Spacing.xs)
-            .padding(.vertical, Theme.Spacing.xs)
-            .frame(minHeight: controlSize)
-            .modifier(WriterComposerFieldSurface())
+            .animation(Theme.motionLayout, value: focused)
         }
         .onAppear {
             if autoFocus {
@@ -72,6 +82,26 @@ struct WriterComposerBar: View {
             // 切页/切书时把没落盘的草稿立刻写掉。
             saveDraft()
         }
+    }
+
+    /// 键盘升起时显示在输入条右侧的圆形玻璃关闭键，与系统搜索栏右侧关闭键同位同形。
+    private var keyboardDismissButton: some View {
+        Button {
+            dismissKeyboard()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: dismissButtonSize, height: dismissButtonSize)
+                .modifier(WriterComposerCircleSurface())
+                .frame(
+                    minWidth: Theme.Layout.hitTarget,
+                    minHeight: Theme.Layout.hitTarget
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("收起键盘")
     }
 
     /// 续写入口：与右侧发送按钮等径的浅灰圆钮，保持左右对称与主次分明。
@@ -212,6 +242,17 @@ private struct WriterComposerFieldSurface: ViewModifier {
             content.glassSurface(Capsule(), interactive: true)
         } else {
             content.background(Theme.field, in: Capsule())
+        }
+    }
+}
+
+/// 键盘关闭按钮的圆形表面，与输入胶囊同材质。
+private struct WriterComposerCircleSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassSurface(Circle(), interactive: true)
+        } else {
+            content.background(Theme.field, in: Circle())
         }
     }
 }

@@ -13,21 +13,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let raw = try container.decode(String.self)
-        if raw == "CUSTOM_OPENAI_COMPATIBLE" {
-            self = .openAICompatible
-        } else if let matched = ProviderKind(rawValue: raw) {
-            self = matched
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Unknown ProviderKind: \(raw)"
-            )
-        }
-    }
-
     /// 新建供应方时可选类型；OpenCode 已并入 OpenAI 兼容预设。
     static var selectableCases: [ProviderKind] {
         [.deepseek, .openRouter, .anthropic, .openAICompatible]
@@ -37,7 +22,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .deepseek: return "DeepSeek"
         case .openRouter: return "OpenRouter"
-        case .anthropic: return "Anthropic"
+        case .anthropic: return "Claude"
         case .openAICompatible: return "OpenAI 兼容"
         case .openCodeGo: return "OpenAI 兼容"
         }
@@ -81,8 +66,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         let target = host.isEmpty ? raw : host
 
         let rules: [(keywords: [String], asset: String)] = [
-            (["deepseek"], "ProviderDeepSeek"),
-            (["openrouter"], "ProviderOpenRouter"),
             (["moonshot", "kimi"], "ProviderKimi"),
             (["z.ai", "bigmodel.cn", "zhipuai"], "ProviderZai"),
             (["hunyuan", "huanyuan", "lkeap.cloud.tencent", "tencentcloudapi"], "ProviderHuanyuan"),
@@ -93,7 +76,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
             (["commandcode", "command-code"], "ProviderCommandCode"),
             (["opendesign", "open-design"], "ProviderOpenDesign"),
             (["ollama"], "ProviderOllama"),
-            (["anthropic", "claude"], "ProviderAnthropic"),
             (["generativelanguage.googleapis", "aiplatform.googleapis", "gemini"], "ProviderGemini"),
             (["x.ai", "grok"], "ProviderGrok"),
             (["mistral.ai", "mistral"], "ProviderMistral"),

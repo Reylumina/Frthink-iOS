@@ -242,12 +242,14 @@ struct WorldCharactersSection: View {
         }
 
         private var avatarColor: Color {
-            let seed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = seed.isEmpty ? card.id : seed
-            // 对齐概览页图标的 iOS 系统色板，保持明亮一致的视觉身份。
-            let palette: [Color] = [.blue, .indigo, .orange, .purple, .pink, .teal, .mint, .cyan]
-            let hash = key.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
-            return palette[abs(hash) % palette.count]
+            // 优先按人物卡在全书列表中的序号顺序分配 iOS 系统色，保证前 12 位角色互不重复。
+            let palette: [Color] = [
+                .blue, .indigo, .purple, .pink,
+                .red, .orange, .yellow, .mint,
+                .teal, .cyan, .green, .brown,
+            ]
+            let index = session.payload.world.characters.firstIndex(where: { $0.id == card.id }) ?? 0
+            return palette[index % palette.count]
         }
 
         var body: some View {
