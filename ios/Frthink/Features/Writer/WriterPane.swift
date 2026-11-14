@@ -52,8 +52,6 @@ struct WriterPane: View {
     @State private var pendingBodyImport: PendingBodyImport?
     /// 气泡的追加/清理/删除共用一个 alert，避免同一层视图挂多个 alert。
     @State private var messageAction: MessageAction?
-    /// 长按气泡弹出的操作菜单（无预览卡片的居中系统弹窗）。
-    @State private var menuMessage: ChatMessage?
     /// 用户是否停在聊天底部；滚上去后暂停自动跟随，避免抢滚动。
     @State private var isAtBottom = true
     /// 生成结束后的落底窗口：这段时间里底部哨兵离开屏幕不算用户滚走。
@@ -176,18 +174,6 @@ struct WriterPane: View {
 
     var body: some View {
         chatList
-            .alert(
-                menuMessage?.role == .user ? "我的指令" : "码字机回复",
-                isPresented: menuMessageBinding,
-                presenting: menuMessage
-            ) { message in
-                if message.role == .user {
-                    userContextMenu(for: message)
-                } else {
-                    assistantContextMenu(for: message)
-                }
-                Button("取消", role: .cancel) { menuMessage = nil }
-            }
             // 确认用推入页，不用和文件面板同层的 alert：面板收起与弹层抢转场时，
             // 后者会被系统静默丢掉，表现就是「选完文件没反应」。
             .navigationDestination(item: $pendingBodyImport) { pending in
@@ -218,9 +204,6 @@ struct WriterPane: View {
             }
             .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
             .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
-            .sensoryFeedback(.impact(weight: .medium), trigger: menuMessage?.id) { _, newValue in
-                newValue != nil && store.settings.hapticsEnabled
-            }
             .toolbar { writerToolbar }
             .pageBackground()
             .onChange(of: controller.budgetAlert?.id) { _, newValue in
@@ -809,7 +792,11 @@ struct WriterPane: View {
         )
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
-        menuAnchor(row, message: message)
+        if message.role == .user {
+            menuAnchor(row) { userContextMenu(for: message) }
+        } else {
+            menuAnchor(row) { assistantContextMenu(for: message) }
+        }
     }
 
     @ViewBuilder
@@ -910,18 +897,38 @@ struct WriterPane: View {
         .disabled(controller.isBusy)
     }
 
-    /// 长按弹出纯操作菜单，不附带气泡预览卡片。
+    /// 保留系统液态玻璃长按菜单与按压回弹动效，并用 1×1 透明预览屏蔽长条缩略卡片。
     @ViewBuilder
-    private func menuAnchor<Row: View>(
+    private func menuAnchor<Row: View, Menu: View>(
         _ row: Row,
-        message: ChatMessage
+        @ViewBuilder menu: @escaping () -> Menu
     ) -> some View {
         if selectionMode {
             row
         } else {
-            row.onLongPressGesture(minimumDuration: 0.35) {
-                menuMessage = message
-            }
+            BubbleContextMenuContainer(content: row, menu: menu)
+        }
+    }
+
+    private struct BubbleContextMenuContainer<Content: View, Menu: View>: View {
+        let content: Content
+        @ViewBuilder let menu: () -> Menu
+
+        @GestureState private var isPressing = false
+
+        var body: some View {
+            content
+                .scaleEffect(isPressing ? 0.97 : 1.0)
+                .animation(.easeOut(duration: 0.15), value: isPressing)
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .updating($isPressing) { current, state, _ in
+                            state = current
+                        }
+                )
+                .contextMenu(menuItems: menu) {
+                    Color.clear.frame(width: 1, height: 1)
+                }
         }
     }
 
@@ -1224,13 +1231,6 @@ struct WriterPane: View {
         Binding(
             get: { messageAction != nil },
             set: { if !$0 { messageAction = nil } }
-        )
-    }
-
-    private var menuMessageBinding: Binding<Bool> {
-        Binding(
-            get: { menuMessage != nil },
-            set: { if !$0 { menuMessage = nil } }
         )
     }
 

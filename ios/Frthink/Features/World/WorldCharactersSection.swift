@@ -241,14 +241,31 @@ struct WorldCharactersSection: View {
             card.identity.isEmpty ? card.personality : card.identity
         }
 
+        private var avatarColor: Color {
+            let seed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return Theme.Identity.color(for: seed.isEmpty ? card.id : seed)
+        }
+
+        private var avatarInitial: String? {
+            let trimmed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.first.map(String.init)
+        }
+
         var body: some View {
             HStack(alignment: .center, spacing: Theme.Spacing.m) {
-                Image(systemName: "person.fill")
-                    .font(Theme.label)
-                    .foregroundStyle(Color.secondary)
-                    .frame(width: avatarSize, height: avatarSize)
-                    .background(Circle().fill(Theme.accentSoft))
-                    .accessibilityHidden(true)
+                Group {
+                    if let initial = avatarInitial {
+                        Text(initial)
+                            .font(Font.headline.weight(.semibold))
+                    } else {
+                        Image(systemName: "person")
+                            .font(Theme.label)
+                    }
+                }
+                .foregroundStyle(avatarColor)
+                .frame(width: avatarSize, height: avatarSize)
+                .background(Circle().fill(avatarColor.opacity(Theme.tintedFillOpacity)))
+                .accessibilityHidden(true)
 
                 summaryColumn
 
