@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "hunyuan-color.svg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

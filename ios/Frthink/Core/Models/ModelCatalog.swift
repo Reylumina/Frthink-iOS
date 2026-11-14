@@ -28,6 +28,8 @@ enum ModelCatalog {
             // `deepseek/deepseek-v4.1-flash-1017`（created 1792225624，2026-10-17）
             // 比滚动别名 `deepseek/deepseek-v4.1-flash` 更新，取快照版。
             return "deepseek/deepseek-v4.1-flash-1017"
+        case .anthropic:
+            return "claude-sonnet-4-5"
         case .openAICompatible:
             return nil
         case .openCodeGo:
@@ -45,6 +47,7 @@ enum ModelCatalog {
     static func contextWindow(for model: String) -> Int? {
         let name = model.lowercased()
         if name.contains("deepseek") { return 1_000_000 }
+        if name.contains("claude") { return 200_000 }
         return nil
     }
 }

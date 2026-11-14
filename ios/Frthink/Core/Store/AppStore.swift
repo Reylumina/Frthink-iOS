@@ -476,6 +476,13 @@ final class AppStore {
         guard !key.isEmpty else {
             throw LLMError.missingAPIKey(provider.kind.displayName)
         }
+        if provider.kind == .anthropic {
+            return AnthropicClient(
+                baseURL: provider.baseURLForDisplay,
+                apiKey: key,
+                provider: provider
+            )
+        }
         return OpenAICompatibleClient(
             baseURL: provider.baseURLForDisplay,
             apiKey: key,

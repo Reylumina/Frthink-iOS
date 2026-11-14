@@ -42,6 +42,7 @@ struct SettingsConnectionPage: View {
                 if let provider = store.settings.activeProvider {
                     ProviderIcon(
                         kind: provider.kind,
+                        baseURL: provider.baseURL,
                         tint: hasActiveKey ? Theme.accent : AppTone.warning.color
                     )
                     Text(activeProviderName)
@@ -256,6 +257,7 @@ struct TranslationProviderPicker: View {
                 ForEach(store.settings.providers) { provider in
                     row(
                         kind: provider.kind,
+                        baseURL: provider.baseURL,
                         title: provider.model.isEmpty
                             ? provider.kind.displayName
                             : "\(provider.kind.displayName) · \(provider.model)",
@@ -276,6 +278,7 @@ struct TranslationProviderPicker: View {
 
     private func row(
         kind: ProviderKind? = nil,
+        baseURL: String? = nil,
         title: String,
         selected: Bool,
         action: @escaping () -> Void
@@ -283,7 +286,7 @@ struct TranslationProviderPicker: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.m) {
                 if let kind {
-                    ProviderIcon(kind: kind)
+                    ProviderIcon(kind: kind, baseURL: baseURL)
                 }
                 Text(title)
                     .font(Theme.label)
@@ -327,6 +330,7 @@ private struct ConnectionProviderRow: View {
             HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 ProviderIcon(
                     kind: provider.kind,
+                    baseURL: provider.baseURL,
                     tint: isActive ? Theme.accent : .secondary
                 )
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {

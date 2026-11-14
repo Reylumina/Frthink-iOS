@@ -243,28 +243,20 @@ struct WorldCharactersSection: View {
 
         private var avatarColor: Color {
             let seed = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            return Theme.Identity.color(for: seed.isEmpty ? card.id : seed)
+            let key = seed.isEmpty ? card.id : seed
+            // 对齐概览页图标的 iOS 系统色板，保持明亮一致的视觉身份。
+            let palette: [Color] = [.blue, .indigo, .orange, .purple, .pink, .teal, .mint, .cyan]
+            let hash = key.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
+            return palette[abs(hash) % palette.count]
         }
 
         var body: some View {
             HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 Image(systemName: "person.fill")
-                    .font(Font.body.weight(.medium))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(avatarColor)
+                    .font(.system(size: avatarSize * 0.45, weight: .medium))
+                    .foregroundStyle(.white)
                     .frame(width: avatarSize, height: avatarSize)
-                    .background(
-                        Circle().fill(
-                            LinearGradient(
-                                colors: [avatarColor.opacity(0.22), avatarColor.opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    )
-                    .overlay(
-                        Circle().strokeBorder(avatarColor.opacity(0.18), lineWidth: 0.5)
-                    )
+                    .background(Circle().fill(avatarColor))
                     .accessibilityHidden(true)
 
                 summaryColumn

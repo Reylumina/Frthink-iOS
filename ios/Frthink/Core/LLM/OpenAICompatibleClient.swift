@@ -16,7 +16,7 @@ final class OpenAICompatibleClient: LLMClient {
     ///
     /// - `ephemeral` + `urlCache = nil`：LLM 响应不该进 URL 缓存，SSE 更不该。
     /// - `waitsForConnectivity = false`：交互式请求断网就立刻报错，不挂 3 分钟。
-    private static let sharedSession: URLSession = {
+    static let sharedSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         // 流式响应可能几分钟没有新字节，请求超时给足；资源超时兜住挂死的情况。
         config.timeoutIntervalForRequest = 180
@@ -467,7 +467,7 @@ final class OpenAICompatibleClient: LLMClient {
     // MARK: - 辅助
 
     /// 出错时把响应体读出来，方便把服务端的原文带给用户。
-    private static func drain(_ bytes: URLSession.AsyncBytes) async throws -> String {
+    static func drain(_ bytes: URLSession.AsyncBytes) async throws -> String {
         var buffer = ""
         for try await line in bytes.lines {
             buffer += line

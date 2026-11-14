@@ -7,6 +7,7 @@ import Foundation
 enum ProviderKind: String, Codable, CaseIterable, Identifiable {
     case deepseek = "DEEPSEEK"
     case openRouter = "OPENROUTER"
+    case anthropic = "ANTHROPIC"
     case openAICompatible = "OPENAI_COMPATIBLE"
     case openCodeGo = "OPENCODE_GO"
 
@@ -14,13 +15,14 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 
     /// 新建供应方时可选类型；OpenCode 已并入 OpenAI 兼容预设。
     static var selectableCases: [ProviderKind] {
-        [.deepseek, .openRouter, .openAICompatible]
+        [.deepseek, .openRouter, .anthropic, .openAICompatible]
     }
 
     var displayName: String {
         switch self {
         case .deepseek: return "DeepSeek"
         case .openRouter: return "OpenRouter"
+        case .anthropic: return "Anthropic"
         case .openAICompatible: return "OpenAI 兼容"
         case .openCodeGo: return "OpenAI 兼容"
         }
@@ -31,22 +33,60 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .deepseek: return "sparkles"
         case .openRouter: return "arrow.triangle.branch"
+        case .anthropic: return "sparkle"
         case .openAICompatible: return "server.rack"
         case .openCodeGo: return "chevron.left.forwardslash.chevron.right"
         }
     }
 
-    /// 官方品牌标的 asset 名；没有品牌标的类型退回 `symbolName`。
-    ///
-    /// 来源：DeepSeek 鲸鱼取自 Simple Icons（CC0），填充官方蓝 `#4D6BFE`；
-    /// OpenRouter glyph 取自官方品牌页（`openrouter.ai/brand`），浅色 Grape、
-    /// 深色 Volt，按品牌要求不拉伸、不改色。
+    /// 官方品牌标的 asset 名；OpenAI 兼容默认回落到 OpenAI 图标。
     var logoAssetName: String? {
+        logoAssetName(forBaseURL: nil)
+    }
+
+    /// 按协议与服务地址解析品牌图标（兼容标准 API 与各家 Token/Coding Plan 地址）。
+    func logoAssetName(forBaseURL baseURL: String?) -> String? {
         switch self {
         case .deepseek: return "ProviderDeepSeek"
         case .openRouter: return "ProviderOpenRouter"
-        case .openAICompatible, .openCodeGo: return nil
+        case .anthropic: return "ProviderAnthropic"
+        case .openCodeGo: return "ProviderOpenCode"
+        case .openAICompatible:
+            return Self.matchedBrandAsset(for: baseURL) ?? "ProviderOpenAI"
         }
+    }
+
+    private static func matchedBrandAsset(for baseURL: String?) -> String? {
+        guard let raw = baseURL?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !raw.isEmpty else {
+            return nil
+        }
+        let host = URL(string: raw)?.host?.lowercased() ?? ""
+        let target = host.isEmpty ? raw : "\(host) \(raw)"
+
+        let rules: [(keywords: [String], asset: String)] = [
+            (["deepseek"], "ProviderDeepSeek"),
+            (["openrouter"], "ProviderOpenRouter"),
+            (["moonshot", "kimi"], "ProviderKimi"),
+            (["z.ai", "bigmodel.cn", "zhipuai"], "ProviderZai"),
+            (["hunyuan", "huanyuan", "lkeap.cloud.tencent", "tencentcloudapi"], "ProviderHuanyuan"),
+            (["dashscope", "qwen"], "ProviderQwen"),
+            (["volces.com", "volcengine", "doubao"], "ProviderDoubao"),
+            (["minimaxi", "minimax"], "ProviderMiniMax"),
+            (["opencode.ai", "opencode"], "ProviderOpenCode"),
+            (["commandcode", "command-code"], "ProviderCommandCode"),
+            (["opendesign", "open-design"], "ProviderOpenDesign"),
+            (["ollama"], "ProviderOllama"),
+            (["anthropic", "claude"], "ProviderAnthropic"),
+            (["generativelanguage.googleapis", "aiplatform.googleapis", "gemini"], "ProviderGemini"),
+            (["x.ai", "grok"], "ProviderGrok"),
+            (["mistral.ai", "mistral"], "ProviderMistral"),
+            (["openai.com", "openai"], "ProviderOpenAI"),
+        ]
+        for rule in rules where rule.keywords.contains(where: { target.contains($0) }) {
+            return rule.asset
+        }
+        return nil
     }
 
     /// 默认服务地址。
@@ -54,6 +94,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .deepseek: return "https://api.deepseek.com"
         case .openRouter: return "https://openrouter.ai/api/v1"
+        case .anthropic: return "https://api.anthropic.com"
         case .openAICompatible: return ""
         case .openCodeGo: return "https://opencode.ai/zen/go/v1"
         }

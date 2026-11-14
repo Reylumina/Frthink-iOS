@@ -154,9 +154,14 @@ struct ProviderEditorView: View {
 
     private var connectionSection: some View {
         Section {
-            Picker("类型", selection: $draft.kind) {
+            Picker(selection: $draft.kind) {
                 ForEach(editableKinds) { kind in
                     Text(kind.displayName).tag(kind)
+                }
+            } label: {
+                HStack(spacing: Theme.Spacing.m) {
+                    ProviderIcon(kind: draft.kind, baseURL: draft.baseURL)
+                    Text("类型")
                 }
             }
             .pickerStyle(.menu)
@@ -404,6 +409,13 @@ struct ProviderEditorView: View {
         }
         guard !provider.baseURLForDisplay.isEmpty else {
             throw LLMError.badURL(provider.baseURL)
+        }
+        if provider.kind == .anthropic {
+            return AnthropicClient(
+                baseURL: provider.baseURLForDisplay,
+                apiKey: key,
+                provider: provider
+            )
         }
         return OpenAICompatibleClient(
             baseURL: provider.baseURLForDisplay,

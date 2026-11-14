@@ -178,38 +178,39 @@ struct IconTile: View {
 /// 互相染色。当前项由旁边的「当前」胶囊表示，不靠图标颜色。
 struct ProviderIcon: View {
     let kind: ProviderKind
+    var baseURL: String? = nil
     var tint: Color = Theme.accent
-    /// 显式尺寸（可选）。不传就按全应用统一的 28pt 基准随字号缩放。
+    /// 显式尺寸（可选）。不传就按与概览/设置页 `IconTile` 一致的 28pt 基准随字号缩放。
     var size: CGFloat? = nil
 
     @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = Theme.Layout.iconTileSize
 
     private var resolvedSize: CGFloat { size ?? scaledSize }
+    private var resolvedAsset: String? { kind.logoAssetName(forBaseURL: baseURL) }
 
     var body: some View {
         Group {
-            if let asset = kind.logoAssetName {
+            if let asset = resolvedAsset {
                 Image(asset)
                     .resizable()
                     .scaledToFit()
-                    // 品牌标留白 8%：14% 时图标看起来比旁边的系统方块小一圈。
-                    .padding(resolvedSize * 0.08)
+                    .padding(resolvedSize * 0.04)
             } else {
                 Image(systemName: kind.symbolName)
-                    .font(.system(size: resolvedSize * 0.46, weight: .semibold))
+                    .font(.system(size: resolvedSize * 0.54, weight: .medium))
                     .foregroundStyle(tint)
             }
         }
         .frame(width: resolvedSize, height: resolvedSize)
         .background(
             background,
-            in: RoundedRectangle(cornerRadius: resolvedSize * 0.3, style: .continuous)
+            in: RoundedRectangle(cornerRadius: resolvedSize * 0.226, style: .continuous)
         )
         .accessibilityHidden(true)
     }
 
     private var background: Color {
-        kind.logoAssetName == nil ? tint.opacity(0.12) : Color.primary.opacity(0.06)
+        resolvedAsset == nil ? tint.opacity(0.12) : Color.primary.opacity(0.06)
     }
 }
 
