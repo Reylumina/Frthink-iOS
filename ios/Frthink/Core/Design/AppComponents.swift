@@ -987,7 +987,7 @@ extension View {
         actionTitle: String = "删除",
         onConfirm: @escaping () -> Void
     ) -> some View {
-        confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+        alert(title, isPresented: isPresented) {
             Button(actionTitle, role: .destructive, action: onConfirm)
             Button("取消", role: .cancel) {}
         }
@@ -1000,13 +1000,12 @@ extension View {
         actionTitle: String = "删除",
         onConfirm: @escaping (Item) -> Void
     ) -> some View {
-        confirmationDialog(
+        alert(
             item.wrappedValue.map(title) ?? "",
             isPresented: Binding(
                 get: { item.wrappedValue != nil },
                 set: { if !$0 { item.wrappedValue = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button(actionTitle, role: .destructive) {
                 guard let target = item.wrappedValue else { return }
@@ -1026,10 +1025,9 @@ extension View {
         onDiscard: @escaping () -> Void
     ) -> some View {
         interactiveDismissDisabled(hasChanges)
-            .confirmationDialog(
+            .alert(
                 "放弃未保存的修改？",
-                isPresented: isPresented,
-                titleVisibility: .visible
+                isPresented: isPresented
             ) {
                 Button("放弃修改", role: .destructive, action: onDiscard)
                 Button("继续编辑", role: .cancel) {}

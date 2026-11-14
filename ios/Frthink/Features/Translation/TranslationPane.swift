@@ -75,10 +75,9 @@ struct TranslationPane: View {
                 SheetCloseButton(title: "关闭") { requestClose() }
             }
         }
-        .confirmationDialog(
+        .alert(
             "停止并关闭？",
-            isPresented: $confirmingStop,
-            titleVisibility: .visible
+            isPresented: $confirmingStop
         ) {
             Button("停止并关闭", role: .destructive) {
                 stopRunningAndClose()

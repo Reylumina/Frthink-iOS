@@ -229,10 +229,9 @@ private struct WorldRuleEditorPage: View {
                 }
             }
         }
-        .confirmationDialog(
+        .alert(
             "并入仿写模板？",
-            isPresented: $confirmingMerge,
-            titleVisibility: .visible
+            isPresented: $confirmingMerge
         ) {
             Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
             Button("取消", role: .cancel) {}

@@ -42,10 +42,9 @@ struct WorldCharacterEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
         .onDisappear { commitDraft() }
-        .confirmationDialog(
+        .alert(
             "删除人物卡",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
+            isPresented: $confirmingDelete
         ) {
             Button("删除", role: .destructive) {
                 deleteCard()

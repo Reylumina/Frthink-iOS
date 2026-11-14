@@ -126,10 +126,9 @@ struct ReaderDisplaySettingsSheet: View {
                     SheetConfirmButton { dismiss() }
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "恢复默认？",
-                isPresented: $confirmingReset,
-                titleVisibility: .visible
+                isPresented: $confirmingReset
             ) {
                 Button("恢复默认", role: .destructive) { restoreDefaults() }
                 Button("取消", role: .cancel) {}

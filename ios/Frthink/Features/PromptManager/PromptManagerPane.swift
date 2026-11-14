@@ -98,7 +98,7 @@ struct PromptManagerPane: View {
         .sheet(isPresented: $showingPreview) {
             PromptBlocksPreviewSheet(blocks: previewBlocks)
         }
-        .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
+        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
             Button("删除", role: .destructive) {
                 if let skill = pendingDelete { delete(skill) }
                 pendingDelete = nil

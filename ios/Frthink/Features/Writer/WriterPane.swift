@@ -52,6 +52,8 @@ struct WriterPane: View {
     @State private var pendingBodyImport: PendingBodyImport?
     /// 气泡的追加/清理/删除共用一个 alert，避免同一层视图挂多个 alert。
     @State private var messageAction: MessageAction?
+    /// 长按气泡弹出的操作菜单（无预览卡片的居中系统弹窗）。
+    @State private var menuMessage: ChatMessage?
     /// 用户是否停在聊天底部；滚上去后暂停自动跟随，避免抢滚动。
     @State private var isAtBottom = true
     /// 生成结束后的落底窗口：这段时间里底部哨兵离开屏幕不算用户滚走。
@@ -174,6 +176,18 @@ struct WriterPane: View {
 
     var body: some View {
         chatList
+            .alert(
+                menuMessage?.role == .user ? "我的指令" : "码字机回复",
+                isPresented: menuMessageBinding,
+                presenting: menuMessage
+            ) { message in
+                if message.role == .user {
+                    userContextMenu(for: message)
+                } else {
+                    assistantContextMenu(for: message)
+                }
+                Button("取消", role: .cancel) { menuMessage = nil }
+            }
             // 确认用推入页，不用和文件面板同层的 alert：面板收起与弹层抢转场时，
             // 后者会被系统静默丢掉，表现就是「选完文件没反应」。
             .navigationDestination(item: $pendingBodyImport) { pending in
@@ -204,15 +218,17 @@ struct WriterPane: View {
             }
             .sensoryFeedback(.impact(weight: .light), trigger: controller.isGenerating) { _, _ in store.settings.hapticsEnabled }
             .sensoryFeedback(.success, trigger: session.payload.bodyAppendReceipts.count) { _, _ in store.settings.hapticsEnabled }
+            .sensoryFeedback(.impact(weight: .medium), trigger: menuMessage?.id) { _, newValue in
+                newValue != nil && store.settings.hapticsEnabled
+            }
             .toolbar { writerToolbar }
             .pageBackground()
             .onChange(of: controller.budgetAlert?.id) { _, newValue in
                 budgetPresented = newValue != nil
             }
-            .confirmationDialog(
+            .alert(
                 messageAction?.title ?? "确认操作",
-                isPresented: messageActionBinding,
-                titleVisibility: .visible
+                isPresented: messageActionBinding
             ) {
                 if let action = messageAction {
                     Button(action.confirmTitle, role: action.confirmRole) {
@@ -796,11 +812,7 @@ struct WriterPane: View {
         )
 
         // 操作都收进长按菜单：气泡下面不再挂一排常驻图标（占位置、每条都重复一遍）。
-        if message.role == .user {
-            menuAnchor(row, message: message) { userContextMenu(for: message) }
-        } else {
-            menuAnchor(row, message: message) { assistantContextMenu(for: message) }
-        }
+        menuAnchor(row, message: message)
     }
 
     @ViewBuilder
@@ -901,30 +913,17 @@ struct WriterPane: View {
         .disabled(controller.isBusy)
     }
 
-    /// 用有限高度的摘要卡片作为 contextMenu 预览，避免长篇回复被系统拉成长条状玻璃。
+    /// 长按弹出纯操作菜单，不附带气泡预览卡片。
     @ViewBuilder
-    private func menuAnchor<Row: View, Menu: View>(
+    private func menuAnchor<Row: View>(
         _ row: Row,
-        message: ChatMessage,
-        @ViewBuilder menu: @escaping () -> Menu
+        message: ChatMessage
     ) -> some View {
         if selectionMode {
             row
         } else {
-            row.contextMenu(menuItems: menu) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(message.role == .user ? "我的指令" : "码字机回复")
-                        .font(Font.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Text(message.content.trimmingCharacters(in: .whitespacesAndNewlines))
-                        .font(Font.body)
-                        .foregroundStyle(.primary)
-                        .lineLimit(6)
-                        .multilineTextAlignment(.leading)
-                }
-                .padding(Theme.Spacing.l)
-                .frame(width: 320, alignment: .leading)
-                .background(Theme.card)
+            row.onLongPressGesture(minimumDuration: 0.35) {
+                menuMessage = message
             }
         }
     }
@@ -1228,6 +1227,13 @@ struct WriterPane: View {
         Binding(
             get: { messageAction != nil },
             set: { if !$0 { messageAction = nil } }
+        )
+    }
+
+    private var menuMessageBinding: Binding<Bool> {
+        Binding(
+            get: { menuMessage != nil },
+            set: { if !$0 { menuMessage = nil } }
         )
     }
 

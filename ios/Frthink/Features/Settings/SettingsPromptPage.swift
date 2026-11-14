@@ -164,10 +164,9 @@ struct WorldBuildEditorPage: View {
         .sheet(isPresented: $showingDefault) {
             WorldBuildDefaultSheet(text: PromptLibrary.worldBuildInstructionDefault)
         }
-        .confirmationDialog(
+        .alert(
             "恢复出厂值？",
-            isPresented: $confirmingReset,
-            titleVisibility: .visible
+            isPresented: $confirmingReset
         ) {
             Button("恢复出厂值", role: .destructive) { resetToDefault() }
             Button("取消", role: .cancel) {}

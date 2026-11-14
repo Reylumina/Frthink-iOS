@@ -47,10 +47,9 @@ struct LibraryBranchesSheet: View {
                     }
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "新建分支副本？",
-                isPresented: $confirmingCreate,
-                titleVisibility: .visible
+                isPresented: $confirmingCreate
             ) {
                 Button("新建分支副本") {
                     createBranch()

@@ -49,10 +49,9 @@ struct LibraryTrashView: View {
             .groupedPageBackground()
             .navigationTitle("回收站")
             .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
+        .alert(
             pendingDelete.map { "彻底删除「\($0.shelfTitle)」？" } ?? "彻底删除这本书？",
-            isPresented: deleteDialogBinding,
-            titleVisibility: .visible
+            isPresented: deleteDialogBinding
         ) {
             Button("彻底删除", role: .destructive) {
                 if let project = pendingDelete {

@@ -148,10 +148,9 @@ struct SettingsTokenResetSection: View {
                 confirmingReset = true
             }
         }
-        .confirmationDialog(
+        .alert(
             "清零累计 Token 用量？",
-            isPresented: $confirmingReset,
-            titleVisibility: .visible
+            isPresented: $confirmingReset
         ) {
             Button("清零", role: .destructive) {
                 store.settings.tokenUsageTotal = 0

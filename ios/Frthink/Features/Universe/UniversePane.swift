@@ -61,7 +61,7 @@ struct UniversePane: View {
         .sheet(isPresented: $isCreating) {
             creationSheet
         }
-        .confirmationDialog(deleteAlertTitle, isPresented: deleteBinding, titleVisibility: .visible) {
+        .alert(deleteAlertTitle, isPresented: deleteBinding) {
             Button("删除", role: .destructive) {
                 if let entry = pendingDelete { delete(entry) }
                 pendingDelete = nil

@@ -77,7 +77,7 @@ struct CorpusLibraryManagerSheet: View {
                     }
                 }
             }
-            .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
+            .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
                 Button("删除", role: .destructive) {
                     if let library = pendingDelete { delete(library) }
                     pendingDelete = nil

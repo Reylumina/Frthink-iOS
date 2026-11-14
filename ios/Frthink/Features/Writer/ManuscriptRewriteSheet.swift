@@ -86,10 +86,9 @@ struct ManuscriptRewriteSheet: View {
             // 有未保存的指令或已经有生成结果时，下滑关闭会被半路丢掉；
             // 只有「取消」这条明确入口能关，关闭前再确认一次（§5.8）。
             .interactiveDismissDisabled(hasUnsavedWork || isRunning)
-            .confirmationDialog(
+            .alert(
                 "放弃这次改写？",
-                isPresented: $showDiscardConfirm,
-                titleVisibility: .visible
+                isPresented: $showDiscardConfirm
             ) {
                 Button("放弃", role: .destructive) { close() }
                 Button("继续编辑", role: .cancel) {}

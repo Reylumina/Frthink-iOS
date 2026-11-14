@@ -101,7 +101,7 @@ struct PromptSkillEditor: View {
                 }
             }
         }
-        .confirmationDialog(deleteTitle, isPresented: $confirmingDelete, titleVisibility: .visible) {
+        .alert(deleteTitle, isPresented: $confirmingDelete) {
             Button("删除", role: .destructive) {
                 onDelete?()
                 // 删除即结束这一页：置位避免 onDisappear 又把改动存回去。

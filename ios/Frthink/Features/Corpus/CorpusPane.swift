@@ -114,7 +114,7 @@ struct CorpusPane: View {
                 }
             }
         }
-        .confirmationDialog(deleteAlertTitle, isPresented: deleteAlertBinding, titleVisibility: .visible) {
+        .alert(deleteAlertTitle, isPresented: deleteAlertBinding) {
             Button("删除", role: .destructive) {
                 if let entry = pendingDelete { delete(entry) }
                 pendingDelete = nil

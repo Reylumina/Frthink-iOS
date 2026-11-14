@@ -73,10 +73,9 @@ struct ProviderEditorView: View {
                     draft.model = picked
                 }
             }
-            .confirmationDialog(
+            .alert(
                 confirmationTitle,
-                isPresented: confirmationBinding,
-                titleVisibility: .visible
+                isPresented: confirmationBinding
             ) {
                 switch pendingConfirmation {
                 case .discard:
