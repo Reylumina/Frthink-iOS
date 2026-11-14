@@ -348,12 +348,9 @@ struct WorldCharactersSection: View {
     }
 
     private func addCard() {
-        let initialGroupID: String?
-        if let groupFilter, groupFilter != Self.ungroupedFilterKey {
-            initialGroupID = groupFilter
-        } else {
-            initialGroupID = nil
-        }
+        let initialGroupID: String? = (groupFilter == "__all__" || groupFilter == "__ungrouped__")
+            ? nil
+            : groupFilter
         let card = CharacterCard(name: "", groupId: initialGroupID)
         session.payload.world.characters.append(card)
         session.scheduleSave()
