@@ -218,6 +218,7 @@ struct WorldCharactersSection: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, 4, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .groupedPageBackground()

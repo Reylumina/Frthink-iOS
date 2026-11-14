@@ -600,7 +600,7 @@ struct WriterPane: View {
                 guard isAtBottom else { return }
                 settleAtBottom(proxy)
             }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 jumpToLatestOverlay(proxy)
             }
         }
@@ -611,14 +611,12 @@ struct WriterPane: View {
 
     @ViewBuilder
     private func jumpToLatestOverlay(_ proxy: ScrollViewProxy) -> some View {
-        // 只在离开底部时出现；浮在内容上的玻璃按钮（§1.6、§5.4）。
+        // 只在离开底部时出现；水平居中悬浮的玻璃圆形按钮，不与右下角发送键同列撞形。
         ZStack {
             if !isAtBottom {
-                // 带文字的胶囊，不和一个圆形的发送键抢同一种形态（§5.11）。
                 FloatingGlassButton(
                     symbol: "chevron.down",
-                    label: "回到最新",
-                    title: "最新"
+                    label: "回到最新"
                 ) {
                     isAtBottom = true
                     scrollToBottom(
@@ -626,7 +624,6 @@ struct WriterPane: View {
                         animation: Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)
                     )
                 }
-                .padding(.trailing, Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.s)
                 .transition(
                     reduceMotion

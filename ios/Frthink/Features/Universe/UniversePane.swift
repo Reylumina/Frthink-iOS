@@ -156,15 +156,18 @@ struct UniversePane: View {
 
     private var creationSheet: some View {
         NavigationStack {
-            Form {
-                UniverseEntryFields(
-                    kind: $draftKind,
-                    title: $draftTitle,
-                    bodyText: $draftBody
-                )
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                    UniverseEntryFields(
+                        kind: $draftKind,
+                        title: $draftTitle,
+                        bodyText: $draftBody
+                    )
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.m)
             }
-            .scrollContentBackground(.hidden)
-            .groupedPageBackground()
+            .pageBackground()
             .keyboardDismissOnScroll()
             .navigationTitle("新建宇宙资料")
             .navigationBarTitleDisplayMode(.inline)
@@ -313,18 +316,25 @@ private struct UniverseEntryEditor: View {
     }
 
     var body: some View {
-        Form {
-            UniverseEntryFields(
-                kind: $kind,
-                title: $title,
-                bodyText: $bodyText
-            )
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                UniverseEntryFields(
+                    kind: $kind,
+                    title: $title,
+                    bodyText: $bodyText
+                )
                 Toggle("全局启用", isOn: $enabled)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.s)
+                    .background(
+                        Theme.field,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    )
             }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
         }
-        .scrollContentBackground(.hidden)
-        .groupedPageBackground()
+        .pageBackground()
         .keyboardDismissOnScroll()
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -354,36 +364,30 @@ private struct UniverseEntryFields: View {
     @Binding var title: String
     @Binding var bodyText: String
 
-    @ViewBuilder
     var body: some View {
-        Section {
-            Picker("类型", selection: $kind) {
-                ForEach(UniverseEntry.Kind.allCases) { kind in
-                    Text(kind.displayName).tag(kind)
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                AppSectionHeader(title: "类型")
+                Picker("类型", selection: $kind) {
+                    ForEach(UniverseEntry.Kind.allCases) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
-        } header: {
-            AppSectionHeader(title: "类型")
-        }
 
-        Section {
             AppTextField(
                 title: "标题",
                 text: $title,
-                placeholder: "通用叙事视角约定",
-                flat: true
+                placeholder: "通用叙事视角约定"
             )
-        }
 
-        Section {
             AppTextArea(
                 title: "内容",
                 text: $bodyText,
                 placeholder: "内容",
                 minLines: 6,
-                maxLines: 12,
-                flat: true
+                maxLines: 12
             )
         }
     }

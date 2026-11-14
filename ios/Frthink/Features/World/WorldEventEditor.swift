@@ -36,7 +36,7 @@ struct WorldEventEditor: View {
                 )
             }
         }
-        .groupedPageBackground()
+        .pageBackground()
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
@@ -72,69 +72,66 @@ struct WorldEventEditor: View {
     }
 
     private var editor: some View {
-        Form {
-            Section {
-                AppTextField(
-                    title: "标题",
-                    text: $draft.title,
-                    placeholder: "事件标题",
-                    flat: true
-                )
-                WorldTagsField(
-                    title: "人物",
-                    values: $draft.characters,
-                    placeholder: "用、分隔",
-                    flat: true
-                )
-            } header: {
-                AppSectionHeader(title: "基本")
-            } footer: {
-                duplicateTitleWarning
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    AppSectionHeader(title: "基本")
+                    AppTextField(
+                        title: "标题",
+                        text: $draft.title,
+                        placeholder: "事件标题"
+                    )
+                    duplicateTitleWarning
+                    WorldTagsField(
+                        title: "人物",
+                        values: $draft.characters,
+                        placeholder: "用、分隔"
+                    )
+                }
 
-            Section {
                 AppTextArea(
                     title: "场景",
                     text: $draft.scene,
                     placeholder: "地点、时间与在场状态",
-                    minLines: 3,
-                    flat: true
+                    minLines: 3
                 )
-            }
 
-            Section {
-                AppTextArea(
-                    title: "起因",
-                    text: $draft.cause,
-                    placeholder: "这件事为什么发生",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "经过",
-                    text: $draft.development,
-                    placeholder: "动作与变化，合并同一事件，不写流水账",
-                    minLines: 3,
-                    flat: true
-                )
-                AppTextArea(
-                    title: "结果",
-                    text: $draft.consequence,
-                    placeholder: "造成了什么变化，留下什么后果",
-                    minLines: 3,
-                    flat: true
-                )
-            } header: {
-                AppSectionHeader(title: "过程")
-            }
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                    AppSectionHeader(title: "过程")
+                    AppTextArea(
+                        title: "起因",
+                        text: $draft.cause,
+                        placeholder: "这件事为什么发生",
+                        minLines: 3
+                    )
+                    AppTextArea(
+                        title: "经过",
+                        text: $draft.development,
+                        placeholder: "动作与变化，合并同一事件，不写流水账",
+                        minLines: 3
+                    )
+                    AppTextArea(
+                        title: "结果",
+                        text: $draft.consequence,
+                        placeholder: "造成了什么变化，留下什么后果",
+                        minLines: 3
+                    )
+                }
 
-            Section {
                 DestructiveActionRow(title: "删除事件卡") {
                     confirmingDelete = true
                 }
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.xs)
+                .background(
+                    Theme.field,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                )
             }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
         }
-        .scrollContentBackground(.hidden)
+        .keyboardDismissOnScroll()
     }
 
     @ViewBuilder

@@ -40,30 +40,35 @@ struct WorldbookEntryEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    AppTextField(
-                        title: "词条名",
-                        text: $title,
-                        placeholder: "例如：雾港城的潮汐规则",
-                        flat: true
-                    )
-                    AppTextArea(
-                        title: "内容",
-                        text: $bodyText,
-                        placeholder: "这条设定具体是什么",
-                        minLines: 6,
-                        maxLines: 14,
-                        flat: true
-                    )
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                        AppTextField(
+                            title: "词条名",
+                            text: $title,
+                            placeholder: "例如：雾港城的潮汐规则"
+                        )
+                        AppTextArea(
+                            title: "内容",
+                            text: $bodyText,
+                            placeholder: "这条设定具体是什么",
+                            minLines: 6,
+                            maxLines: 14
+                        )
+                    }
 
-                Section {
                     Toggle("启用词条", isOn: $enabled)
+                        .padding(.horizontal, Theme.Spacing.m)
+                        .padding(.vertical, Theme.Spacing.s)
+                        .background(
+                            Theme.field,
+                            in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                        )
                 }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.m)
             }
-            .scrollContentBackground(.hidden)
-            .groupedPageBackground()
+            .pageBackground()
             .keyboardDismissOnScroll()
             .navigationTitle(isNew ? "新建世界书词条" : "编辑世界书词条")
             .navigationBarTitleDisplayMode(.inline)

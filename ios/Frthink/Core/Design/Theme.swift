@@ -9,17 +9,12 @@ enum Theme {
 
     // MARK: - 颜色
 
-    /// 全局 tint：单色（浅色近黑 #111 / 深色近白 #F2F2F7）。
+    /// 全局 tint：iOS / SwiftUI 系统默认蓝（浅色 #007AFF / 深色 #0A84FF）。
     ///
-    /// 内容型 App 的通行做法是把彩色让给内容：控件统一黑/白，颜色只出现在
-    /// 状态和用户自己的素材上。iOS 26 的 Liquid Glass 本身也是中性玻璃，
-    /// 再叠一层饱和蓝反而打架（Apple Music 也在往单色图标收）。
+    /// 在黑灰白内容骨架上明确区分「可交互主操作」与「静态正文」，深浅色自动适配。
     static let accent = Color.accentColor
 
-    /// 压在强调色实底上的字形：发送键图标、码字机圆标。
-    ///
-    /// 浅色档黑底白字、深色档白底近黑字，跟着 accent 一起翻转。
-    /// 放在资产里是为了不写死色值。
+    /// 压在强调色实底上的字形：发送键图标、码字机圆标（纯白）。
     static let onAccent = Color(uiColor: UIColor(named: "OnAccent") ?? .white)
 
     /// 强调色淡底：选中胶囊、圆钮、图标印章的底色。

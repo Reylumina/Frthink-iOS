@@ -75,7 +75,7 @@ struct WriterComposerBar: View {
         }
     }
 
-    /// 续写入口：作为输入框胶囊的行首附件，与输入框共用同一表面。
+    /// 续写入口：浅灰淡圆底包裹图标，和右侧实心圆发送键形成对称但主次分明的结构。
     private var continuationButton: some View {
         Button {
             sendContinuation()
@@ -84,6 +84,7 @@ struct WriterComposerBar: View {
                 .font(Font.subheadline.weight(.medium))
                 .foregroundStyle(controller.isGenerating ? Color.secondary : Theme.accent)
                 .frame(width: glyph, height: glyph)
+                .background(Theme.field, in: Circle())
                 // 可视尺寸 28pt，热区补回 44pt；负内边距把多出来的占位让回去，
                 // 胶囊不会因此被撑高（§5.1）。
                 .frame(width: Theme.Layout.hitTarget, height: Theme.Layout.hitTarget)

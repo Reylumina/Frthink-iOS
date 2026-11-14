@@ -37,7 +37,7 @@ struct WorldCharacterEditor: View {
                 )
             }
         }
-        .groupedPageBackground()
+        .pageBackground()
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
@@ -66,128 +66,147 @@ struct WorldCharacterEditor: View {
     }
 
     private var editor: some View {
-        Form {
-            basicSection
-            personalitySection
-            memorySection
-            customEntriesSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                basicSection
+                personalitySection
+                memorySection
+                customEntriesSection
 
-            Section {
                 DestructiveActionRow(title: "删除人物卡") {
                     confirmingDelete = true
                 }
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.xs)
+                .background(
+                    Theme.field,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                )
             }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
         }
-        .scrollContentBackground(.hidden)
+        .keyboardDismissOnScroll()
     }
 
     private var basicSection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            AppSectionHeader(title: "基本")
             AppTextField(
                 title: "姓名",
                 text: $draft.name,
-                placeholder: "人物本名",
-                flat: true
+                placeholder: "人物本名"
             )
+            nameWarning
             WorldTagsField(
                 title: "别称",
                 values: $draft.aliases,
-                placeholder: "用、分隔",
-                flat: true
+                placeholder: "用、分隔"
             )
             AppTextField(
                 title: "身份",
                 text: $draft.identity,
-                placeholder: "身份、职业、阵营",
-                flat: true
+                placeholder: "身份、职业、阵营"
             )
             Toggle("参与写作提示词", isOn: Binding(
                 get: { draft.enabled ?? true },
                 set: { draft.enabled = $0 }
             ))
-            Picker("分组", selection: Binding(
-                get: { draft.groupId ?? "" },
-                set: { draft.groupId = $0.isEmpty ? nil : $0 }
-            )) {
-                Text("未分组").tag("")
-                ForEach(session.payload.world.characterGroups) { group in
-                    Text(group.name).tag(group.id)
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.s)
+            .background(
+                Theme.field,
+                in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+            )
+            HStack {
+                Text("分组")
+                    .font(Font.body)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                Picker("分组", selection: Binding(
+                    get: { draft.groupId ?? "" },
+                    set: { draft.groupId = $0.isEmpty ? nil : $0 }
+                )) {
+                    Text("未分组").tag("")
+                    ForEach(session.payload.world.characterGroups) { group in
+                        Text(group.name).tag(group.id)
+                    }
                 }
+                .labelsHidden()
             }
-        } header: {
-            AppSectionHeader(title: "基本")
-        } footer: {
-            nameWarning
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.xs)
+            .background(
+                Theme.field,
+                in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+            )
         }
     }
 
     private var personalitySection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            AppSectionHeader(title: "说话与行为")
             AppTextArea(
                 title: "性格",
                 text: $draft.personality,
                 placeholder: "稳定的性格与价值观",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
             AppTextArea(
                 title: "语气",
                 text: $draft.voice,
                 placeholder: "措辞、语气与对不同对象的说话方式",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
             AppTextArea(
                 title: "目标",
                 text: $draft.goals,
                 placeholder: "目标与具体动机",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
             AppTextArea(
                 title: "底线",
                 text: $draft.boundaries,
                 placeholder: "不会做的事、不能触碰的边界",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
-        } header: {
-            AppSectionHeader(title: "说话与行为")
         }
     }
 
     private var memorySection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            AppSectionHeader(title: "记忆与关系")
             AppTextArea(
                 title: "人物记忆",
                 text: $draft.personalMemory,
                 placeholder: "角色亲历或明确知晓、对其行为有持续影响的经历",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
             AppTextArea(
                 title: "关系态度",
                 text: $draft.relationshipAttitudes,
                 placeholder: "按对象分别记录印象、态度、信任与变化",
-                minLines: 3,
-                flat: true
+                minLines: 3
             )
-        } header: {
-            AppSectionHeader(title: "记忆与关系")
         }
     }
 
     private var customEntriesSection: some View {
-        Section {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            AppSectionHeader(title: "自定义词条")
             customEntryRows
             Button {
                 addCustomEntry()
             } label: {
                 Label("添加自定义词条", systemImage: "plus")
                     .font(Font.body)
+                    .frame(maxWidth: .infinity, minHeight: Theme.Layout.hitTarget, alignment: .leading)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .background(
+                        Theme.field,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    )
             }
-        } header: {
-            AppSectionHeader(title: "自定义词条")
         }
     }
 
@@ -228,15 +247,13 @@ struct WorldCharacterEditor: View {
                 AppTextField(
                     title: "标题",
                     text: $title,
-                    placeholder: "例如：武器、口癖",
-                    flat: true
+                    placeholder: "例如：武器、口癖"
                 )
                 AppTextArea(
                     title: "内容",
                     text: $content,
                     minLines: 3,
-                    showsCount: false,
-                    flat: true
+                    showsCount: false
                 )
                 Button(role: .destructive) {
                     onDelete()
@@ -247,6 +264,7 @@ struct WorldCharacterEditor: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                Divider()
             }
             .padding(.vertical, Theme.Spacing.xs)
         }
