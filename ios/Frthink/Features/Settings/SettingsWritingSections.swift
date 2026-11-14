@@ -231,7 +231,7 @@ struct SettingsAppearanceSection: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Text("夜色像被谁拧暗了一格，走廊尽头的灯还亮着。")
                     .font(ReaderStyle.bodyFont(size: previewFontSize))
-                    .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: 1.6))
+                    .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: WriterTypography.lineHeight))
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

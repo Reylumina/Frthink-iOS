@@ -269,7 +269,7 @@ struct WriterStreamingBubble: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，流式气泡跟着用同一个值。
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
     @State private var reasoningExpanded = false
 
     private var bodyFontSize: CGFloat {
@@ -323,6 +323,7 @@ struct WriterStreamingBubble: View {
                 text: controller.streamingText,
                 characterCount: controller.streamingCharacterCount,
                 fontSize: bodyFontSize,
+                lineHeight: lineHeight,
                 lineSpacing: WriterTypography.lineSpacing(size: bodyFontSize, lineHeight: lineHeight)
             )
             .frame(maxWidth: .infinity, alignment: .leading)

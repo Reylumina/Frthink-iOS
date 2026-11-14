@@ -179,14 +179,14 @@ enum Theme {
         /// 视图里用 `@ScaledMetric(relativeTo: .body)` 读，不直接取这个常数。
         static let controlHeight: CGFloat = 36
 
-        /// 正文段落间距（§2.3）：额外行距 × 1.4。
+        /// 正文段落间距（§2.3）：以 `fontSize * 0.7`（18pt → 12.6pt）为下限，并在高行距时保持 `额外行距 × 1.4`。
         ///
-        /// 以额外行距（字号 × (行高 − 1)）为计算基准而非固定字号倍数：
-        /// 当阅读页行距调整为 1.2 或 2.0 时，段间距动态联动，保持段距与折行间距恒定为
-        /// 1.4 倍比例，避免出现行距加大后段间距相对过窄的不协调现象。
-        /// 默认行高 1.5 时等于字号 × 0.7（18pt → 12.6pt）。
-        static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.5) -> CGFloat {
-            fontSize * CGFloat(max(0, lineHeight - 1)) * 1.4
+        /// 默认行高 1.4（额外行距 `fontSize × 0.4`）时保持 12.6pt 段距不变；
+        /// 当阅读页行距调高至 1.8 或 2.0 时，段间距随额外行距按 1.4 倍同步放大，
+        /// 避免出现行距加大后段间距相对过窄的不协调现象。
+        static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.4) -> CGFloat {
+            let lineSpacing = fontSize * CGFloat(max(0, lineHeight - 1))
+            return max(fontSize * 0.7, lineSpacing * 1.4)
         }
 
         /// 图标方块的基准边长（§2.4）：28pt，全应用只有一个值——分类图标、

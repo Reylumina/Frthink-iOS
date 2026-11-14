@@ -6,8 +6,8 @@ import SwiftUI
 import UIKit
 
 enum WriterTypography {
-    /// 正文行高倍数。§2.3：流式气泡、正文编辑器、阅读页统一 1.5。
-    static let lineHeight: Double = 1.5
+    /// 正文行高倍数。§2.3：流式气泡、正文编辑器、阅读页默认 1.4。
+    static let lineHeight: Double = 1.4
 
     /// 用户气泡最多占对话列宽的 80%（§5.3）。
     static let userBubbleWidthRatio: CGFloat = 0.8
@@ -32,6 +32,14 @@ enum WriterTypography {
     /// 气泡里的段落间距（§2.3），与阅读页统一由 `Theme.Layout` 换算。
     static func paragraphSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
         Theme.Layout.paragraphSpacing(fontSize: size, lineHeight: lineHeight)
+    }
+
+    /// 单 `UITextView` 内多段排版时，TextKit 会在非末段末尾同时应用 `lineSpacing` 与 `paragraphSpacing`。
+    /// 扣除 `lineSpacing` 后再交给 `NSParagraphStyle.paragraphSpacing`，使视觉段距与阅读页 `LazyVStack` 完全一致。
+    static func effectiveParagraphSpacing(size: CGFloat, lineHeight: Double = lineHeight) -> CGFloat {
+        let target = paragraphSpacing(size: size, lineHeight: lineHeight)
+        let line = lineSpacing(size: size, lineHeight: lineHeight)
+        return max(0, target - line)
     }
 
     /// 将正文拆分为独立段落，过滤空行并去除首尾空白字符。
@@ -100,7 +108,7 @@ enum WriterTypography {
     ) -> NSAttributedString {
         let paragraphs = paragraphs(text)
         let lineSpacing = lineSpacing(size: fontSize, lineHeight: lineHeight)
-        let spacing = paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let spacing = effectiveParagraphSpacing(size: fontSize, lineHeight: lineHeight)
         let result = NSMutableAttributedString()
 
         for (index, paragraphText) in paragraphs.enumerated() {
@@ -173,7 +181,7 @@ enum WriterTypography {
         lineHeight: Double
     ) -> [NSAttributedString.Key: Any] {
         let line = lineSpacing(size: fontSize, lineHeight: lineHeight)
-        let para = paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let para = effectiveParagraphSpacing(size: fontSize, lineHeight: lineHeight)
         return [
             .font: UIFont.systemFont(ofSize: fontSize, weight: .regular),
             .foregroundColor: UIColor.label,
@@ -197,7 +205,8 @@ enum WriterTypography {
         let storage = textView.textStorage
         let totalLength = storage.length
         let line = lineSpacing(size: fontSize, lineHeight: lineHeight)
-        let spacing = paragraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let spacing = effectiveParagraphSpacing(size: fontSize, lineHeight: lineHeight)
+        let blankHeight = max(1, spacing)
         let font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
 
         let standardStyle = makeParagraphStyle(
@@ -221,8 +230,8 @@ enum WriterTypography {
         blankLineStyle.alignment = .justified
         blankLineStyle.lineBreakStrategy = .pushOut
         blankLineStyle.hyphenationFactor = 0.85
-        blankLineStyle.minimumLineHeight = spacing
-        blankLineStyle.maximumLineHeight = spacing
+        blankLineStyle.minimumLineHeight = blankHeight
+        blankLineStyle.maximumLineHeight = blankHeight
         blankLineStyle.lineSpacing = 0
         blankLineStyle.paragraphSpacing = 0
 
@@ -241,17 +250,17 @@ enum WriterTypography {
         while index < totalLength {
             let lineRange = ns.lineRange(for: NSRange(location: index, length: 0))
             let contentEnd = NSMaxRange(lineRange)
-            let trimmedLen = lineRange.length
-            let isBlankLine = trimmedLen == 0
-                || (trimmedLen == 1 && ns.character(at: lineRange.location) == 10)
-                || (trimmedLen == 2
-                    && ns.character(at: lineRange.location) == 13
-                    && ns.character(at: lineRange.location + 1) == 10)
+            let isBlankLine = ns.substring(with: lineRange)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
             if isBlankLine {
                 storage.addAttribute(.paragraphStyle, value: blankLineStyle, range: lineRange)
             } else if contentEnd < totalLength {
-                let nextChar = ns.character(at: contentEnd)
-                if nextChar == 10 || nextChar == 13 {
+                let nextLineRange = ns.lineRange(for: NSRange(location: contentEnd, length: 0))
+                let nextIsBlank = ns.substring(with: nextLineRange)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+                if nextIsBlank {
                     storage.addAttribute(.paragraphStyle, value: beforeBlankStyle, range: lineRange)
                 }
             }

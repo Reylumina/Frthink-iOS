@@ -145,7 +145,7 @@ struct ReaderDisplaySettingsSheet: View {
 
     private func restoreDefaults() {
         fontSize = 18
-        lineHeight = 1.5
+        lineHeight = 1.4
     }
 }
 

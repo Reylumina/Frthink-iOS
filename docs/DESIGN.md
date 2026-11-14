@@ -134,8 +134,8 @@ Frthink 的设计目标是贴近 iOS 原生写作应用质感：沉静、现代�
 |---|---|
 | 字号基数 | 外观设置的 `bodyFontSize`，默认 18pt，范围 13–28；经 `UIFontMetrics` 跟随 Dynamic Type，见 `Core/Design/DynamicTypeFont.swift` |
 | 阅读页字号 | 阅读设置单独可调，换算方式同上 |
-| 行高 | 默认 1.5 倍，换算统一走 `ReaderStyle.lineSpacing(size:lineHeight:)`；阅读页可调 1.2–2.0，其他正文场景固定 1.5 |
-| 段落 | 根据原文换行符分段，空行仅作为分隔标记，不额外占用行高。项目统一采用如下段距换算公式：`Theme.Layout.paragraphSpacing(fontSize:lineHeight:)` = 额外行距 × 1.4，其中额外行距 = 字号 × (行高 − 1)。在默认行高 1.5 时，段距等于字号 × 0.7（例如 18pt 对应 12.6pt）。以额外行距为计算基准，当阅读页行距调整为 1.2 或 2.0 时，段距同步联动变化，使段间距与文本折行间距始终保持 1.4 倍比例。该规则由阅读页、创作页全文编辑器（`ManuscriptTextEditor`，将连续空行折叠为单一段落间距）、完成态气泡、用户气泡及流式气泡统一复用，不重复累加。不自动追加首行缩进 |
+| 行高 | 默认 1.4 倍，换算统一走 `ReaderStyle.lineSpacing(size:lineHeight:)`；阅读页可调 1.2–2.0，其他场景同步跟随阅读页行距配置 |
+| 段落 | 根据原文换行符分段，空行仅作为分隔标记，不额外占用行高。项目统一采用如下段距换算公式：`Theme.Layout.paragraphSpacing(fontSize:lineHeight:)` = `max(字号 × 0.7, 额外行距 × 1.4)`，其中额外行距 = 字号 × (行高 − 1)。在默认行高 1.4 时，额外行距为 7.2pt（18pt 字号下），段距保持 12.6pt（字号 × 0.7）；当阅读页行距调高至 1.8 或 2.0 时，段距随额外行距按 1.4 倍同步放大。单 `UITextView` 多段场景（流式气泡、完成态气泡、创作页正文编辑器）统一通过 `WriterTypography.effectiveParagraphSpacing` 扣除 TextKit 末尾追加的 `lineSpacing`，使阅读页与创作页视觉段距完全一致，不重复累加。不自动追加首行缩进 |
 | 行宽 | 每行不超过 36 个汉字。正文栏最大宽度 = 字号 × 36，超出时居中，两侧留白（§5.3） |
 | 对齐 | 两端对齐。SwiftUI `Text` 的 `multilineTextAlignment` 没有 justify、也不读 `NSParagraphStyle`，正文与气泡一律走 `Core/Design/JustifiedText.swift` 或 `ManuscriptTextEditor`（`UITextView` + TextKit + `WriterTypography`）：`alignment = .justified`、`lineBreakStrategy = .pushOut`、`hyphenationFactor = 0.85`，中文行首禁则由 CoreText 处理。用户气泡开启 `shrinksToFitWidth = true`，短句按实际宽度收缩、长句满宽两端对齐。流式输出过程中末段文本持续追加，排版暂保持 `.natural`，待段落生成完成后再执行两端对齐 |
 | 颜色 | `.primary`，统一跟随系统深浅色外观 |

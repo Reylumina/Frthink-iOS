@@ -9,6 +9,8 @@ struct StreamingTextView: UIViewRepresentable {
     var characterCount: Int? = nil
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
+    /// 与阅读页共用的行高倍数，默认 `WriterTypography.lineHeight`（1.4）。
+    var lineHeight: Double = WriterTypography.lineHeight
     /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
     var lineSpacing: CGFloat
 
@@ -25,7 +27,7 @@ struct StreamingTextView: UIViewRepresentable {
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
         let coordinator = context.coordinator
-        coordinator.fontSignature = Self.signature(fontSize: fontSize, lineSpacing: lineSpacing)
+        coordinator.fontSignature = Self.signature(fontSize: fontSize, lineHeight: lineHeight, lineSpacing: lineSpacing)
         let rendered = coordinator.window.rendered(text, characterCount: characterCount).text
         applyFullReset(rendered, to: view, coordinator: coordinator)
         return view
@@ -33,7 +35,7 @@ struct StreamingTextView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UITextView, context: Context) {
         let coordinator = context.coordinator
-        let signature = Self.signature(fontSize: fontSize, lineSpacing: lineSpacing)
+        let signature = Self.signature(fontSize: fontSize, lineHeight: lineHeight, lineSpacing: lineSpacing)
         if coordinator.fontSignature != signature {
             coordinator.fontSignature = signature
             coordinator.window = StreamingTextWindow()
@@ -49,7 +51,7 @@ struct StreamingTextView: UIViewRepresentable {
         let completed = paragraphs.count > 1 ? Array(paragraphs.dropLast()) : []
         let trailing = paragraphs.last ?? ""
 
-        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: WriterTypography.lineHeight)
+        let spacing = WriterTypography.effectiveParagraphSpacing(size: fontSize, lineHeight: lineHeight)
 
         // 快路径：已落定段落前缀完全未变，只替换最后一个正在流式增长的段落，O(末段) 而非 O(全窗口)。
         if completed.count == coordinator.completedParagraphs.count,
@@ -153,7 +155,7 @@ struct StreamingTextView: UIViewRepresentable {
         let paragraphs = WriterTypography.paragraphs(rendered)
         let completed = paragraphs.count > 1 ? Array(paragraphs.dropLast()) : []
         let trailing = paragraphs.last ?? ""
-        let spacing = WriterTypography.paragraphSpacing(size: fontSize, lineHeight: WriterTypography.lineHeight)
+        let spacing = WriterTypography.effectiveParagraphSpacing(size: fontSize, lineHeight: lineHeight)
 
         let full = NSMutableAttributedString()
         var prefixEnds: [Int] = []
@@ -236,7 +238,7 @@ struct StreamingTextView: UIViewRepresentable {
         var cachedHeight: CGFloat = 0
     }
 
-    private static func signature(fontSize: CGFloat, lineSpacing: CGFloat) -> String {
-        "\(fontSize)-\(lineSpacing)"
+    private static func signature(fontSize: CGFloat, lineHeight: Double, lineSpacing: CGFloat) -> String {
+        "\(fontSize)-\(lineHeight)-\(lineSpacing)"
     }
 }
