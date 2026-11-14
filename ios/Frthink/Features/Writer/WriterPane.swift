@@ -820,10 +820,18 @@ struct WriterPane: View {
                 if controller.isBusy {
                     controller.stop()
                 }
+                let previousDraft = composer.text
+                let withdrawnText = message.content
+                composer.text = withdrawnText
+                session.payload.composerDraft = withdrawnText
                 let index = session.payload.messages.firstIndex { $0.id == message.id }
                 let removed = session.withdraw(from: message.id)
                 presentUndoPrompt("已撤销指令") {
                     session.restore(removed, at: index)
+                    if composer.text == withdrawnText {
+                        composer.text = previousDraft
+                        session.payload.composerDraft = previousDraft
+                    }
                 }
             }
             let delete = UIAction(
@@ -1187,7 +1195,9 @@ struct WriterPane: View {
         var cutIndex = index
         var restoredInstruction = false
         if let userIndex = messages[..<index].lastIndex(where: { $0.role == .user }) {
-            composer.text = messages[userIndex].content
+            let instruction = messages[userIndex].content
+            composer.text = instruction
+            session.payload.composerDraft = instruction
             cutIndex = userIndex
             restoredInstruction = true
         }
