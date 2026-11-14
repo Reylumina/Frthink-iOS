@@ -23,8 +23,6 @@ SwiftLint 仅在 CI 的 lint 任务中执行（通过 `brew install swiftlint`�
 python script/swift_check.py ios/Frthink
 python script/prompt_check.py
 python script/design_check.py
-python script/archive_import_check.py <备份路径>
-python script/pbxproj_check.py
 ```
 
 本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上均为本地秒级检查，每批代码变更后即可运行，不依赖 CI。CI 按批次执行：完成单个功能点或一组相关变更后，触发一次 `Self Check`；需要 IPA 产物时触发 `iOS Build`；界面变更批次完成后执行 `UI Screenshots` 并按 `DESIGN.md` §9 进行人工目检；流式相关变更则执行 `Stream Check`。
@@ -113,17 +111,17 @@ java -cp tools/jadx-1.5.6-all.jar jadx.cli.JadxCLI -d out/jadx dx/classes.dex
 | 编辑器窗口只覆盖书末 | 跳到更早章节会扩窗口至书末；改写仍拼全文 | `ProjectSession.editorWindow` |
 | 结构改动仍整份写 `payload.json` | 打字只写正文，世界/对话改动仍全量编码 | `ProjectSession.flushSave()` |
 | 后台执行只有约 30 秒额度 | 系统收回后流式中断，已收内容保留 | `WriterController.beginBackgroundTask()` |
-| 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` |
+| 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` / `ArchiveSnapshot.swift` / `ArchiveRestore.swift` |
 | 长书首次发送仍主线程整本解密 | 初次执行续写或世界刷新时存在短暂卡顿，后续调用复用内存缓存 | `ProjectSession.manuscript` 是副作用 getter |
 | 生成检查点每 3 秒改 `payload.messages` | 写作台每 3 秒可能整页重算一次，与 PERFORMANCE §2.1 的描述不一致 | `WriterController.persistPendingDelta` |
-| P19 归纳预设只存不用 | 导入导出保持完整保真，但未注入任何提示词；在原版消费逻辑完成逆向取证前，暂不接入实际业务流程 | `Archive.swift`、`PromptComposer+Material.swift` |
+| P19 归纳预设只存不用 | 导入导出保持完整保真，但未注入任何提示词；在原版消费逻辑完成逆向取证前，暂不接入实际业务流程 | `ArchiveRestore.swift`、`PromptComposer+Material.swift` |
 | 长文编辑仍有一处在 sheet | `ManuscriptReaderSheet` 全屏读正文，DESIGN §5.10 要求 push | `ManuscriptReaderSheet` |
 
 ## 7. 约定
 
 - 提示词文本内嵌在 `PromptLibrary.swift`，逐字对齐原版，不为通顺改写。
 - token 估算逻辑严格沿用原版算法，不替换为分词器（tokenizer），以防文本截断边界发生偏移。
-- 采样参数保持原版：`temperature = 0.2`，不跟随模型卡建议。
+- 世界刷新与素材抽取等后台结构化任务固定采用低温采样（`temperature = 0.2`），码字机续写与选区改写读取当前服务商配置的 `provider.temperature`。
 - 颜色、字号、间距只用 `docs/DESIGN.md` 的 token。
-- 存档格式需与原版保持互通兼容，修改前须先执行 `archive_import_check.py` 及真实备份自检。
+- 存档格式需与原版保持互通兼容，修改后须通过运行时自检（`SelfCheck` 含 `archive.realBackup`）验证。
 - 文档表述保持客观严谨，避免口语化说明与空泛修辞。

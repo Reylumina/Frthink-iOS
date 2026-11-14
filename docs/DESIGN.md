@@ -116,7 +116,7 @@ Frthink 的设计目标是贴近 iOS 原生写作应用质感：沉静、现代�
 | 元信息（时间、字数、条数） | `.footnote`，`.secondary` 色 | `Theme.metadata` |
 | 胶囊、角标 | `.caption.weight(.semibold)` | `Theme.badge` |
 | 作品正文、码字机回复 | 正文字号基数（§2.3） | `ReaderStyle.bodyFont(size:)` |
-| 用户消息 | `.body` | — |
+| 用户消息 | `.body` 基数（17pt 随 Dynamic Type 缩放，经 `JustifiedText` 两端对齐） | `Theme.Typography.bodyBaseSize` |
 
 **数字**：会变化的数字（计数、字数、时间、进度）用 `.monospacedDigit()`，保留比例字形并只让数字等宽，避免刷新时跳动；`Theme.numeric` 与 `Theme.numericSmall` 已封装此规则。等宽字体（`design: .monospaced`）只用于代码类内容（API Key 片段、模型 id、JSON、错误码）。
 
@@ -135,10 +135,10 @@ Frthink 的设计目标是贴近 iOS 原生写作应用质感：沉静、现代�
 | 字号基数 | 外观设置的 `bodyFontSize`，默认 18pt，范围 13–28；经 `UIFontMetrics` 跟随 Dynamic Type，见 `Core/Design/DynamicTypeFont.swift` |
 | 阅读页字号 | 阅读设置单独可调，换算方式同上 |
 | 行高 | 默认 1.5 倍，换算统一走 `ReaderStyle.lineSpacing(size:lineHeight:)`；阅读页可调 1.2–2.0，其他正文场景固定 1.5 |
-| 段落 | 根据原文换行符分段，空行仅作为分隔标记，不额外占用行高。项目统一采用如下段距换算公式：`Theme.Layout.paragraphSpacing(fontSize:lineHeight:)` = 额外行距 × 1.4，其中额外行距 = 字号 × (行高 − 1)。在默认行高 1.5 时，段距等于字号 × 0.7（例如 18pt 对应 12.6pt）。以额外行距为计算基准，当阅读页行距调整为 1.2 或 2.0 时，段距同步联动变化，使段间距与文本折行间距始终保持 1.4 倍比例。该规则由阅读页、完成态气泡及流式气泡统一复用，不重复累加。不自动追加首行缩进 |
+| 段落 | 根据原文换行符分段，空行仅作为分隔标记，不额外占用行高。项目统一采用如下段距换算公式：`Theme.Layout.paragraphSpacing(fontSize:lineHeight:)` = 额外行距 × 1.4，其中额外行距 = 字号 × (行高 − 1)。在默认行高 1.5 时，段距等于字号 × 0.7（例如 18pt 对应 12.6pt）。以额外行距为计算基准，当阅读页行距调整为 1.2 或 2.0 时，段距同步联动变化，使段间距与文本折行间距始终保持 1.4 倍比例。该规则由阅读页、创作页全文编辑器（`ManuscriptTextEditor`，将连续空行折叠为单一段落间距）、完成态气泡、用户气泡及流式气泡统一复用，不重复累加。不自动追加首行缩进 |
 | 行宽 | 每行不超过 36 个汉字。正文栏最大宽度 = 字号 × 36，超出时居中，两侧留白（§5.3） |
-| 对齐 | 两端对齐。SwiftUI `Text` 的 `multilineTextAlignment` 没有 justify、也不读 `NSParagraphStyle`，正文一律走 `Core/Design/JustifiedText.swift`（`UITextView` + TextKit）：`alignment = .justified`、`lineBreakStrategy = .pushOut`、`hyphenationFactor = 0.85`，中文行首禁则由 CoreText 处理。流式输出过程中末段文本持续追加，排版暂保持 `.natural`，待段落生成完成后再执行两端对齐 |
-| 颜色 | `.primary`。阅读页的黑底模式不跟随系统深浅色，前景用 `ReaderStyle.ink(dark:)` |
+| 对齐 | 两端对齐。SwiftUI `Text` 的 `multilineTextAlignment` 没有 justify、也不读 `NSParagraphStyle`，正文与气泡一律走 `Core/Design/JustifiedText.swift` 或 `ManuscriptTextEditor`（`UITextView` + TextKit + `WriterTypography`）：`alignment = .justified`、`lineBreakStrategy = .pushOut`、`hyphenationFactor = 0.85`，中文行首禁则由 CoreText 处理。用户气泡开启 `shrinksToFitWidth = true`，短句按实际宽度收缩、长句满宽两端对齐。流式输出过程中末段文本持续追加，排版暂保持 `.natural`，待段落生成完成后再执行两端对齐 |
+| 颜色 | `.primary`，统一跟随系统深浅色外观 |
 | 选中、搜索高亮 | `ReaderStyle.highlightColor(current:)`，当前命中比其他命中深一档 |
 | 正文外的元素 | 页脚进度、章节名用 `.footnote`、`.secondary`，不和正文抢层级。页脚另有一条 `Theme.Layout.progressBarHeight`（2pt）的进度条，进度色用 tint |
 
@@ -261,7 +261,7 @@ HStack {
 - 状态行只占一行：图标在文字前，动作在行尾。图标不能单独占一行。
 - `TextEditor` 不放进外层 `ScrollView`。
 - 测量尺寸统一用 `.onGeometryChange(for:transform:action:)` 返回轻量 `Equatable` 值，不用 `GeometryReader` 包裹测量。
-- 删除确认与未保存放弃确认统一走 `AppComponents` 的 `deleteConfirmationDialog` / `discardChangesDialog`，不用 `.alert` 或各自重复写弹层。
+- 删除确认与未保存放弃确认统一走 `AppFormComponents` 的 `deleteConfirmationDialog` / `discardChangesDialog`（内部封装居中 `.alert`），不在业务视图中重复手写弹窗。
 
 ### 5.2 iOS 26 与 17–25
 
@@ -319,7 +319,7 @@ HStack {
 
 ### 5.6 深色模式与无障碍
 
-- 深色模式只靠语义色自动适配，不写 `colorScheme == .dark` 分支。阅读页的黑底模式是用户设置，不算例外。
+- 深色模式全部由语义色与系统材质自动适配，页面代码中不写 `colorScheme == .dark` 分支。
 - **减弱动态效果**：读 `accessibilityReduceMotion`，按 §4.1 降级。
 - **降低透明度**：材质一律用系统玻璃或系统材质，它们会自动变成不透明；这个设置才能真正生效。
 - **增强对比度**：语义色自动加深；内容表面按 §1.5 加描边。
@@ -368,10 +368,10 @@ HStack {
 - 滚动区用 `.scrollDismissesKeyboard(.interactively)`。
 - 底部输入条放在 `.safeAreaInset(edge: .bottom)` 里，键盘避让交给系统（自定义键盘工具条由 lint 禁用）。输入条的材质见 §1.6。
 - 流式渲染刷新率控制为 33ms 一帧（约 30 帧/秒）：若设置为 60ms，单次渲染追加多个字符容易产生顿挫感；在低电量或设备发热场景下，自动降频至 80–100ms。
-- 流式生成期间也按同一套规则排版：`StreamingTextView` 逐段算字号、段内按 `**` 切 run 换字重，标题完成态与流式用同一组缩放（1.45 / 1.26 / 1.12），换气泡时高度不跳；新增文字里出现 `#` 或 `**` 时整段重排，避免按后缀排错。
-- 码字机回复支持基本 Markdown：行内加粗/斜体走 `MarkdownInline.runs(_:)`（流式与完成态同一份解析，标记本身不显示），用户气泡走 `AttributedString(markdown:)`，块级只认一到三级标题（行首 `# `、`## `、`### `），字号按正文派生 1.45 / 1.26 / 1.12 倍、字重 semibold；不解析列表、分隔线，避免把小说正文里的星号和短横线误读成结构。
+- 流式生成期间也按同一套规则排版：`StreamingTextView` 与完成态气泡共用 `WriterTypography`，按已完成段落维护前缀偏移，每帧仅对新增完成段落与末尾进行中段落执行 `O(末段)` 增量 `NSTextStorage.replaceCharacters` 更新，换气泡时高度不跳。
+- 码字机回复与用户气泡支持基本 Markdown：行内加粗/斜体统一走 `MarkdownInline.runs(_:)` 与 `WriterTypography.attributedDocument`（流式与完成态同一份解析，标记本身不显示；用户气泡配 `JustifiedText(..., shrinksToFitWidth: true)`），块级只认一到三级标题（行首 `# `、`## `、`### `），字号按正文派生 1.45 / 1.26 / 1.12 倍、字重 semibold；不解析列表、分隔线，避免把小说正文里的星号和短横线误读成结构。
 - 思考过程默认折叠，仅保留单行文本摘要（如「思考过程（N 字）」），点击可展开或再次折叠；不使用 `DisclosureGroup`，以避免系统默认箭头图标带来的多余视觉干扰。
-- 气泡相关操作统一收拢至长按菜单（`NoPreviewContextMenu`，基于 UIKit `UIContextMenuInteraction` + 空 `visiblePath`），不在气泡下方常驻图标条，亦不显示气泡标题头与预览缩略图卡片。用户气泡菜单提供「撤回」（删除该指令及后续消息，支持撤销），助手气泡提供复制/插入/追加/提取为人物卡/重新生成/回退/清理版本/删除；多选属于独立模式，统一由顶栏的“更多（⋯）”菜单进入。
+- 气泡相关操作统一收拢至长按菜单（`NoPreviewContextMenu`，基于 UIKit `UIContextMenuInteraction` + 空 `visiblePath`），不在气泡下方常驻图标条，亦不显示气泡标题头与预览缩略图卡片。用户气泡菜单提供「撤回」（删除该指令及后续消息，将该指令回填至输入框，并支持撤销恢复原草稿），助手气泡提供复制/插入/追加/提取为人物卡/重新生成/回退/清理版本/删除；多选属于独立模式，统一由顶栏的“更多（⋯）”菜单进入。
 - 键盘弹出时，正文区域右上角悬浮展示圆形关闭按钮（`ToolbarCircleIcon`）：点击即可收起键盘；交互式滚动收起则由 `.scrollDismissesKeyboard(.interactively)` 处理。
 - 顶栏（悬浮于玻璃材质上的图标）采用系统原生符号，无需添加背景方块或描边圆环——该层级视觉效果依托系统玻璃材质呈现；正文区域的操作图标则统一使用 `IconTile`。
 - 续写、输入框、发送/停止三件控件放在底部输入条同一中轴上：左侧续写（34pt 圆形玻璃按钮）、中间输入（玻璃/实底胶囊）、右侧发送（34pt 强调色实心圆），热区均补到 44pt。
@@ -388,7 +388,7 @@ HStack {
 
 ### 5.11 组件
 
-共用组件在 `Core/Design/AppComponents.swift` 和 `Theme.swift`。二级、三级页面优先用 `Form` / `List` 加下面的组件，不手写分隔线区块，不在卡片里套卡片。
+共用组件在 `Core/Design/AppComponents.swift`、`Core/Design/AppFormComponents.swift` 和 `Theme.swift`。二级、三级页面优先用 `Form` / `List` 加下面的组件，不手写分隔线区块，不在卡片里套卡片。
 
 | 组件 | 用途 |
 |---|---|
@@ -488,6 +488,8 @@ HStack {
 | 世界页头部 | 「世界」和「这本书的设定与人物」 | `M1/C0738o.java:167-168` |
 | 书架标题 | 「书架」 | 用户 2026-11-12 指定；原版为「本机书架」，移植版不再沿用 |
 | 回收站状态 | 「项目已在回收站」「项目已恢复到书架」「项目已从书架隐藏」 | `dex-chinese.txt:1940,1941,143` |
+| 阅读页空态 | 「暂无正文」「暂无译文」（配 `globe` 图标） | 用户指定精简文案 |
+| 创作页输入框占位 | 「告诉码字机你的创作想法…」 | 用户指定文案 |
 
 空态句、头部副标题这类说明性句子，在字符串表或规格里查不到出处的，视为自拟文案，删除。§8.1 列出的标题、数值、状态和结果提示不需要出处。
 

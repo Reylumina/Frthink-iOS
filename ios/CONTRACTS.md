@@ -1,6 +1,6 @@
-# iOS 端共享契约
+# iOS 端模块与接口契约
 
-Core 层已开发完毕，**请勿修改 `Core/` 与 `App/` 目录下的文件**。各模块仅在对应的 `Features/` 子目录内进行开发，各功能模块文件边界独立，依托本契约进行接口对接。
+本文档记录 `App/`、`Core/` 与 `Features/` 各层之间的模块边界及核心公开接口。
 
 目标：iOS 17.0+，Xcode 26（Swift 5 语言模式），无任何第三方依赖，纯 SwiftUI。
 
@@ -8,19 +8,21 @@ Core 层已开发完毕，**请勿修改 `Core/` 与 `App/` 目录下的文件**
 
 ```
 ios/
-  Frthink.xcodeproj/          # 工程配置已完成，由 PBXFileSystemSynchronizedRootGroup 自动同步文件
+  Frthink.xcodeproj/          # 由 PBXFileSystemSynchronizedRootGroup 自动同步文件
   Frthink/
-    App/                      # 核心入口模块，请勿修改
+    App/                      # 应用入口、根导航、演示数据与运行时自检（SelfCheck）
       FrthinkApp.swift
       RootView.swift
       ProjectWorkspaceView.swift
-    Core/                     # 核心底层模块，请勿修改
+    Core/                     # 核心模型、持久化、存档、LLM 协议、提示词与设计组件
+      Archive.swift / ArchiveSnapshot.swift / ArchiveRestore.swift
+      FrthinkGzip.swift / FrthinkArchiveError.swift
       Models/  Store/  LLM/  Prompts/  Design/
-    Features/                 # 业务特性模块
+    Features/                 # 业务特性模块（Library / Writer / World / Translation / Universe / Settings）
     Resources/Assets.xcassets
 ```
 
-**新增 `.swift` 源代码文件无需手动修改 `pbxproj`**——工程配置了文件系统同步分组，放置于 `Frthink/Features/...` 路径下即可自动参与编译。
+**新增 `.swift` 源代码文件无需手动修改 `pbxproj`**——工程配置了文件系统同步分组，放置于 `Frthink/...` 对应目录下即可自动参与编译。
 
 ## 可直接调用的 API
 
@@ -30,7 +32,8 @@ ios/
 struct Project                     // id, title, synopsis, updatedAt, revision,
                                    // coverImagePayload(String?), branchRootId,
                                    // branchOrder, trashedAt(Date?)
-struct ProjectPayload              // manuscript, chapters, messages, world, continuationAnchor
+struct ProjectPayload              // chapters, messages, world, continuationAnchor, composerDraft 等
+                                   // 正文分页独立存储在 FileStore（body.pages/），通过 session.manuscript / editorText 访问
 struct Chapter                     // id, title, location
 
 struct WorldBook                   // setting, styleTemplate, styleNotes, longTermRules,
@@ -72,6 +75,7 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
     func saveSettings()
     func apiKey(for providerID: String) -> String
     func setAPIKey(_ key: String, for providerID: String)
+    func makeClient(for provider: ProviderSetting, apiKeyOverride: String? = nil) throws -> any LLMClient
     func clientForActiveProvider() throws -> any LLMClient
 
 @MainActor @Observable final class ProjectSession
@@ -104,7 +108,7 @@ struct LLMMessage  { role, content; .system()/.user()/.assistant() 便捷构造 
 struct LLMRequest  { model, messages, stream, temperature, maxTokens, topP }
 
 enum LLMStreamEvent { case delta(String), reasoning(String), finished(reason: String?) }
-enum LLMError: LocalizedError  // .notConfigured/.missingAPIKey/.badURL/.http/.decoding/.cancelled/.emptyResponse
+enum LLMError: LocalizedError  // .notConfigured/.missingAPIKey/.badURL/.http/.decoding/.cancelled/.emptyResponse/.truncated
 
 protocol LLMClient {
     func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, Error>
@@ -170,32 +174,33 @@ enum PromptComposer
 
 ### 设计
 
-token 和共用组件以 [`docs/DESIGN.md`](../docs/DESIGN.md) 为准（组件清单见 §5.11），实现在 `Core/Design/Theme.swift` 和 `Core/Design/AppComponents.swift`。
+token 和共用组件以 [`docs/DESIGN.md`](../docs/DESIGN.md) 为准（组件清单见 §5.11），实现在 `Core/Design/Theme.swift`、`Core/Design/AppComponents.swift`、`Core/Design/AppFormComponents.swift` 和 `Core/Design/JustifiedText.swift`。
 
 ```swift
 ToastView / ErrorBanner               // 已在 RootView 中接入，业务层仅需为 store.toast 或 store.errorMessage 赋值
 ```
 
-## 各特性模块交付产物（类型签名必须完全一致）
+## 各特性模块入口
 
-| 模块 | 文件路径 | 必须实现的类型 |
+| 模块 | 文件路径 | 入口视图 |
 |---|---|---|
 | library | `Features/Library/` | `LibraryView(store: AppStore, onOpen: (Project) -> Void)` |
-| writer | `Features/Writer/` | `WriterPane(session: ProjectSession)` |
+| writer | `Features/Writer/` | `WriterPane(session: ProjectSession)`（辅视图在 `WriterSupportViews.swift` 等） |
 | world | `Features/World/` | `WorldPane(session: ProjectSession)` |
-| settings | `Features/Settings/` + `Features/Translation/` | `SettingsView(store: AppStore)`、`TranslationPane(session: ProjectSession)` |
+| reader / translation | `Features/Translation/` | `ReaderPane(session: ProjectSession)`、`TranslationPane(session: ProjectSession)` |
+| universe | `Features/Universe/` | `UniversePane(store: AppStore, session: ProjectSession?)` |
+| settings | `Features/Settings/` | `SettingsView(store: AppStore)` |
 
 `LibraryView` 中需提供工具栏入口以呈现 `SettingsView`（可通过 sheet 或 navigationDestination 实现）。`onOpen` 回调由 `RootView` 统一处理导航路由。
 
 ## 硬性约束
 
-1. **严禁修改 `App/` 与 `Core/` 目录下的任何文件。** 如需扩展接口，应在自身业务目录下扩展，或编写同名类型的 `extension`（禁止新增存储属性）。
-2. **不要引入第三方依赖。** 不引入 SPM 包或 CocoaPods。Markdown 渲染使用 `AttributedString(markdown:)` 或基于轻量解析实现。
-3. **不用 SwiftData / CoreData。** 数据持久化已统一由 `ProjectSession` 与 `FileStore` 负责实现。
+1. **单向依赖。** `Features/` 依赖 `Core/`，`Core/` 不反向依赖 `Features/`。
+2. **不要引入第三方依赖。** 不引入 SPM 包或 CocoaPods。正文与气泡排版统一走 `WriterTypography`、`MarkdownInline` 与 TextKit（`JustifiedText` / `StreamingTextView` / `ManuscriptTextEditor`）。
+3. **不用 SwiftData / CoreData。** 数据持久化已统一由 `ProjectSession`、`FileStore` 与 `TextFileCodec` 负责实现。
 4. **视觉遵循 Theme。** 禁止硬编码颜色值与字号字面量，统一使用 `Theme.*` 规范。
 5. **每个文件顶部写一句注释说明这个文件负责什么。**
-6. 上屏文案用中文，和 APK 里的说法保持一致（世界书、码字机、仿写模板、人物卡、
-   事件卡、译文、语料收集库）。
+6. 上屏文案用书面中文，遵循 `docs/DESIGN.md` §8 精简与去口语化规范，核心领域术语与原版保持一致（世界书、码字机、仿写模板、人物卡、事件卡、译文、语料收集库）。
 
 ## 编译验证
 

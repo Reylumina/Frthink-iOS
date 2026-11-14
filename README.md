@@ -25,7 +25,7 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | 界面与交互 | 按 [docs/DESIGN.md](docs/DESIGN.md) 重写（iOS 26.2 基线）：用户气泡实底填充、书架改名「书架」、书封单色占位、系统 `UndoManager` 撤销重做、浮层玻璃「回到最新」、玻璃输入条。`UI Screenshots` 逐页目检通过；iOS 26 的 ×/✓ 与 iPad 宽度未在真机确认 |
 | 流式渲染 | `Stream Check` 基于 mock SSE 连续执行三次，正文行数与段落断言一致（267 行 / 18 段）。真机联网流式交互体验未验证 |
 | 加密存储 | `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 落盘 AES-256-GCM，主密钥在 Keychain，导出保持原版明文 |
-| 正文分页、后台生成 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 正文分页、导入导出与后台生成 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页；支持 UTF-8 / UTF-16 / GB18030 正文导入与纯文本 `.txt` 正文导出，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 世界设定 | `worldbook:setting` 伪词条已移除。旧设定文本迁移为世界书词条，分栏改为概览 |
 | 长期写作规则 | 手动触发整理、P54、历史版本与 `sourceHash` 门控已实现；摘要模型可单独指定，留空跟随当前服务提供方 |
 
@@ -72,18 +72,19 @@ ios/
   Frthink/
     App/                       入口与五个一级 Tab
     Core/
+      Archive*.swift             .frthink 存档模型、快照导出与恢复导入、RFC1952 gzip
       Models/                  Project、WorldBook、CharacterCard、EventCard、Universe
-      Store/                   文件持久化、Keychain、@Observable 状态
+      Store/                   文件持久化、正文编解码（TextFileCodec）、Keychain、@Observable 状态
       LLM/                     OpenAI 兼容与 Anthropic 客户端、SSE 解析、token 估算
       Prompts/                 提示词与拼装逻辑
-      Design/                  主题与通用容器
+      Design/                  主题、通用容器与表单组件、TextKit 两端对齐排版
     Features/
-      Library/                 书架
-      Writer/                  创作、码字机
+      Library/                 书架与回收站
+      Writer/                  创作、码字机、正文编辑器
       World/                   世界、世界书、人物卡、事件卡、模板与规则
-      Translation/             阅读、原文与译文对照
+      Translation/             阅读、章节目录、搜索、书签、原文与译文对照
       Universe/                跨项目共享设定
-      Settings/                供应方与密钥
+      Settings/                供应方、密钥、提示词、语料与存档管理
 docs/spec/                     反编译还原的四份规格
 .github/workflows/              编译与自检流水线
 ```

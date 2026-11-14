@@ -25,7 +25,7 @@ SSE 增量数据优先写入 `WriterController` 的内部缓冲区，即 `displa
 
 默认按 33ms 合并刷新一次（约 30 帧/秒），收到换行符立即刷新，避免将段落边界截断在时间片内部。低电量模式下降频至 100ms；`thermalState` 为 serious 或 critical 时降为 80ms，fair 时为 50ms。滚动跟踪同步绑定同一个 `displayTick`。
 
-流式气泡独立渲染。`WriterStreamingBubble` 仅监听控制器流式文本，不触发正文及其他气泡的视图重算。流式文本基于 `StreamingTextView`（`UITextView`）呈现，每帧先计算整段排版并按展示字符串求取公共前缀，仅增量替换尾部差异，仅在超出滑窗容量时执行整段重排。生成结束后切换为完成态气泡，同样通过 TextKit 渲染（`JustifiedText`）；气泡内文本不开放零散选词，整条文本复制统一由长按菜单触发。
+流式气泡独立渲染。`WriterStreamingBubble` 仅监听控制器流式文本，不触发正文及其他气泡的视图重算。流式文本基于 `StreamingTextView`（`UITextView`）呈现，与完成态共用 `WriterTypography`：内部维护已完成段落列表（`completedParagraphs`）及其在 `NSTextStorage` 中的 UTF-16 结束偏移（`completedUTF16PrefixEnds`），每帧仅对新增完成的段落与当前末尾进行中段落构建属性字符串并调用 `NSTextStorage.replaceCharacters` 增量替换尾部，将每帧排版复杂度从 `O(窗口全文)` 降至 `O(末段)`；仅在超出滑窗容量或样式参数变更时执行整窗重建。生成结束后切换为完成态气泡，同样通过 TextKit 渲染（`JustifiedText`）；气泡内文本不开放零散选词，整条文本复制统一由长按菜单触发。
 
 生成阶段的 3 秒检查点策略详见 §2.5。流式与完成态共用 `MarkdownInline.runs(_:)` 解析行内加粗和斜体；仅在文本包含 `*` 字符时执行解析，普通正文保持纯文本渲染。
 

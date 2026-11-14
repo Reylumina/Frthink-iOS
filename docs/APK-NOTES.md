@@ -41,7 +41,7 @@ AI 中文小说写作工具。主要功能是将长篇小说写作所需的上�
 | **宇宙** | 跨项目共享层：全局预设、共享世界书、Skill |
 | **设置** | 15 个区块，见 [`spec/01`](spec/01-architecture.md) §1.4 |
 
-写作之外的能力：`.frthink` 存档导入导出、语料收集库、提示词集成管理器、翻译分段缓存。
+写作之外的能力：`.frthink` 存档导入导出、`.txt`/`.md` 正文导入与纯文本 `.txt` 导出、语料收集库、提示词集成管理器、翻译分段缓存。
 
 ## 四、技术内核：提示词块系统
 
@@ -104,6 +104,7 @@ AES-256-GCM 加密，密钥保存在 AndroidKeyStore 内部且不可导出。因
 - **长期规则门控（`L1/W2.java:606-658`）**：要求 `enabled == true && rulesVersion == 1 && !content.isBlank() && content != "暂无长期规则。"`，且所有 `sourceMessageKeys` 以 `"user:"` 开头、`sourceHash == p000a.a.o(sourceMessageKeys)`；`previousRevisions` 保留最近 10 条。
 - **人物卡工具路径（`L1/W.smali:423-805`）**：`create_character_card` schema 字段与层级已完整验证；首次请求不发 `thinking`，仅在 HTTP 400 返回同时含 `thinking mode` 与 `tool[_\s-]?choice` 时，无条件附带 `"thinking": {"type": "disabled"}` 与 `Idempotency-Key: {attemptId}-thinking-disabled` 重试。
 - **写作台范围限制**：支持 `1–1,000,000` 字「正文范围」配置与保存回执。
+- **正文与存档导入导出（`L1/U2.java` / `I1/l3.java` / `I1/x3.java`）**：正文导入文件上限为 12 MiB，支持 `.txt`/`.md`/`.markdown` 扩展名、UTF-8/UTF-16LE/BE BOM 识别及 `GB18030` 编码回退，拒绝包含 `\0` 字节的二进制内容并统一换行为 `\n`；正文导出将 Markdown 标题与行内格式剥离后输出为纯文本 `.txt`；`.frthink` 存档导入上限为 300 MiB，包含完整的 `StoredSettings` 字段集与 `continuationAnchorOffset` 续写锚点偏移。
 
 ## 九、已知缺口
 

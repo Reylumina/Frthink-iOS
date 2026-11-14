@@ -30,14 +30,14 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 
 ```
 App/            入口、根导航、演示数据、运行时自检
-Features/       按业务域切的界面层：Writer、World、Reader 等
+Features/       按业务域切的界面层：Writer、World、Translation（Reader）、Library、Universe、Settings
 Core/
-  Models/       值类型：Project、World、Chat、Settings、Archive 快照
-  Store/        AppStore（全局）、ProjectSession（单书）、FileStore（落盘）、Keychain
+  Models/       值类型：Project、World、Chat、Settings、Universe
+  Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、TextFileCodec（正文编解码与导出）、Keychain
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）
   LLM/          协议抽象、OpenAI 兼容与 Anthropic 实现、token 估算
-  Archive.swift 信封、编解码、导入导出；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
-  Design/       token 与容器
+  Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
+  Design/       Theme、AppComponents、AppFormComponents、JustifiedText 等
 ```
 
 依赖方向是单向的：Features 依赖 Core，Core 不认识 Features，App 可以依赖两者。
@@ -52,7 +52,7 @@ Core/
 | `AppStore` 管全局，`ProjectSession` 管单书 | 打开与关闭书稿时资源边界清晰 | 两者生命周期不同，需显式刷新会话状态 |
 | `FileStore` 采用纯文件持久化，未引入 SwiftData | 存档格式与原版严格一致，导出即可直接兼容原版 | 缺乏按需检索能力，列表数据依赖全量读取 |
 
-已知架构缺陷：`RootView` 中的 `activeProjectID` 与 `ProjectSession` 存在隐式耦合，切换 Tab 时生成任务缺乏统一的生命周期管理。原版通过前台 Service 保活，当前移植版暂无对应实现。
+已知架构约束：`RootView` 中的 `activeProjectID` 与 `ProjectSession` 共享当前打开书稿标识；`WriterPane.handleDisappear()` 通过比对 `RootView.activeProjectKey` 区分「系统内存告警释放缓存会话」与「用户主动关闭/切换书稿」，避免内存压力误中断后台生成。原版通过 Android 前台 Service 保活，iOS 端受系统后台配额限制。
 
 存档界面将系统文件面板与导入流程视图解耦挂载：`fileImporter` / `fileExporter` 挂载于「存档与备份」页面，导入流程视图通过 `navigationDestination` 推入呈现，而非在按钮所在视图上直接弹出 `fullScreenCover`。当系统文件面板收起与自定义模态视图同时转场时容易发生冲突导致后者被系统丢弃；通过导航推入则可避免转场竞争。读取外部文件时先确保 iCloud 同步完成，再通过 `NSFileCoordinator` 进行协同读取。
 
@@ -64,7 +64,7 @@ Core/
 
 世界刷新、事件、文风、长期规则四种任务按书登记在 `AppStore`：`registerWorldTask(_:for:)` 返回一个令牌，任务收尾用同一令牌调 `finishWorldTask(for:token:)`，仅会清理自身对应的任务记录；切换项目、移入回收站或彻底删除则调用 `cancelWorldTask`。若缺乏令牌机制，旧任务结束时容易误将同项目后续发起的新任务一并清除。
 
-正文排版统一走 TextKit：阅读页段落与完成态气泡用 `Core/Design/JustifiedText.swift`（`UITextView`，`.justified` + `.pushOut`），流式用 `StreamingTextView`，两者共用 `MarkdownInline.runs(_:)` 与 `Theme.Layout.paragraphSpacing(fontSize:lineHeight:)`。SwiftUI 的 `Text` 没有两端对齐，也没有能承载段落样式的入口，所以正文这一层不用它。
+正文与气泡排版统一走 TextKit：阅读页段落、码字机完成态气泡、用户指令气泡（`shrinksToFitWidth: true`）均使用 `Core/Design/JustifiedText.swift`（`UITextView`，`.justified` + `.pushOut` + `0.85` 断字系数），创作页全屏正文编辑器使用 `ManuscriptTextEditor`，流式气泡使用 `StreamingTextView`（按已完成段落前缀做 `O(末段)` 增量 `NSTextStorage` 替换）。各处统一复用 `WriterTypography`、`MarkdownInline.runs(_:)` 与 `Theme.Layout.paragraphSpacing(fontSize:lineHeight:)`。SwiftUI 的 `Text` 不支持两端对齐与段落级样式控制，因此正文与气泡层均基于 TextKit 实现。
 
 写作台对话列表采用 `VStack` 而非 `LazyVStack`：整个列表已预先根据 `visibleMessageCount` 截断，行数存在明确上限；而流式生成行可能包含上万字，`LazyVStack` 估算行高配合 33ms 跟踪器的 `scrollTo`，在生成结束切换气泡时容易产生偏移计算误差并定位至内容区域之外，导致界面呈现全屏空白（此问题已在 Stream Check 中复现）。
 
@@ -95,7 +95,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 2. PromptComposer：把块转成 system/user 消息，并裁剪历史
 3. TokenEstimator：逐码点加权估算，不是 tokenizer
 4. PromptBudget：推导 input、output、effective 三个预算
-5. OpenAICompatibleClient：发 7 键基础请求体，思考档位开启时追加 provider 字段
+5. OpenAICompatibleClient / AnthropicClient：按当前服务商协议发送请求体，采样温度读取 `provider.temperature`，思考档位开启时追加对应推理字段
 ```
 
 每次请求把实际发出的消息存进 `requestSnapshots`，事后可还原模型当时看到的内容。快照仅保留最近 30 条，可以单条删除或清空，删除不影响下一次请求。
@@ -106,7 +106,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 ### 4.6 错误模型
 
-`LLMError` 分六类：`notConfigured`、`http(status, body)`、`decoding`、`cancelled`、`emptyResponse(detail)`、`truncated(detail)`。错误信息必须附带服务端返回的原始响应。仅提示“连接失败”无法明确区分鉴权异常、参数错误、模型名称无效或配额耗尽等具体原因，此前曾将“模型默认开启思考模式导致输出正文为空”误判为网络故障。
+`LLMError` 涵盖 `notConfigured`、`missingAPIKey`、`badURL`、`http(status, body)`、`decoding(detail)`、`cancelled`、`emptyResponse(detail)`、`truncated(detail)`。错误信息附带服务端返回的原始响应，以明确区分鉴权异常、参数错误、模型名称无效或配额耗尽等具体原因。
 
 存档错误同样带键路径，由 `corruptedDetail` 返回。
 
