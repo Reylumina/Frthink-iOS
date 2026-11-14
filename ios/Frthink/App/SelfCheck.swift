@@ -2379,7 +2379,13 @@ enum SelfCheck {
             var settings = AppSettings()
             settings.corpusEnabled = true
             settings.corpusLibraries = [CorpusLibrary(name: "全量库", entries: entries, enabled: true)]
-            let assembly = PromptAssembly.from(world: WorldBook(), manuscript: "", settings: settings)
+            let assembly = PromptAssembly.from(
+                world: WorldBook(),
+                manuscript: "",
+                assistantSupplement: "",
+                settings: settings,
+                projectID: "corpus-check"
+            )
             try expect(assembly.corpus.count == 12, "语料注入条数应为 12，实际 \(assembly.corpus.count)")
             return "12 条全量注入 ok"
         }
@@ -2389,7 +2395,7 @@ enum SelfCheck {
             let cards = [
                 CharacterCard(name: "林昭", identity: "剑修"),
                 CharacterCard(name: "小昭", personality: "果决"),
-                CharacterCard(name: "林昭", aliases: ["小昭"], goals: "寻剑"),
+                CharacterCard(name: "林昭", goals: "寻剑", aliases: ["小昭"]),
             ]
             let consolidated = WorldMerge.consolidateConnected(cards)
             try expect(consolidated.count == 1, "连通分量应合并为 1 张，实际 \(consolidated.count)")
