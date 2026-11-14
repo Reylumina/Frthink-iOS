@@ -331,14 +331,7 @@ struct TranslationPane: View {
                     userInfo: [NSLocalizedDescriptionKey: "原文文件过大（超过 50 MB）"]
                 )
             }
-            guard let text = String(data: data, encoding: .utf8) else {
-                throw NSError(
-                    domain: "Frthink.TranslationImport",
-                    code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "文件不是 UTF-8 编码的纯文本。"]
-                )
-            }
-            return text
+            return try TextFileCodec.decode(data)
         }.value
     }
 

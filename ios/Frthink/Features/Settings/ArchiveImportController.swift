@@ -400,12 +400,12 @@ final class ArchiveImportController {
 /// 使用 `NSFileCoordinator` 协调文件读取，避免直接读取云盘或外部提供方文件时发生死锁或无响应；
 /// 不支持协调的提供方降级为直接读取。
 private enum ArchiveFileReader {
-    private static let maxArchiveBytes = 200 * SecurityScopedFileReader.bytesPerMiB
+    private static let maxArchiveBytes = FrthinkArchive.maxBytes
 
     static func read(_ url: URL) throws -> Data {
         do {
             return try SecurityScopedFileReader.read(url, maxBytes: maxArchiveBytes) { _ in
-                FrthinkArchiveError.importUnreadable("存档文件过大（超过 200 MB），无法导入")
+                FrthinkArchiveError.importUnreadable("存档文件过大（超过 300 MB），无法导入")
             }
         } catch let error as FrthinkArchiveError {
             throw error

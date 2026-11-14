@@ -32,6 +32,9 @@ struct ReaderPane: View {
     @State private var scrolledBlockStart: Int?
     @State private var showSettings = false
     @State private var showChapters = false
+    @State private var isExportingBody = false
+    @State private var bodyExportDocument = PlainTextFileDocument()
+    @State private var bodyExportFilename = "正文.txt"
     @State private var showSearch = false
     @State private var query = ""
     @State private var matches: [ReaderMatch] = []
@@ -134,6 +137,20 @@ struct ReaderPane: View {
         }
         .sheet(isPresented: $showSettings) { settingsSheet }
         .sheet(isPresented: $showChapters) { chaptersSheet }
+        .fileExporter(
+            isPresented: $isExportingBody,
+            document: bodyExportDocument,
+            contentType: .plainText,
+            defaultFilename: bodyExportFilename
+        ) { result in
+            switch result {
+            case .success:
+                store.toast = "已导出正文"
+            case .failure(let error):
+                guard !settingsIsUserCancelled(error) else { return }
+                store.errorMessage = "导出正文失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - 浮层与弹窗
@@ -271,6 +288,13 @@ struct ReaderPane: View {
             Divider()
 
             Button {
+                prepareBodyExport()
+            } label: {
+                Label("导出正文…", systemImage: "square.and.arrow.up")
+            }
+            .disabled(session.manuscriptCharacterCount == 0)
+
+            Button {
                 showSettings = true
             } label: {
                 Label("阅读显示设置", systemImage: "textformat.size")
@@ -282,6 +306,27 @@ struct ReaderPane: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("更多阅读操作")
+    }
+
+    @MainActor
+    private func prepareBodyExport() {
+        let projectID = session.project.id
+        let title = session.project.title
+        let files = store.fileStore
+        let loadedText = session.canReadByPage ? nil : session.manuscript
+        Task { @MainActor in
+            let plain = await Task.detached(priority: .userInitiated) {
+                let raw = loadedText ?? files.loadBody(projectID)
+                return TextFileCodec.plainTextForExport(from: raw)
+            }.value
+            guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                store.errorMessage = "当前作品暂无可导出的正文。"
+                return
+            }
+            bodyExportDocument = PlainTextFileDocument(text: plain)
+            bodyExportFilename = TextFileCodec.exportFilename(title: title)
+            isExportingBody = true
+        }
     }
 
     // MARK: - 正文
@@ -558,10 +603,12 @@ struct ReaderPane: View {
                 let readerBlocks = blocks.map {
                     ReaderBlock(start: $0.start, length: $0.length)
                 }
+                let fileStore = store.fileStore
+                let projectID = session.project.id
                 let pageSource = ReaderPageSource(
                     pageCount: session.bodyPageCount,
                     pageSize: FileStore.bodyPageSize,
-                    loader: { [weak session] index in session?.bodyPage(index) }
+                    loader: { index in fileStore.loadBodyPage(projectID, index: index) }
                 )
                 document = ReaderDocument(
                     blocks: readerBlocks,

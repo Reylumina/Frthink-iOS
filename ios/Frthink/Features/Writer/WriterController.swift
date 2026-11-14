@@ -762,6 +762,8 @@ final class WriterController {
                 } catch {
                     // 流式未收到任何可见正文且非取消时，按原版 `-compat` 改用非流式重发一次。
                     let noContentYet = streamingCharacterCount == initialChars
+                        && pendingDelta.isEmpty
+                        && displayBuffer.isEmpty
                     if noContentYet,
                        !error.isLLMCancellation,
                        !Task.isCancelled,

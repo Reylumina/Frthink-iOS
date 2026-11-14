@@ -43,6 +43,9 @@ struct WriterPane: View {
     @State private var budgetPresented = false
     @State private var activeSheet: WriterSheet?
     @State private var isImportingBody = false
+    @State private var isExportingBody = false
+    @State private var bodyExportDocument = PlainTextFileDocument()
+    @State private var bodyExportFilename = "正文.txt"
     @State private var pendingBodyImport: PendingBodyImport?
     /// 消息气泡追加、清理与删除复用单一确认弹窗容器。
     @State private var messageAction: MessageAction?
@@ -218,10 +221,24 @@ struct WriterPane: View {
             }
             .fileImporter(
                 isPresented: $isImportingBody,
-                allowedContentTypes: [.item, .plainText, .text],
+                allowedContentTypes: [.plainText, .text],
                 allowsMultipleSelection: false
             ) { result in
                 handleBodyImport(result)
+            }
+            .fileExporter(
+                isPresented: $isExportingBody,
+                document: bodyExportDocument,
+                contentType: .plainText,
+                defaultFilename: bodyExportFilename
+            ) { result in
+                switch result {
+                case .success:
+                    store.toast = "已导出正文"
+                case .failure(let error):
+                    guard !settingsIsUserCancelled(error) else { return }
+                    store.errorMessage = "导出正文失败：\(error.localizedDescription)"
+                }
             }
             .onChange(of: scenePhase) { _, phase in
                 // 切换至后台时立即持久化增量文本检查点。
@@ -305,11 +322,12 @@ struct WriterPane: View {
         dismissKeyboard()
         controller.checkpoint(session: session)
 
-        // 校验会话缓存有效性：项目切换时释放旧任务与撤销栈，Tab 切换保留活跃状态。
+        // 校验活跃项目标识：仅在切换书稿时释放旧任务与撤销栈，Tab 切换与内存警告均保留活跃状态。
+        let projectID = session.project.id
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            let stillCached = store.cachedSession(for: session.project.id) === session
-            guard !stillCached else { return }
+            let stillActive = UserDefaults.standard.string(forKey: RootView.activeProjectKey) == projectID
+            guard !stillActive else { return }
             discardUndoActions()
             if controller.isBusy {
                 controller.stop()
@@ -376,6 +394,13 @@ struct WriterPane: View {
             Label("导入正文…", systemImage: "square.and.arrow.down")
         }
         .disabled(controller.isBusy)
+
+        Button {
+            prepareBodyExport()
+        } label: {
+            Label("导出正文…", systemImage: "square.and.arrow.up")
+        }
+        .disabled(controller.isBusy || session.manuscriptCharacterCount == 0)
 
         Divider()
 
@@ -1264,11 +1289,18 @@ struct WriterPane: View {
                         defer {
                             if accessed { url.stopAccessingSecurityScopedResource() }
                         }
-                        let data = try Data(contentsOf: url)
-                        guard let text = String(data: data, encoding: .utf8) else {
-                            throw BodyImportError.notUTF8
+                        try TextFileCodec.validateExtension(url)
+                        let data = try SecurityScopedFileReader.read(
+                            url,
+                            maxBytes: TextFileCodec.maxImportBytes
+                        ) { _ in
+                            NSError(
+                                domain: "Frthink.BodyImport",
+                                code: 1,
+                                userInfo: [NSLocalizedDescriptionKey: "正文文件过大（超过 12 MB），无法导入。"]
+                            )
                         }
-                        return text
+                        return try TextFileCodec.decode(data)
                     }.value
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         store.errorMessage = "这个文件没有正文内容。"
@@ -1326,14 +1358,25 @@ private struct BodyImportConfirmPage: View {
         .navigationTitle("确认导入")
         .navigationBarTitleDisplayMode(.inline)
     }
-}
-
-/// 正文导入格式校验：仅支持 UTF-8 编码文本。
-private enum BodyImportError: LocalizedError {
-    case notUTF8
-
-    var errorDescription: String? {
-        "文件不是 UTF-8 文本，请另存为 UTF-8 后再导入。"
+    @MainActor
+    private func prepareBodyExport() {
+        let projectID = session.project.id
+        let title = session.project.title
+        let files = store.fileStore
+        let loadedText = session.canReadByPage ? nil : session.manuscript
+        Task { @MainActor in
+            let plain = await Task.detached(priority: .userInitiated) {
+                let raw = loadedText ?? files.loadBody(projectID)
+                return TextFileCodec.plainTextForExport(from: raw)
+            }.value
+            guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                store.errorMessage = "当前作品暂无可导出的正文。"
+                return
+            }
+            bodyExportDocument = PlainTextFileDocument(text: plain)
+            bodyExportFilename = TextFileCodec.exportFilename(title: title)
+            isExportingBody = true
+        }
     }
 }
 

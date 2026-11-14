@@ -132,7 +132,12 @@ enum FrthinkArchive {
             self.projectId = project.id
             self.title = project.title
             self.synopsis = project.synopsis
-            self.snapshot = ArchivedSnapshot(payload: payload, sourceText: sourceText)
+            let availableUniverseIDs = Set(universeEntries.map(\.id))
+            var filteredPayload = payload
+            filteredPayload.enabledUniverseEntryIDs = payload.enabledUniverseEntryIDs.filter {
+                availableUniverseIDs.contains($0)
+            }
+            self.snapshot = ArchivedSnapshot(payload: filteredPayload, sourceText: sourceText)
             self.sourceText = sourceText
             self.translations = translations
             self.universeEntries = universeEntries
@@ -195,10 +200,12 @@ enum FrthinkArchive {
                           let sourceHash = raw.sourceHash,
                           !sourceHash.isEmpty
                     else { return nil }
+                    let rawTarget = raw.target?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let target = rawTarget.isEmpty ? TranslationSegment.defaultTarget : rawTarget
                     return TranslationSegment(
                         owner: "",
                         project: backupProjectId,
-                        target: TranslationSegment.defaultTarget,
+                        target: target,
                         sourceHash: sourceHash,
                         segment: index,
                         payload: text
@@ -257,6 +264,7 @@ enum FrthinkArchive {
                         body: entry.body,
                         kind: entry.kind.rawValue,
                         content: entry.body,
+                        keywords: "",
                         enabled: entry.enabled,
                         updatedAt: FrthinkArchive.iso8601.string(from: entry.updatedAt)
                     )
@@ -413,7 +421,9 @@ enum FrthinkArchive {
         }
 
         chapters = (try? c.decode([Chapter].self, forKey: .chapters)) ?? []
-        continuationAnchor = try? c.decodeIfPresent(Int.self, forKey: .continuationAnchor)
+        continuationAnchor =
+            (try? c.decodeIfPresent(Int.self, forKey: .continuationAnchorOffset))
+            ?? (try? c.decodeIfPresent(Int.self, forKey: .continuationAnchor))
         assistantSupplement =
             (try? c.decode(String.self, forKey: .assistantSupplement))
             ?? (try? c.decode(String.self, forKey: .projectAssistantPrompt))
@@ -634,6 +644,7 @@ enum FrthinkArchive {
         // 导出的 schemaVersion 写 20 —— 这是原版认识的值。
         try c.encode(20, forKey: .schemaVersion)
         try c.encode(manuscript, forKey: .authoritativeBody)
+        try c.encodeIfPresent(continuationAnchor, forKey: .continuationAnchorOffset)
         try c.encode(assistantSupplement, forKey: .projectAssistantPrompt)
         try c.encode(bodyPromptSendWhole, forKey: .bodyPromptSendWhole)
         try c.encode(bodyPromptTailCodePoints, forKey: .bodyPromptTailCodePoints)
@@ -866,6 +877,7 @@ enum FrthinkArchive {
         // 早期 iOS 自身导出的键，保持兼容
         case manuscript
         case chapters
+        case continuationAnchorOffset
         case continuationAnchor
         case assistantSupplement
         // 行为参数与界面状态
@@ -973,6 +985,7 @@ enum FrthinkArchive {
         var body: String
         var kind: String
         var content: String
+        var keywords: String
         var enabled: Bool
         var updatedAt: String
     }
@@ -1440,6 +1453,20 @@ enum FrthinkArchive {
             dict["corpusEnabled"] = settings.corpusEnabled
             dict["writingFontSize"] = Int(settings.bodyFontSize)
             dict["readingFontSize"] = Int(settings.bodyFontSize)
+            dict["requireApproval"] = false
+            dict["supportModel"] = ""
+            dict["availableModels"] = [] as [Any]
+            dict["modelCapabilities"] = [:] as [String: Any]
+            dict["composerDraft"] = ""
+            dict["apiConfigured"] = !settings.providers.isEmpty
+            dict["promptTokens"] = 0
+            dict["completionTokens"] = 0
+            dict["credentials"] = [] as [Any]
+            dict["activeCredentialId"] = ""
+            dict["agents"] = [] as [Any]
+            dict["aiFlavorRulesDraft"] = settings.aiFlavorRules
+            dict["promptBlocks"] = [] as [Any]
+            dict["motionFrameRate"] = "FPS_120"
             dict["skills"] = settings.skills.map {
                 [
                     "id": $0.id,
@@ -1654,8 +1681,8 @@ enum FrthinkArchive {
             if let summaryModel {
                 settings.summaryModel = summaryModel
             }
-            if let skills, !skills.isEmpty {
-                let mapped = skills.compactMap { raw -> Skill? in
+            if let skills {
+                settings.skills = skills.compactMap { raw -> Skill? in
                     guard let name = raw.name, !name.isEmpty else { return nil }
                     return Skill(
                         id: raw.id ?? UUID().uuidString,
@@ -1664,7 +1691,6 @@ enum FrthinkArchive {
                         enabled: raw.enabled ?? true
                     )
                 }
-                if !mapped.isEmpty { settings.skills = mapped }
             }
             if let worldbooks, !worldbooks.isEmpty, settings.universeEntries.isEmpty {
                 // 只有 iOS 形状没解出任何条目时才用 Android 映射：否则会把
@@ -2000,6 +2026,7 @@ enum FrthinkArchive {
                     segment.owner,
                     segment.project,
                     segment.target,
+                    segment.sourceHash,
                     String(segment.segment),
                 ].joined(separator: "\u{1F}")
                 guard keys.insert(key).inserted else {
