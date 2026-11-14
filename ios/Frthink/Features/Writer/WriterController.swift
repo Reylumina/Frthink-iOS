@@ -702,7 +702,7 @@ final class WriterController {
             model: provider.resolvedModel,
             messages: messages,
             stream: provider.stream,
-            temperature: 0.2,
+            temperature: provider.temperature,
             maxTokens: plan.outputBudget,
             // 思考档位由供应方设置统一决定。
             attemptId: UUID().uuidString

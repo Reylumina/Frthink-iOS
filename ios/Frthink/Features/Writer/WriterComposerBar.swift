@@ -76,7 +76,6 @@ struct WriterComposerBar: View {
             focused = false
         }
         .onDisappear {
-            // 页面退出或切换项目时立即持久化输入草稿。
             saveDraft()
         }
     }

@@ -255,9 +255,8 @@ struct SettingsAppearanceSection: View {
         guard store.settings.bodyFontSize != fontSize else { return }
         store.settings.bodyFontSize = fontSize
         store.saveSettings()
-        // 阅读页用自己的 @AppStorage 键；这里同步过去，范围与阅读页一致。
-        // 键名与 ReaderStorageKey.fontSize 相同；Settings 不反向依赖 Reader 模块。
-        UserDefaults.standard.set(fontSize, forKey: "reader.fontSize")
+        // 同步更新阅读页字号存储项，保持两处字号一致。
+        UserDefaults.standard.set(fontSize, forKey: ReaderStorageKey.fontSize)
     }
 }
 

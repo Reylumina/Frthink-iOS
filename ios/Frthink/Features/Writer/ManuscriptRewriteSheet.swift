@@ -195,7 +195,7 @@ struct ManuscriptRewriteSheet: View {
                         .user(Self.userPrompt(selection: selectedText, instruction: instruction)),
                     ],
                     stream: true,
-                    temperature: 0.2,
+                    temperature: provider.temperature,
                     maxTokens: max(1_024, min(provider.maxTokens, 8_192)),
                     thinking: false
                 )

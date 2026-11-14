@@ -30,7 +30,6 @@ struct WriterPromptSnapshot {
     var inputBudget: Int
 }
 
-/// 组装结果。
 struct WriterPreparedPrompt {
     var messages: [LLMMessage]
     var sourceIds: [String]
@@ -274,7 +273,6 @@ enum WriterBudgeting {
 
         var chars = min(text.count, max(64, budget * 9 / 10))
         while chars >= 64 {
-            // 循环内校验任务取消状态。
             try Task.checkCancellation()
             let start = text.index(text.endIndex, offsetBy: -chars)
             let slice = String(text[start...])

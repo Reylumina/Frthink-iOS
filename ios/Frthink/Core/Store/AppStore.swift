@@ -474,11 +474,20 @@ final class AppStore {
         try client(for: translationProvider)
     }
 
-    private func client(for provider: ProviderSetting?) throws -> any LLMClient {
-        guard let provider else {
+    func makeClient(
+        for provider: ProviderSetting?,
+        apiKeyOverride: String? = nil
+    ) throws -> any LLMClient {
+        guard var provider else {
             throw LLMError.notConfigured
         }
-        let key = apiKey(for: provider.id)
+        if provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            provider.baseURL = provider.kind.defaultBaseURL
+        }
+        guard !provider.baseURLForDisplay.isEmpty else {
+            throw LLMError.badURL(provider.baseURL)
+        }
+        let key = apiKeyOverride ?? apiKey(for: provider.id)
         guard !key.isEmpty else {
             throw LLMError.missingAPIKey(provider.kind.displayName)
         }
@@ -494,6 +503,10 @@ final class AppStore {
             apiKey: key,
             provider: provider
         )
+    }
+
+    private func client(for provider: ProviderSetting?) throws -> any LLMClient {
+        try makeClient(for: provider)
     }
 }
 

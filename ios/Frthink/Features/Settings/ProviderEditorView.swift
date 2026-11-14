@@ -403,29 +403,7 @@ struct ProviderEditorView: View {
     /// 基于当前编辑中的配置构建临时客户端，不修改当前生效的 AI 服务商。
     @MainActor
     private func makeClient() throws -> any LLMClient {
-        let key = effectiveKey
-        guard !key.isEmpty else {
-            throw LLMError.missingAPIKey(draft.kind.displayName)
-        }
-        var provider = draft
-        if provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            provider.baseURL = provider.kind.defaultBaseURL
-        }
-        guard !provider.baseURLForDisplay.isEmpty else {
-            throw LLMError.badURL(provider.baseURL)
-        }
-        if provider.kind == .anthropic {
-            return AnthropicClient(
-                baseURL: provider.baseURLForDisplay,
-                apiKey: key,
-                provider: provider
-            )
-        }
-        return OpenAICompatibleClient(
-            baseURL: provider.baseURLForDisplay,
-            apiKey: key,
-            provider: provider
-        )
+        try store.makeClient(for: draft, apiKeyOverride: effectiveKey)
     }
 
     @MainActor

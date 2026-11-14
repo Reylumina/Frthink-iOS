@@ -141,7 +141,7 @@ final class WriterUndoState {
     private let manager: UndoManager
     /// 通知令牌。deinit 是非隔离上下文，读这个属性不能让编译器报隔离错误；
     /// 令牌只在主线程写入，removeObserver 本身线程安全。
-    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    private var observers: [NSObjectProtocol] = []
 
     init(manager: UndoManager) {
         self.manager = manager

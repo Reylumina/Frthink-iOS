@@ -310,15 +310,10 @@ struct ReaderPane: View {
 
     @MainActor
     private func prepareBodyExport() {
-        let projectID = session.project.id
         let title = session.project.title
         let files = store.fileStore
-        let loadedText = session.canReadByPage ? nil : session.manuscript
         Task { @MainActor in
-            let plain = await Task.detached(priority: .userInitiated) {
-                let raw = loadedText ?? files.loadBody(projectID)
-                return TextFileCodec.plainTextForExport(from: raw)
-            }.value
+            let plain = await TextFileCodec.loadPlainExport(session: session, files: files)
             guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 store.errorMessage = "当前作品暂无可导出的正文。"
                 return
