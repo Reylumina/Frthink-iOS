@@ -28,7 +28,6 @@ struct WorldCharactersSection: View {
     @State private var pendingDeleteIDs: Set<String> = []
     @State private var groupFilter = "__all__"
     @State private var showGroupEditor = false
-    @State private var showingRefreshOptions = false
 
     private struct Route: Identifiable {
         let id: String
@@ -54,13 +53,6 @@ struct WorldCharactersSection: View {
             NavigationStack {
                 WorldGroupEditor(session: session)
             }
-        }
-        .alert("刷新人物卡", isPresented: $showingRefreshOptions) {
-            Button("增量刷新") { onRefresh?() }
-            Button("从头整理（重新分析全部正文）") { onRefreshFull?() }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("增量刷新会从上次断点继续；从头整理会重新分析全书正文。")
         }
         .onAppear {
             #if DEBUG
@@ -134,13 +126,21 @@ struct WorldCharactersSection: View {
         .accessibilityValue(sortMode.displayName)
     }
 
-    /// 从正文整理人物卡：常规刷新与从头整理。
-    ///
-    /// 用按钮 + 底部动作表，不用 Menu：Menu 的浮层贴在标签上方，标签靠近屏幕顶部时
-    /// 会被排到屏幕上半部分，圆角样式也随锚点变；动作表固定在底部、统一圆角。
+    /// 从正文整理人物卡：使用原生 Menu 就近弹出液态玻璃操作菜单，与右侧分组菜单保持一致。
     private var refreshButton: some View {
-        Button {
-            showingRefreshOptions = true
+        Menu {
+            Button {
+                onRefresh?()
+            } label: {
+                Label("增量刷新", systemImage: "arrow.triangle.2.circlepath")
+            }
+            if onRefreshFull != nil {
+                Button {
+                    onRefreshFull?()
+                } label: {
+                    Label("从头整理（重新分析全部正文）", systemImage: "arrow.counterclockwise")
+                }
+            }
         } label: {
             // 进度由世界页的状态行统一报，这一行只留入口。
             HStack(spacing: Theme.Spacing.xs) {
