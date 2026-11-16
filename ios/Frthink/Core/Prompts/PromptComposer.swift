@@ -181,12 +181,8 @@ enum PromptComposer {
         blocks.map(\.rendered).filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
-    /// 主写作请求的 messages：system（块 1–10 + 非用户侧追加块）→ 只读日志/正文 user 块（块 11–12 + 锚点）→ 历史消息 → 本轮 user 指令。
-    static func writingMessages(
-        assembly: PromptAssembly,
-        history: [LLMMessage],
-        userInstruction: String?
-    ) -> [LLMMessage] {
+    /// 主写作请求不可裁剪的前缀消息：system（块 1–10 + 非用户侧追加块）→ 只读日志/正文 user 块（块 11–12 + 锚点）。
+    static func writingPrefixMessages(assembly: PromptAssembly) -> [LLMMessage] {
         var blocks = writingBlocks(assembly)
         // 13 · 调用方追加的块
         blocks.append(contentsOf: assembly.appendedBlocks)
@@ -202,13 +198,23 @@ enum PromptComposer {
         let systemBlocks = blocks.filter { !isUserSideBlock($0) }
         let contextUserBlocks = blocks.filter(isUserSideBlock)
 
-        var messages: [LLMMessage] = []
+        var prefix: [LLMMessage] = []
         let system = systemPrompt(from: systemBlocks)
-        if !system.isEmpty { messages.append(.system(system)) }
+        if !system.isEmpty { prefix.append(.system(system)) }
         for block in contextUserBlocks {
             let rendered = block.rendered
-            if !rendered.isEmpty { messages.append(.user(rendered)) }
+            if !rendered.isEmpty { prefix.append(.user(rendered)) }
         }
+        return prefix
+    }
+
+    /// 主写作请求的 messages：前缀块（system + 只读日志/正文/锚点）→ 历史消息 → 本轮 user 指令。
+    static func writingMessages(
+        assembly: PromptAssembly,
+        history: [LLMMessage],
+        userInstruction: String?
+    ) -> [LLMMessage] {
+        var messages = writingPrefixMessages(assembly: assembly)
         messages.append(contentsOf: history)
         // 本轮用户指令（P15 这类「用户输入」角色）永远在最后。
         if let userInstruction, !userInstruction.isEmpty {

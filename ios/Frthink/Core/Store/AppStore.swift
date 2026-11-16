@@ -457,7 +457,7 @@ final class AppStore {
             kind: .deepseek,
             baseURL: "http://127.0.0.1:8765/v1",
             model: "mock-stream",
-            temperature: 0.7,
+            temperature: 0.2,
             maxTokens: 8192,
             stream: true
         )

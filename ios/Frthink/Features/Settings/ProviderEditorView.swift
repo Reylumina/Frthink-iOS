@@ -109,34 +109,20 @@ struct ProviderEditorView: View {
 
     // MARK: - 连接
 
-    private enum ProviderPreset: String, CaseIterable, Identifiable {
-        case custom
-        case openCodeGo
-
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .custom: return "自定义"
-            case .openCodeGo: return "OpenCode Go"
-            }
-        }
-    }
-
-    private var presetBinding: Binding<ProviderPreset> {
+    private var presetBinding: Binding<OpenAICompatiblePreset> {
         Binding(
-            get: {
-                draft.baseURLForDisplay.lowercased().contains("opencode.ai")
-                    ? .openCodeGo : .custom
-            },
+            get: { OpenAICompatiblePreset.match(baseURL: draft.baseURLForDisplay) },
             set: { preset in
-                switch preset {
-                case .openCodeGo:
-                    draft.baseURL = ProviderKind.openCodeGo.defaultBaseURL
-                    draft.model = ProviderKind.openCodeGo.defaultModel
-                case .custom:
-                    if draft.baseURLForDisplay.lowercased().contains("opencode.ai") {
+                if preset == .custom {
+                    // 从内置预设切回「自定义」时清空预设地址与模型，避免残留干扰。
+                    if OpenAICompatiblePreset.match(baseURL: draft.baseURLForDisplay) != .custom {
                         draft.baseURL = ""
                         draft.model = ""
+                    }
+                } else {
+                    draft.baseURL = preset.defaultBaseURL
+                    if !preset.defaultModel.isEmpty {
+                        draft.model = preset.defaultModel
                     }
                 }
                 models = []
@@ -157,7 +143,7 @@ struct ProviderEditorView: View {
 
             if draft.kind == .openAICompatible {
                 Picker("预设", selection: presetBinding) {
-                    ForEach(ProviderPreset.allCases) { preset in
+                    ForEach(OpenAICompatiblePreset.allCases) { preset in
                         Text(preset.title).tag(preset)
                     }
                 }

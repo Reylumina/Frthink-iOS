@@ -2224,11 +2224,39 @@ enum SelfCheck {
 
             snapshot.action = .continueWriting
             let continuation = WriterPromptBuilder.prepare(snapshot)
+            let assistantMatches = continuation.messages.filter {
+                $0.role == "assistant" && $0.content.hasSuffix("上一段回复")
+            }
             try expect(
-                continuation.messages.contains {
-                    $0.role == "assistant" && $0.content.hasSuffix("上一段回复")
-                },
-                "续写没有把最近助手片段回灌成 assistant"
+                assistantMatches.count == 1,
+                "续写应只回灌一次最近助手片段，实际 \(assistantMatches.count) 次"
+            )
+
+            // 历史超预算裁剪时，必须保留权威正文块，只丢弃更早的聊天轮次。
+            var tightSnapshot = snapshot
+            tightSnapshot.action = .send(instruction: "继续写")
+            tightSnapshot.manuscript = "第一章 正文锚点"
+            tightSnapshot.messages = (0..<12).flatMap { idx in
+                [
+                    ChatMessage(role: .user, content: String(repeating: "旧指令\(idx) ", count: 40)),
+                    ChatMessage(role: .assistant, content: String(repeating: "旧回复\(idx) ", count: 40))
+                ]
+            }
+            tightSnapshot.inputBudget = 600
+            let tightPrepared = WriterPromptBuilder.prepare(tightSnapshot)
+            try expect(
+                tightPrepared.messages.contains { $0.role == "user" && $0.content.contains("第一章 正文锚点") },
+                "超预算裁剪时不应丢弃权威正文块"
+            )
+            try expect(
+                tightPrepared.omittedHistoryMessages > 0,
+                "超预算时应裁剪旧聊天历史"
+            )
+            try expect(
+                OpenAICompatiblePreset.match(baseURL: "https://api.kimi.com/coding/v1") == .custom
+                    && OpenAICompatiblePreset.match(baseURL: "https://api.moonshot.cn/v1") == .kimi
+                    && OpenAICompatiblePreset.match(baseURL: "https://open.bigmodel.cn/api/paas/v4") == .zai,
+                "OpenAI 兼容预设反推不准确"
             )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }

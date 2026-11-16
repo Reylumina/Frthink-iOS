@@ -104,6 +104,101 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// 「OpenAI 兼容」服务的显式预设，替代仅靠 URL 猜测厂商的做法。
+enum OpenAICompatiblePreset: String, CaseIterable, Identifiable {
+    case custom
+    case openAI
+    case gemini
+    case kimi
+    case zai
+    case qwen
+    case doubao
+    case miniMax
+    case hunyuan
+    case grok
+    case mistral
+    case ollama
+    case openCodeGo
+    case commandCode
+    case openDesign
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .custom: return "自定义"
+        case .openAI: return "OpenAI"
+        case .gemini: return "Gemini（OpenAI 兼容）"
+        case .kimi: return "Kimi（Moonshot）"
+        case .zai: return "智谱 Z.ai"
+        case .qwen: return "通义千问（DashScope）"
+        case .doubao: return "豆包（火山方舟）"
+        case .miniMax: return "MiniMax"
+        case .hunyuan: return "腾讯混元"
+        case .grok: return "Grok（xAI）"
+        case .mistral: return "Mistral"
+        case .ollama: return "Ollama（本地）"
+        case .openCodeGo: return "OpenCode Go"
+        case .commandCode: return "Command Code"
+        case .openDesign: return "OpenDesign"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .custom: return ""
+        case .openAI: return "https://api.openai.com/v1"
+        case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .kimi: return "https://api.moonshot.cn/v1"
+        case .zai: return "https://open.bigmodel.cn/api/paas/v4"
+        case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        case .doubao: return "https://ark.cn-beijing.volces.com/api/v3"
+        case .miniMax: return "https://api.minimaxi.com/v1"
+        case .hunyuan: return "https://api.hunyuan.cloud.tencent.com/v1"
+        case .grok: return "https://api.x.ai/v1"
+        case .mistral: return "https://api.mistral.ai/v1"
+        case .ollama: return "http://localhost:11434/v1"
+        case .openCodeGo: return ProviderKind.openCodeGo.defaultBaseURL
+        case .commandCode: return "https://api.commandcode.ai/v1"
+        case .openDesign: return "https://api.opendesign.ai/v1"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .custom: return ""
+        case .openAI: return "gpt-5.1"
+        case .gemini: return "gemini-2.5-pro"
+        case .kimi: return "kimi-k2-0905-preview"
+        case .zai: return "glm-4.6"
+        case .qwen: return "qwen3-max"
+        case .doubao: return ""
+        case .miniMax: return "MiniMax-M2"
+        case .hunyuan: return "hunyuan-turbos-latest"
+        case .grok: return "grok-4"
+        case .mistral: return "mistral-large-latest"
+        case .ollama: return ""
+        case .openCodeGo: return ProviderKind.openCodeGo.defaultModel
+        case .commandCode: return ""
+        case .openDesign: return ""
+        }
+    }
+
+    /// 根据当前服务地址反推匹配的预设，未命中预设域名则视为「自定义」。
+    static func match(baseURL: String) -> OpenAICompatiblePreset {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return .custom }
+        let host = URL(string: trimmed)?.host?.lowercased() ?? trimmed
+        for preset in allCases where preset != .custom {
+            if let presetHost = URL(string: preset.defaultBaseURL)?.host?.lowercased(),
+               host == presetHost || host.contains(presetHost) {
+                return preset
+            }
+        }
+        return .custom
+    }
+}
+
 /// 思考档位。关闭时不发任何推理参数。
 enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
     case off
@@ -184,7 +279,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         kind: ProviderKind,
         baseURL: String? = nil,
         model: String? = nil,
-        temperature: Double = 1.0,
+        temperature: Double = 0.2,
         maxTokens: Int = 30000,
         stream: Bool = true,
         enabled: Bool = true,
@@ -212,7 +307,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.kind = kind
         self.baseURL = (try? c.decode(String.self, forKey: .baseURL)) ?? kind.defaultBaseURL
         self.model = (try? c.decode(String.self, forKey: .model)) ?? kind.defaultModel
-        self.temperature = (try? c.decode(Double.self, forKey: .temperature)) ?? 1.0
+        self.temperature = (try? c.decode(Double.self, forKey: .temperature)) ?? 0.2
         self.maxTokens = (try? c.decode(Int.self, forKey: .maxTokens)) ?? 30000
         self.stream = (try? c.decode(Bool.self, forKey: .stream)) ?? true
         self.enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
@@ -383,7 +478,7 @@ struct AppSettings: Codable {
         enabledUniverseEntryIDs: [String] = [],
         theme: AppTheme = .system,
         bodyFontSize: Double = 18,
-        defaultTemperature: Double = 1.0,
+        defaultTemperature: Double = 0.2,
         defaultMaxTokens: Int = 30000,
         contextWindowTokens: Int = 0,
         inputBudgetTokens: Int = 32_768,
@@ -396,7 +491,7 @@ struct AppSettings: Codable {
         worldBuildInstruction: String = "",
         plotOutlineInstruction: String = "",
         imitationInstruction: String = "",
-        autoConversationSummary: Bool = true,
+        autoConversationSummary: Bool = false,
         conversationSummaryThresholdPercent: Int = 95,
         excludeAssistantChatHistory: Bool = false,
         globalPreset: String = "",
@@ -478,7 +573,7 @@ struct AppSettings: Codable {
             (try? c.decode([String].self, forKey: .enabledUniverseEntryIDs)) ?? []
         theme = (try? c.decode(AppTheme.self, forKey: .theme)) ?? .system
         bodyFontSize = (try? c.decode(Double.self, forKey: .bodyFontSize)) ?? 18
-        defaultTemperature = (try? c.decode(Double.self, forKey: .defaultTemperature)) ?? 1.0
+        defaultTemperature = (try? c.decode(Double.self, forKey: .defaultTemperature)) ?? 0.2
         defaultMaxTokens = (try? c.decode(Int.self, forKey: .defaultMaxTokens)) ?? 30000
         contextWindowTokens =
             (try? c.decode(Int.self, forKey: .contextWindowTokens)) ?? 0
@@ -499,7 +594,7 @@ struct AppSettings: Codable {
         imitationInstruction =
             (try? c.decode(String.self, forKey: .imitationInstruction)) ?? ""
         autoConversationSummary =
-            (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? true
+            (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? false
         conversationSummaryThresholdPercent =
             (try? c.decode(Int.self, forKey: .conversationSummaryThresholdPercent)) ?? 95
         excludeAssistantChatHistory =

@@ -33,8 +33,10 @@ struct WriterComposerBar: View {
     /// 输入条里控件的行内高度，跟随字号缩放（§2.4、§5.9）。
     @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = Theme.Layout.inlineControl
 
-    /// 键盘弹起时右侧关闭按钮的直径：与胶囊总高（34pt 控件 + 上下各 4pt 内边距 = 42pt）一致，视觉同高。
-    private var dismissButtonSize: CGFloat { controlSize + Theme.Spacing.xs * 2 }
+    /// 键盘弹起时右侧关闭按钮的直径：至少满足 44pt 触控热区，并随字号缩放保持与输入胶囊同高。
+    private var dismissButtonSize: CGFloat {
+        max(Theme.Layout.hitTarget, controlSize + Theme.Spacing.m)
+    }
 
     var body: some View {
         // 材质与形状见 `WriterComposerShell`：iOS 26 玻璃胶囊，17–25 回落 `.bar`（§1.6）。

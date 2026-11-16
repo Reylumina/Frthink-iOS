@@ -9,7 +9,7 @@ struct StreamingTextView: UIViewRepresentable {
     var characterCount: Int? = nil
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
-    /// 与阅读页共用的行高倍数，默认 `WriterTypography.lineHeight`（1.4）。
+    /// 与阅读页共用的行高倍数，默认 `WriterTypography.lineHeight`（1.3）。
     var lineHeight: Double = WriterTypography.lineHeight
     /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
     var lineSpacing: CGFloat

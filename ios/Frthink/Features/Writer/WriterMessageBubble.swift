@@ -37,7 +37,7 @@ struct WriterMessageBubble: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，创作页跟着用同一个值。
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
 
     /// 与流式视图、正文编辑器同一套字号。
     private var bodyFontSize: CGFloat {
@@ -111,7 +111,11 @@ struct WriterMessageBubble: View {
             )
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
-            .background(Theme.bubbleFill, in: Theme.containerShape())
+            .background(
+                Theme.bubbleFill,
+                in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
             .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)

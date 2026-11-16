@@ -125,7 +125,7 @@ struct WriterPane: View {
             case .delete: return "删除当前版本？"
             case .deleteMessage: return "删除消息？"
             case .deleteSelected(let count): return "删除 \(count) 条消息？"
-            case .clearAll: return "清空聊天记录？"
+            case .clearAll: return "清空当前会话？"
             }
         }
 
@@ -378,6 +378,13 @@ struct WriterPane: View {
             }
         } label: {
             Label("多选消息", systemImage: "checklist")
+        }
+        .disabled(controller.isBusy || session.payload.messages.isEmpty)
+
+        Button(role: .destructive) {
+            messageAction = .clearAll
+        } label: {
+            Label("清空会话", systemImage: "trash")
         }
         .disabled(controller.isBusy || session.payload.messages.isEmpty)
 
@@ -1282,7 +1289,7 @@ struct WriterPane: View {
             withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
                 session.clearConversation()
             }
-            store.toast = "已清空聊天记录"
+            store.toast = "已清空会话"
         }
     }
 
