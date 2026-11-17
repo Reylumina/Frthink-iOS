@@ -248,12 +248,12 @@ enum WorldMaterialWorkflow {
         session: ProjectSession,
         store: AppStore
     ) async throws -> String {
-        let context = try WorldRequestContext.make(store: store, thinking: false)
         let manuscript = session.manuscript
         let trimmed = manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw WorldWorkflowError.emptyManuscript
+            throw WorldRunError(message: "当前正文为空，无法深度蒸馏文风。")
         }
+        let context = try WorldRequestContext.make(store: store)
 
         let fingerprint = StyleDistiller.analyzeFingerprint(trimmed)
         let exemplars = StyleDistiller.selectExemplarPassages(from: trimmed)
