@@ -67,6 +67,7 @@ struct WorldRulesSection: View {
     /// 存在进行中的世界任务时禁用 AI 操作入口。
     var isActionDisabled: Bool = false
     var onExtractStyleNotes: () -> Void
+    var onDistillStyle: () -> Void
     var onUpdateRules: () -> Void
 
     @State private var editing: WorldRuleTextKind?
@@ -91,6 +92,11 @@ struct WorldRulesSection: View {
             }
 
             Section {
+                updateRow(
+                    title: "深度蒸馏文风指纹与范文（推荐）",
+                    kind: .distillingStyle,
+                    action: onDistillStyle
+                )
                 updateRow(
                     title: "从正文提炼文风笔记",
                     kind: .extractingStyleNotes,

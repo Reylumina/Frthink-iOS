@@ -70,7 +70,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
             (["z.ai", "bigmodel.cn", "zhipuai"], "ProviderZai"),
             (["hunyuan", "huanyuan", "lkeap.cloud.tencent", "tencentcloudapi"], "ProviderHuanyuan"),
             (["dashscope", "qwen"], "ProviderQwen"),
-            (["volces.com", "volcengine", "doubao"], "ProviderDoubao"),
             (["minimaxi", "minimax"], "ProviderMiniMax"),
             (["opencode.ai", "opencode"], "ProviderOpenCode"),
             (["commandcode", "command-code"], "ProviderCommandCode"),
@@ -78,7 +77,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
             (["ollama"], "ProviderOllama"),
             (["generativelanguage.googleapis", "aiplatform.googleapis", "gemini"], "ProviderGemini"),
             (["x.ai", "grok"], "ProviderGrok"),
-            (["mistral.ai", "mistral"], "ProviderMistral"),
             (["openai.com", "openai"], "ProviderOpenAI"),
         ]
         for rule in rules where rule.keywords.contains(where: { target.contains($0) }) {
@@ -105,18 +103,16 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 }
 
 /// 「OpenAI 兼容」服务的显式预设，替代仅靠 URL 猜测厂商的做法。
-enum OpenAICompatiblePreset: String, CaseIterable, Identifiable {
+enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashable {
     case custom
     case openAI
     case gemini
     case kimi
     case zai
     case qwen
-    case doubao
     case miniMax
     case hunyuan
     case grok
-    case mistral
     case ollama
     case openCodeGo
     case commandCode
@@ -132,11 +128,9 @@ enum OpenAICompatiblePreset: String, CaseIterable, Identifiable {
         case .kimi: return "Kimi（Moonshot）"
         case .zai: return "智谱 Z.ai"
         case .qwen: return "通义千问（DashScope）"
-        case .doubao: return "豆包（火山方舟）"
         case .miniMax: return "MiniMax"
         case .hunyuan: return "腾讯混元"
         case .grok: return "Grok（xAI）"
-        case .mistral: return "Mistral"
         case .ollama: return "Ollama（本地）"
         case .openCodeGo: return "OpenCode Go"
         case .commandCode: return "Command Code"
@@ -152,11 +146,9 @@ enum OpenAICompatiblePreset: String, CaseIterable, Identifiable {
         case .kimi: return "https://api.moonshot.cn/v1"
         case .zai: return "https://open.bigmodel.cn/api/paas/v4"
         case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        case .doubao: return "https://ark.cn-beijing.volces.com/api/v3"
         case .miniMax: return "https://api.minimaxi.com/v1"
         case .hunyuan: return "https://api.hunyuan.cloud.tencent.com/v1"
         case .grok: return "https://api.x.ai/v1"
-        case .mistral: return "https://api.mistral.ai/v1"
         case .ollama: return "http://localhost:11434/v1"
         case .openCodeGo: return ProviderKind.openCodeGo.defaultBaseURL
         case .commandCode: return "https://api.commandcode.ai/v1"
@@ -166,21 +158,29 @@ enum OpenAICompatiblePreset: String, CaseIterable, Identifiable {
 
     var defaultModel: String {
         switch self {
-        case .custom: return ""
-        case .openAI: return "gpt-5.1"
-        case .gemini: return "gemini-2.5-pro"
-        case .kimi: return "kimi-k2-0905-preview"
-        case .zai: return "glm-4.6"
-        case .qwen: return "qwen3-max"
-        case .doubao: return ""
-        case .miniMax: return "MiniMax-M2"
-        case .hunyuan: return "hunyuan-turbos-latest"
-        case .grok: return "grok-4"
-        case .mistral: return "mistral-large-latest"
-        case .ollama: return ""
-        case .openCodeGo: return ProviderKind.openCodeGo.defaultModel
-        case .commandCode: return ""
-        case .openDesign: return ""
+        case .openCodeGo:
+            return ProviderKind.openCodeGo.defaultModel
+        case .custom, .openAI, .gemini, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollama,
+             .commandCode, .openDesign:
+            return ""
+        }
+    }
+
+    /// 各预设对应的官方品牌图标资源名。
+    var logoAssetName: String {
+        switch self {
+        case .custom, .openAI: return "ProviderOpenAI"
+        case .gemini: return "ProviderGemini"
+        case .kimi: return "ProviderKimi"
+        case .zai: return "ProviderZai"
+        case .qwen: return "ProviderQwen"
+        case .miniMax: return "ProviderMiniMax"
+        case .hunyuan: return "ProviderHuanyuan"
+        case .grok: return "ProviderGrok"
+        case .ollama: return "ProviderOllama"
+        case .openCodeGo: return "ProviderOpenCode"
+        case .commandCode: return "ProviderCommandCode"
+        case .openDesign: return "ProviderOpenDesign"
         }
     }
 
@@ -223,6 +223,26 @@ enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
         case .low: return 1
         case .high: return 2
         case .max: return 3
+        }
+    }
+}
+
+/// 历史思维链在多轮对话中的回灌策略（对齐 SillyTavern Reasoning Context 机制）。
+enum ReasoningContextPolicy: String, Codable, CaseIterable, Identifiable, Hashable {
+    /// 不回灌历史轮次思维链，仅保留当前轮思考（最省上下文、防止长历史文风跑偏）。
+    case none
+    /// 仅回灌最近 2 轮助手回复的思维链（兼顾连续推理与 KV Cache 稳定）。
+    case recentTwo
+    /// 全部回灌。
+    case all
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .none: return "不回灌历史"
+        case .recentTwo: return "最近 2 轮（推荐）"
+        case .all: return "全部保留"
         }
     }
 }
@@ -273,6 +293,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
     var thinkingLevel: ThinkingLevel?
     /// 关闭思考时发什么字段；nil 等同 `.none`（原版行为）。
     var reasoningOffStyle: ReasoningOffStyle?
+    /// 绑定的「OpenAI 兼容」预设供应商，nil 时按地址反推。
+    var preset: OpenAICompatiblePreset?
 
     init(
         id: String = UUID().uuidString,
@@ -285,7 +307,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         enabled: Bool = true,
         thinking: Bool? = nil,
         thinkingLevel: ThinkingLevel? = nil,
-        reasoningOffStyle: ReasoningOffStyle? = nil
+        reasoningOffStyle: ReasoningOffStyle? = nil,
+        preset: OpenAICompatiblePreset? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -298,6 +321,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.thinking = thinking
         self.thinkingLevel = thinkingLevel
         self.reasoningOffStyle = reasoningOffStyle
+        self.preset = preset
     }
 
     init(from decoder: Decoder) throws {
@@ -314,6 +338,27 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.thinking = try? c.decodeIfPresent(Bool.self, forKey: .thinking)
         self.thinkingLevel = try? c.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
         self.reasoningOffStyle = try? c.decodeIfPresent(ReasoningOffStyle.self, forKey: .reasoningOffStyle)
+        self.preset = try? c.decodeIfPresent(OpenAICompatiblePreset.self, forKey: .preset)
+    }
+
+    /// 解析当前生效的预设；非 OpenAI 兼容服务商返回 nil。
+    var resolvedPreset: OpenAICompatiblePreset? {
+        switch kind {
+        case .openAICompatible:
+            return preset ?? OpenAICompatiblePreset.match(baseURL: baseURLForDisplay)
+        case .openCodeGo:
+            return .openCodeGo
+        case .deepseek, .openRouter, .anthropic:
+            return nil
+        }
+    }
+
+    /// 列表与编辑页展示用名称：OpenAI 兼容且绑定了具名预设时显示预设名。
+    var displayTitle: String {
+        if kind == .openAICompatible, let resolved = resolvedPreset, resolved != .custom {
+            return resolved.title
+        }
+        return kind.displayName
     }
 
     var effectiveThinkingLevel: ThinkingLevel {
@@ -411,6 +456,12 @@ struct AppSettings: Codable {
     var globalPreset: String
     /// 去 AI 味规则（P05）。渲染成「用户确认的写作偏好：\n<内容>」。
     var aiFlavorRules: String
+    /// 是否在末尾注入「尾段风格锚定」（Depth-0 提醒仿写/审查规则，解决长上下文注意力衰减）。
+    var reinforceStyleAtTail: Bool
+    /// 历史思维链回灌策略。
+    var reasoningContextPolicy: ReasoningContextPolicy
+    /// 是否按注意力/关键词动态激活人物卡与事件卡（含 3 轮 Sticky 黏性）。
+    var dynamicContextActivation: Bool
     /// 技能列表（P04）。启用的每条渲染成 `# <技能名>\n<内容>`。
     var skills: [Skill]
     /// 语料收集库。原版存 `universe-corpus-v1.enc`，库可以嵌套；这里平铺多库。
@@ -497,7 +548,10 @@ struct AppSettings: Codable {
         globalPreset: String = "",
         aiFlavorRules: String = "",
         skills: [Skill]? = nil,
-        corpusLibraries: [CorpusLibrary] = []
+        corpusLibraries: [CorpusLibrary] = [],
+        reinforceStyleAtTail: Bool = true,
+        reasoningContextPolicy: ReasoningContextPolicy = .recentTwo,
+        dynamicContextActivation: Bool = true
     ) {
         let defaults = providers ?? ProviderKind.selectableCases.map { ProviderSetting(kind: $0) }
         self.providers = defaults
@@ -531,6 +585,9 @@ struct AppSettings: Codable {
         self.aiFlavorRules = aiFlavorRules
         self.skills = skills ?? Skill.defaults
         self.corpusLibraries = corpusLibraries
+        self.reinforceStyleAtTail = reinforceStyleAtTail
+        self.reasoningContextPolicy = reasoningContextPolicy
+        self.dynamicContextActivation = dynamicContextActivation
     }
 
     /// 提示词能用的预算：上下文窗口 − 预留输出，再留一成安全空间。
@@ -604,6 +661,13 @@ struct AppSettings: Codable {
         skills = (try? c.decode([Skill].self, forKey: .skills)) ?? Skill.defaults
         corpusLibraries =
             (try? c.decode([CorpusLibrary].self, forKey: .corpusLibraries)) ?? []
+        reinforceStyleAtTail =
+            (try? c.decode(Bool.self, forKey: .reinforceStyleAtTail)) ?? true
+        reasoningContextPolicy =
+            (try? c.decode(ReasoningContextPolicy.self, forKey: .reasoningContextPolicy))
+            ?? .recentTwo
+        dynamicContextActivation =
+            (try? c.decode(Bool.self, forKey: .dynamicContextActivation)) ?? true
         if activeProviderID.isEmpty, let first = providers.first {
             activeProviderID = first.id
         }

@@ -66,6 +66,9 @@ final class OpenAICompatibleClient: LLMClient {
         request.setValue(accept, forHTTPHeaderField: "Accept")
         if provider.isOpenCode {
             request.setValue(openCodeSessionID, forHTTPHeaderField: "x-opencode-session")
+        } else if !provider.isDeepSeek {
+            // 为支持 Session Affinity 的兼容网关提供稳定会话亲和键，提升前缀 KV Cache 路由命中率。
+            request.setValue(openCodeSessionID, forHTTPHeaderField: "X-Session-Affinity")
         }
         // 幂等键：一次「尝试」的稳定标识，重试时原版会加后缀。
         if let attemptId, !attemptId.trimmingCharacters(in: .whitespaces).isEmpty {

@@ -1,0 +1,226 @@
+import Foundation
+
+/// 基于输入预算与关联度的动态上下文选择器。
+///
+/// 设计原则：
+/// 1. **预算驱动，不用魔法阈值**：只有当人物卡、事件卡或语料库总开销超过当前模型 `inputBudget`
+///    的合理份额时才触发筛选与分层压缩；中小体量设定集全量保留，既不误伤质量，也零缓存抖动。
+/// 2. **严格保持原有顺序（保 KV Cache）**：所有筛选与压缩均保持数组原始顺序，绝不每轮重排 `system` 顺序。
+/// 3. **扫描窗口对齐正文窗口**：直接扫描当前实际发送的 `effectiveBody`、会话历史与本轮指令。
+enum DynamicContextSelector {
+    static let stickyDurationTurns = 3
+
+    struct SelectionResult {
+        let characters: [CharacterCard]
+        let matchedCharacterIDs: Set<String>
+        let renderedEvents: String
+        let matchedEventIDs: Set<String>
+    }
+
+    /// 构造扫描文本：本轮指令 + 历史消息 + 当前实际发送的正文窗口。
+    static func makeScanText(
+        instruction: String?,
+        messages: [ChatMessage],
+        bodyWindow: String
+    ) -> String {
+        var parts: [String] = []
+        if let instruction, !instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(instruction)
+        }
+        for msg in messages {
+            let trimmed = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                parts.append(trimmed)
+            }
+        }
+        if !bodyWindow.isEmpty {
+            parts.append(bodyWindow)
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    static func select(
+        world: WorldBook,
+        scanText: String,
+        inputBudget: Int,
+        stickyCharacterIDs: Set<String>,
+        stickyEventIDs: Set<String>,
+        enabled: Bool
+    ) -> SelectionResult {
+        let allActive = PromptComposer.activeCharacters(in: world)
+        guard enabled else {
+            return SelectionResult(
+                characters: allActive,
+                matchedCharacterIDs: Set(allActive.map(\.id)),
+                renderedEvents: PromptComposer.renderEvents(world.events),
+                matchedEventIDs: Set(world.events.map(\.id))
+            )
+        }
+
+        // 各静态资料区各自允许占用的预算上限（占有效输入预算的四分之一），未超标时全量保序发送。
+        let sectionBudget = max(1, inputBudget / 4)
+
+        let (selectedChars, matchedCharIDs) = selectCharacters(
+            allActive,
+            scanText: scanText,
+            budget: sectionBudget,
+            stickyIDs: stickyCharacterIDs
+        )
+        let (renderedEvents, matchedEvtIDs) = selectAndRenderEvents(
+            world.events,
+            activeCharacters: selectedChars,
+            scanText: scanText,
+            budget: sectionBudget,
+            stickyIDs: stickyEventIDs
+        )
+        return SelectionResult(
+            characters: selectedChars,
+            matchedCharacterIDs: matchedCharIDs,
+            renderedEvents: renderedEvents,
+            matchedEventIDs: matchedEvtIDs
+        )
+    }
+
+    static func selectCharacters(
+        _ active: [CharacterCard],
+        scanText: String,
+        budget: Int,
+        stickyIDs: Set<String>
+    ) -> (cards: [CharacterCard], matchedIDs: Set<String>) {
+        let totalTokens = TokenEstimator.estimate(PromptComposer.renderCharacters(active))
+        guard totalTokens > budget else {
+            return (active, Set(active.map(\.id)))
+        }
+
+        var matchedIDs: Set<String> = []
+        var kept: [CharacterCard] = []
+
+        // 按原始顺序遍历，绝不打乱 system 前缀顺序。
+        for card in active {
+            if matchesCharacter(card, in: scanText) {
+                matchedIDs.insert(card.id)
+                kept.append(card)
+            } else if stickyIDs.contains(card.id) {
+                kept.append(card)
+            }
+        }
+
+        // 若当前窗口未命中任何角色，回退按预算从前向后保留核心人物卡。
+        if kept.isEmpty {
+            var used = 0
+            for card in active {
+                let cost = TokenEstimator.estimate(PromptLibrary.characterBlock(for: card))
+                if !kept.isEmpty && used + cost > budget { break }
+                used += cost
+                kept.append(card)
+            }
+        }
+        return (kept, matchedIDs)
+    }
+
+    static func selectAndRenderEvents(
+        _ events: [EventCard],
+        activeCharacters: [CharacterCard],
+        scanText: String,
+        budget: Int,
+        stickyIDs: Set<String>
+    ) -> (rendered: String, matchedIDs: Set<String>) {
+        let fullRendered = PromptComposer.renderEvents(events)
+        guard TokenEstimator.estimate(fullRendered) > budget else {
+            return (fullRendered, Set(events.map(\.id)))
+        }
+
+        let activeNames = Set(activeCharacters.flatMap { card in
+            ([card.name] + card.aliases)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        })
+
+        // 从末尾按半数预算保留近期完整事件，确保最新剧情因果完整。
+        let recencyBudget = max(1, budget / 2)
+        var recentUsed = 0
+        var recentFullIndices: Set<Int> = []
+        for idx in events.indices.reversed() {
+            let single = PromptComposer.renderEvents([events[idx]])
+            let cost = TokenEstimator.estimate(single)
+            if !recentFullIndices.isEmpty && recentUsed + cost > recencyBudget { break }
+            recentUsed += cost
+            recentFullIndices.insert(idx)
+        }
+
+        var matchedIDs: Set<String> = []
+        var fullCards: [EventCard] = []
+        var compressedLines: [String] = []
+
+        for (idx, event) in events.enumerated() {
+            let charLinked = event.characters.contains { activeNames.contains($0) }
+            let titleHit = !event.title.isEmpty && scanText.localizedCaseInsensitiveContains(event.title)
+            if recentFullIndices.contains(idx) || charLinked || titleHit {
+                matchedIDs.insert(event.id)
+                fullCards.append(event)
+            } else if stickyIDs.contains(event.id) {
+                fullCards.append(event)
+            } else {
+                let summary = PromptLibrary.singleLine(
+                    event.consequence.isEmpty ? event.development : event.consequence
+                )
+                let line = summary.isEmpty
+                    ? "• 【\(PromptLibrary.singleLine(event.title))】"
+                    : "• 【\(PromptLibrary.singleLine(event.title))】\(summary)"
+                compressedLines.append(line)
+            }
+        }
+
+        var sections: [String] = []
+        if !compressedLines.isEmpty {
+            sections.append("【前情脉络】\n" + compressedLines.joined(separator: "\n"))
+        }
+        if !fullCards.isEmpty {
+            sections.append(PromptComposer.renderEvents(fullCards))
+        }
+        return (sections.joined(separator: "\n\n"), matchedIDs)
+    }
+
+    /// 语料库超预算时按关键词重合度筛选，保持原始顺序发送以维护 KV Cache 前缀。
+    static func selectCorpus(
+        _ entries: [PromptAssembly.Corpus],
+        scanText: String,
+        budget: Int
+    ) -> [PromptAssembly.Corpus] {
+        let totalTokens = entries.reduce(0) { $0 + TokenEstimator.estimate($1.text) }
+        guard totalTokens > budget else { return entries }
+
+        let scored = entries.enumerated().map { idx, entry -> (index: Int, score: Int, cost: Int) in
+            var score = entry.category == "仿写样本" ? 1 : 0
+            let tokens = (entry.entryName + " " + entry.category)
+                .split { $0.isWhitespace || $0.isPunctuation }
+                .map(String.init)
+                .filter { $0.count >= 2 }
+            for token in tokens where scanText.localizedCaseInsensitiveContains(token) {
+                score += 2
+            }
+            return (idx, score, TokenEstimator.estimate(entry.text))
+        }
+
+        var keptIndices: Set<Int> = []
+        var used = 0
+        for item in scored.sorted(by: {
+            if $0.score != $1.score { return $0.score > $1.score }
+            return $0.index < $1.index
+        }) {
+            if !keptIndices.isEmpty && used + item.cost > budget { continue }
+            used += item.cost
+            keptIndices.insert(item.index)
+        }
+        return entries.enumerated()
+            .filter { keptIndices.contains($0.offset) }
+            .map(\.element)
+    }
+
+    private static func matchesCharacter(_ card: CharacterCard, in text: String) -> Bool {
+        let candidates = ([card.name] + card.aliases)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return candidates.contains { text.localizedCaseInsensitiveContains($0) }
+    }
+}

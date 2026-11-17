@@ -892,6 +892,13 @@ struct WriterPane: View {
 
         var group2: [UIMenuElement] = [
             UIAction(
+                title: "去 AI 味精修",
+                image: UIImage(systemName: "sparkles"),
+                attributes: isBusy ? .disabled : []
+            ) { _ in
+                controller.polishMessage(messageID: message.id, session: session, store: store)
+            },
+            UIAction(
                 title: "重新生成",
                 image: UIImage(systemName: "arrow.clockwise"),
                 attributes: isBusy ? .disabled : []

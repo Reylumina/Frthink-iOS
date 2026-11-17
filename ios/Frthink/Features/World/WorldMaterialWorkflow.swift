@@ -243,6 +243,69 @@ enum WorldMaterialWorkflow {
         return NotesOutcome(updated: true)
     }
 
+    /// 深度文风蒸馏：统计语言指纹 + 自动抽取原著 Few-Shot 范文入语料库 + 生成 5 维仿写模板。
+    static func distillStyleProfile(
+        session: ProjectSession,
+        store: AppStore
+    ) async throws -> String {
+        let context = try WorldRequestContext.make(store: store, thinking: false)
+        let manuscript = session.manuscript
+        let trimmed = manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw WorldWorkflowError.emptyManuscript
+        }
+
+        let fingerprint = StyleDistiller.analyzeFingerprint(trimmed)
+        let exemplars = StyleDistiller.selectExemplarPassages(from: trimmed)
+        let budget = (try? PromptBudget.make(
+            settings: store.settings,
+            model: context.provider.resolvedModel
+        ))?.effectiveInputBudget ?? store.settings.inputBudgetTokens
+        let messages = StyleDistiller.distillMessages(
+            sampleText: trimmed,
+            fingerprint: fingerprint,
+            existingTemplate: session.payload.world.styleTemplate,
+            inputBudget: budget
+        )
+        let distilled = try await context.completeOrThrow(
+            messages,
+            errorPrefix: "深度蒸馏文风失败"
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !distilled.isEmpty {
+            session.payload.world.styleTemplate = distilled
+            session.scheduleSave()
+        }
+
+        if !exemplars.isEmpty {
+            let libName = "本书蒸馏范文 · \(session.project.title)"
+            let entries = exemplars.enumerated().map { idx, text in
+                CorpusEntry(
+                    source: "distill-\(idx + 1)",
+                    title: "原著范文 \(idx + 1)",
+                    text: text,
+                    category: "仿写样本"
+                )
+            }
+            var libraries = store.settings.corpusLibraries
+            if let existingIdx = libraries.firstIndex(where: { $0.name == libName }) {
+                libraries[existingIdx].entries = entries
+                libraries[existingIdx].enabled = true
+            } else {
+                libraries.append(CorpusLibrary(
+                    name: libName,
+                    entries: entries,
+                    enabled: true
+                ))
+            }
+            store.settings.corpusLibraries = libraries
+            store.settings.corpusEnabled = true
+            store.saveSettings()
+        }
+
+        return "已更新 6 维风格指纹，并写入 \(exemplars.count) 段原著范文到语料库"
+    }
+
     // MARK: - 公共
 
     /// 素材归纳基于上次处理偏移增量继续；前缀哈希失配则判定正文已修改并重置进度。

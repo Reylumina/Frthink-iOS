@@ -54,6 +54,14 @@ struct SettingsPromptPage: View {
         Section {
             Toggle("启用语料收集库", isOn: settingsBinding(store, \.corpusEnabled))
             Toggle("默认流式输出", isOn: settingsBinding(store, \.streamByDefault))
+            Toggle("尾段风格锚定", isOn: settingsBinding(store, \.reinforceStyleAtTail))
+            Toggle("动态按需激活人物与事件卡", isOn: settingsBinding(store, \.dynamicContextActivation))
+            Picker("历史思维链回灌", selection: settingsBinding(store, \.reasoningContextPolicy)) {
+                ForEach(ReasoningContextPolicy.allCases) { policy in
+                    Text(policy.displayName).tag(policy)
+                }
+            }
+            .pickerStyle(.menu)
         } header: {
             AppSectionHeader(title: "写作行为")
         }

@@ -361,15 +361,36 @@ enum PromptComposer {
 
     // MARK: - 历史消息
 
-    /// `ChatMessage` → `LLMMessage`：空内容丢弃，角色直映射。
+    /// `ChatMessage` → `LLMMessage`：空内容丢弃，角色直映射，并按策略附带思维链。
     /// 写请求组装与上下文占用估算共用这一份规则。
-    static func llmMessages(from messages: [ChatMessage]) -> [LLMMessage] {
-        messages.compactMap { message -> LLMMessage? in
+    static func llmMessages(
+        from messages: [ChatMessage],
+        reasoningPolicy: ReasoningContextPolicy = .all
+    ) -> [LLMMessage] {
+        var assistantIndices: [Int] = []
+        for (idx, msg) in messages.enumerated() where msg.role == .assistant {
+            if !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                assistantIndices.append(idx)
+            }
+        }
+        let keptReasoningIndices: Set<Int>
+        switch reasoningPolicy {
+        case .none:
+            keptReasoningIndices = []
+        case .recentTwo:
+            keptReasoningIndices = Set(assistantIndices.suffix(2))
+        case .all:
+            keptReasoningIndices = Set(assistantIndices)
+        }
+
+        return messages.enumerated().compactMap { index, message -> LLMMessage? in
             let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !content.isEmpty else { return nil }
             switch message.role {
             case .user: return LLMMessage.user(content)
-            case .assistant: return LLMMessage.assistant(content)
+            case .assistant:
+                let reasoning = keptReasoningIndices.contains(index) ? message.reasoning : nil
+                return LLMMessage.assistant(content, reasoningContent: reasoning)
             case .system: return LLMMessage.system(content)
             }
         }

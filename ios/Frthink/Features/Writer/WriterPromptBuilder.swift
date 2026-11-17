@@ -28,6 +28,9 @@ struct WriterPromptSnapshot {
     var explicitBodyRange: PromptLibrary.BodyRange
     /// 历史裁剪与预算检查共用的有效输入预算。
     var inputBudget: Int
+    /// 上几轮激活、仍处于 Sticky 黏性窗口内的人物卡/事件卡 id。
+    var stickyCharacterIDs: Set<String> = []
+    var stickyEventIDs: Set<String> = []
 }
 
 struct WriterPreparedPrompt {
@@ -35,6 +38,8 @@ struct WriterPreparedPrompt {
     var sourceIds: [String]
     var omittedHistoryMessages: Int
     var estimatedInputTokens: Int
+    var matchedCharacterIDs: Set<String> = []
+    var matchedEventIDs: Set<String> = []
 }
 
 /// 预算重试的三种结果。
@@ -91,31 +96,68 @@ enum WriterPromptBuilder {
                 locked: true
             ))
         }
+        let currentInstruction: String?
+        if case .send(let instruction) = snapshot.action {
+            currentInstruction = instruction
+        } else {
+            currentInstruction = nil
+        }
+        let scanText = DynamicContextSelector.makeScanText(
+            instruction: currentInstruction,
+            messages: snapshot.messages,
+            bodyWindow: effective.text
+        )
+        let dynamicSelection = DynamicContextSelector.select(
+            world: snapshot.world,
+            scanText: scanText,
+            inputBudget: snapshot.inputBudget,
+            stickyCharacterIDs: snapshot.stickyCharacterIDs,
+            stickyEventIDs: snapshot.stickyEventIDs,
+            enabled: snapshot.settings.dynamicContextActivation
+        )
+        assembly.characters = dynamicSelection.characters
+        assembly.plotOutline = dynamicSelection.renderedEvents
+        if snapshot.settings.dynamicContextActivation {
+            assembly.corpus = DynamicContextSelector.selectCorpus(
+                assembly.corpus,
+                scanText: scanText,
+                budget: max(1, snapshot.inputBudget / 4)
+            )
+        }
         try checkpoint()
 
         let prefixMessages = PromptComposer.writingPrefixMessages(assembly: assembly)
+        let reasoningPolicy = snapshot.settings.reasoningContextPolicy
+        let tailAnchor = styleTailAnchor(snapshot: snapshot)
         let history: [LLMMessage]
         let built: [LLMMessage]
         switch snapshot.action {
         case .send(let instruction):
-            history = PromptComposer.llmMessages(from: snapshot.messages)
+            history = PromptComposer.llmMessages(from: snapshot.messages, reasoningPolicy: reasoningPolicy)
+            let effectiveInstruction = tailAnchor.map { "\($0)\n\n\(instruction)" } ?? instruction
             built = PromptComposer.writingMessages(
                 assembly: assembly,
                 history: history,
-                userInstruction: instruction
+                userInstruction: effectiveInstruction
             )
         case .continueWriting:
             // 若最后一条就是助手消息，将其从历史中剥离并作为续接片段，避免同一内容重复发送两遍。
             if let last = snapshot.messages.last, last.role == .assistant {
                 let fragment = last.content
-                history = PromptComposer.llmMessages(from: snapshot.messages.dropLast())
+                history = PromptComposer.llmMessages(
+                    from: snapshot.messages.dropLast(),
+                    reasoningPolicy: reasoningPolicy
+                )
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: history,
                     fragment: fragment
                 )
             } else {
-                history = PromptComposer.llmMessages(from: snapshot.messages)
+                history = PromptComposer.llmMessages(
+                    from: snapshot.messages,
+                    reasoningPolicy: reasoningPolicy
+                )
                 let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })?.content ?? ""
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
@@ -127,7 +169,10 @@ enum WriterPromptBuilder {
             let prefix = index > 0
                 ? Array(snapshot.messages[..<min(index, snapshot.messages.count)])
                 : []
-            var regenHistory = PromptComposer.llmMessages(from: prefix)
+            var regenHistory = PromptComposer.llmMessages(
+                from: prefix,
+                reasoningPolicy: reasoningPolicy
+            )
             if let last = regenHistory.last, last.role == "assistant" {
                 regenHistory.removeLast()
                 built = PromptComposer.continueFragmentMessages(
@@ -156,7 +201,9 @@ enum WriterPromptBuilder {
             messages: trimmed.messages,
             sourceIds: assembly.sourceIds,
             omittedHistoryMessages: trimmed.omitted,
-            estimatedInputTokens: TokenEstimator.estimate(messages: trimmed.messages)
+            estimatedInputTokens: TokenEstimator.estimate(messages: trimmed.messages),
+            matchedCharacterIDs: dynamicSelection.matchedCharacterIDs,
+            matchedEventIDs: dynamicSelection.matchedEventIDs
         )
     }
 
@@ -275,6 +322,24 @@ enum WriterPromptBuilder {
         result.append(contentsOf: kept)
         result.append(contentsOf: tailMessages)
         return (result, omitted)
+    }
+
+    /// 尾段风格锚定（对齐 SillyTavern Author's Note Depth-0 注入）：
+    /// 放在最后一条 `user` 指令之前，不改动 `system` 与 `history` 前缀，
+    /// 在 100% 保留前缀 KV Cache 命中的同时避免长上下文下的风格衰减。
+    private static func styleTailAnchor(snapshot: WriterPromptSnapshot) -> String? {
+        guard snapshot.settings.reinforceStyleAtTail else { return nil }
+        let style = snapshot.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let flavor = snapshot.settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        var parts: [String] = []
+        if !style.isEmpty {
+            parts.append("文风仿写要求：" + style)
+        }
+        if !flavor.isEmpty {
+            parts.append("审查禁忌：" + flavor)
+        }
+        guard !parts.isEmpty else { return nil }
+        return "[写作风格与禁忌提醒]\n" + parts.joined(separator: "\n")
     }
 }
 

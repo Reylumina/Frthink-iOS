@@ -28,6 +28,7 @@ enum WorldBusy: Equatable {
     case refreshingWorld
     case extractingEvents
     case extractingStyleNotes
+    case distillingStyle
     case updatingRules
 
     var label: String {
@@ -35,6 +36,7 @@ enum WorldBusy: Equatable {
         case .refreshingWorld: return "正在刷新人物卡…"
         case .extractingEvents: return "正在抽取事件卡…"
         case .extractingStyleNotes: return "正在提炼文风笔记…"
+        case .distillingStyle: return "正在深度蒸馏文风与范文…"
         case .updatingRules: return "正在整理长期规则…"
         }
     }
@@ -134,6 +136,7 @@ struct WorldPane: View {
                     busy: busy,
                     isActionDisabled: busy != nil,
                     onExtractStyleNotes: startStyleNoteExtraction,
+                    onDistillStyle: startStyleDistillation,
                     onUpdateRules: startLongTermRuleUpdate
                 )
             }
@@ -340,6 +343,18 @@ struct WorldPane: View {
                 store: self.store
             )
             return outcome.summary
+        }
+    }
+
+    private func startStyleDistillation() {
+        startWorldTask(
+            kind: .distillingStyle,
+            cancelled: "已停止深度蒸馏。"
+        ) {
+            try await WorldMaterialWorkflow.distillStyleProfile(
+                session: self.session,
+                store: self.store
+            )
         }
     }
 

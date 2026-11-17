@@ -35,9 +35,14 @@ final class WriterController {
     /// 已收到的思考字符数。流式期间只靠它判断要不要刷新思考区，
     /// 不必每次刷新都比较长字符串。
     private(set) var streamingReasoningCharacterCount = 0
+    /// 思考过程文本同步节流时间戳，降低长思维链逐帧字符串拷贝频率。
+    private var lastReasoningSyncTime: ContinuousClock.Instant?
 
     /// 自动摘要进行中，避免并发重复请求。
     private var autoSummarizing = false
+    /// 动态上下文 Sticky 黏性计数：记录各人物卡/事件卡剩余保持激活的轮数。
+    private var stickyCharacterTurns: [String: Int] = [:]
+    private var stickyEventTurns: [String: Int] = [:]
 
     /// 正在后台组装提示词。此时还没有开始生成，界面显示「整理提示词…」。
     private(set) var isPreparing = false
@@ -218,6 +223,52 @@ final class WriterController {
             bodyRange: .full,
             regenerateFallbackVariant: previousVariant
         )
+    }
+
+    /// 去 AI 味精修（Deslop Critic Pass）：将指定助手回复按当前仿写模板与审查规则重洗为新变体。
+    func polishMessage(messageID: String, session: ProjectSession, store: AppStore) {
+        guard !isGenerating, !isPreparing else { return }
+        guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID }),
+              session.payload.messages[index].role == .assistant else {
+            store.toast = "该助手消息已不存在"
+            return
+        }
+        let draft = session.payload.messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else {
+            store.toast = "这条消息没有可精修的正文"
+            return
+        }
+        do {
+            let (client, provider) = try activeClient(store: store)
+            let plan = try budget(for: provider, settings: store.settings)
+            let messages = StyleDistiller.polishMessages(
+                draft: draft,
+                styleTemplate: session.payload.world.styleTemplate,
+                aiFlavorRules: store.settings.aiFlavorRules
+            )
+            let prepared = WriterPreparedPrompt(
+                messages: messages,
+                sourceIds: ["task:deslop-polish"],
+                omittedHistoryMessages: 0,
+                estimatedInputTokens: TokenEstimator.estimate(messages: messages)
+            )
+            let fallbackVariant = session.payload.messages[index].selectedVariant
+            session.clearInterrupted(messageID)
+            session.addVariant(to: messageID)
+            run(
+                client: client,
+                provider: provider,
+                plan: plan,
+                prepared: prepared,
+                session: session,
+                store: store,
+                messageID: messageID,
+                isNewMessage: false,
+                fallbackVariant: fallbackVariant
+            )
+        } catch {
+            store.errorMessage = error.localizedDescription
+        }
     }
 
     /// 生成或准备中：界面上的编辑/删除动作都要禁用。
@@ -457,7 +508,9 @@ final class WriterController {
             bodyPromptTailCodePoints: session.payload.bodyPromptTailCodePoints,
             continuationAnchor: session.payload.continuationAnchor,
             explicitBodyRange: bodyRange,
-            inputBudget: plan.effectiveInputBudget
+            inputBudget: plan.effectiveInputBudget,
+            stickyCharacterIDs: Set(stickyCharacterTurns.keys),
+            stickyEventIDs: Set(stickyEventTurns.keys)
         )
     }
 
@@ -537,6 +590,10 @@ final class WriterController {
         session: ProjectSession,
         store: AppStore
     ) {
+        updateStickyCaches(
+            matchedCharacters: prepared.matchedCharacterIDs,
+            matchedEvents: prepared.matchedEventIDs
+        )
         switch preparation.action {
         case .send:
             // 用户气泡在准备阶段已经落盘，这里只接助手回复。
@@ -681,6 +738,7 @@ final class WriterController {
         streamingCharacterCount = 0
         streamingReasoning = nil
         streamingReasoningCharacterCount = 0
+        lastReasoningSyncTime = nil
         displayTick = 0
         pendingDelta = ""
         reasoningBuffer = ""
@@ -875,8 +933,13 @@ final class WriterController {
             streamingReasoningCharacterCount != reasoningBufferCharacterCount
         guard textChanged || reasoningChanged else { return }
         if reasoningChanged {
-            streamingReasoning = reasoningBuffer
             streamingReasoningCharacterCount = reasoningBufferCharacterCount
+            let now = ContinuousClock.now
+            let shouldSyncText = lastReasoningSyncTime.map { now - $0 >= .milliseconds(250) } ?? true
+            if shouldSyncText {
+                streamingReasoning = reasoningBuffer
+                lastReasoningSyncTime = now
+            }
         }
         if textChanged {
             streamingText = displayBuffer
@@ -970,11 +1033,13 @@ final class WriterController {
         }
         session.finishGeneration()
 
+        let completedReasoning = reasoningBuffer.isEmpty ? nil : reasoningBuffer
         let wasStopped = stopRequested
         isGenerating = false
         streamingMessageID = nil
         streamingReasoning = nil
         streamingReasoningCharacterCount = 0
+        lastReasoningSyncTime = nil
         streamingText = ""
         streamingCharacterCount = 0
         pendingDelta = ""
@@ -990,7 +1055,7 @@ final class WriterController {
 
         if cancelled {
             if !produced.isEmpty {
-                session.finishAssistantMessage(messageID, model: model)
+                session.finishAssistantMessage(messageID, model: model, reasoning: completedReasoning)
                 store.toast = "生成已停止，已收到的部分内容保存在原气泡"
             } else {
                 if isNewMessage {
@@ -1024,7 +1089,7 @@ final class WriterController {
             return
         }
 
-        session.finishAssistantMessage(messageID, model: model)
+        session.finishAssistantMessage(messageID, model: model, reasoning: completedReasoning)
         #if DEBUG
         if LaunchArguments.mockStream {
             print("[MOCK STREAM DONE] chars=\(produced.count)")
@@ -1092,5 +1157,33 @@ final class WriterController {
     private func isCancellation(_ error: Error?) -> Bool {
         guard let error else { return false }
         return error.isLLMCancellation
+    }
+
+    private func updateStickyCaches(
+        matchedCharacters: Set<String>,
+        matchedEvents: Set<String>
+    ) {
+        stickyCharacterTurns = decayAndRefreshSticky(
+            stickyCharacterTurns,
+            matched: matchedCharacters
+        )
+        stickyEventTurns = decayAndRefreshSticky(
+            stickyEventTurns,
+            matched: matchedEvents
+        )
+    }
+
+    private func decayAndRefreshSticky(
+        _ current: [String: Int],
+        matched: Set<String>
+    ) -> [String: Int] {
+        var next: [String: Int] = [:]
+        for (id, remaining) in current where remaining > 1 {
+            next[id] = remaining - 1
+        }
+        for id in matched {
+            next[id] = DynamicContextSelector.stickyDurationTurns
+        }
+        return next
     }
 }

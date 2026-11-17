@@ -384,6 +384,7 @@ struct WorldCharactersSection: View {
         let ids = pendingDeleteIDs
         pendingDeleteIDs.removeAll()
         session.payload.world.characters.removeAll { ids.contains($0.id) }
+        session.payload.world.analysisMergedCards.removeAll { ids.contains($0.id) }
         session.scheduleSave()
     }
 }

@@ -311,12 +311,18 @@ struct WorldCharacterEditor: View {
         // 若新建卡片内容为空则移除该条目，保持列表数据有效。
         if Self.isBlank(merged) {
             session.payload.world.characters.remove(at: index)
+            session.payload.world.analysisMergedCards.removeAll { $0.id == cardID }
             session.scheduleSave()
             return
         }
         guard merged != session.payload.world.characters[index] else { return }
         merged.updatedAt = Date()
         session.payload.world.characters[index] = merged
+        if let mergedIndex = session.payload.world.analysisMergedCards.firstIndex(where: {
+            $0.id == cardID
+        }) {
+            session.payload.world.analysisMergedCards[mergedIndex] = merged
+        }
         draft = merged
         session.scheduleSave()
     }
@@ -346,6 +352,7 @@ struct WorldCharacterEditor: View {
 
     private func deleteCard() {
         session.payload.world.characters.removeAll { $0.id == cardID }
+        session.payload.world.analysisMergedCards.removeAll { $0.id == cardID }
         session.scheduleSave()
         dismiss()
     }

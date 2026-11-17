@@ -90,10 +90,19 @@ final class AnthropicClient: LLMClient {
             "stream": request.stream,
         ]
         if !systemText.isEmpty {
-            body["system"] = systemText
+            // Anthropic 默认不自动缓存；system 达到 1024 tokens 门槛时显式挂 ephemeral 断点。
+            if TokenEstimator.estimate(systemText) >= 1024 {
+                body["system"] = [[
+                    "type": "text",
+                    "text": systemText,
+                    "cache_control": ["type": "ephemeral"],
+                ]]
+            } else {
+                body["system"] = systemText
+            }
         }
 
-        let mappedTools: [[String: Any]] = (request.tools ?? []).compactMap { tool in
+        var mappedTools: [[String: Any]] = (request.tools ?? []).compactMap { tool in
             guard let data = tool.parametersJSON.data(using: .utf8),
                   let params = try? JSONSerialization.jsonObject(with: data) else {
                 return nil
@@ -103,6 +112,23 @@ final class AnthropicClient: LLMClient {
                 "description": tool.description,
                 "input_schema": params,
             ]
+        }
+        if !mappedTools.isEmpty, TokenEstimator.estimate(systemText) >= 1024 {
+            mappedTools[mappedTools.count - 1]["cache_control"] = ["type": "ephemeral"]
+        }
+        if chatMessages.count >= 2 {
+            let prefixTokens = chatMessages.dropLast().reduce(0) { sum, msg in
+                sum + TokenEstimator.estimate(msg["content"] as? String ?? "")
+            }
+            if prefixTokens >= 1024,
+               let text = chatMessages[chatMessages.count - 2]["content"] as? String {
+                chatMessages[chatMessages.count - 2]["content"] = [[
+                    "type": "text",
+                    "text": text,
+                    "cache_control": ["type": "ephemeral"],
+                ]]
+                body["messages"] = chatMessages
+            }
         }
         let forcesTool = !mappedTools.isEmpty
             && !(request.toolChoiceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
@@ -142,7 +168,7 @@ final class AnthropicClient: LLMClient {
             }
         }
 
-        return (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+        return (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()
     }
 
     private static func effectiveThinkingLevel(

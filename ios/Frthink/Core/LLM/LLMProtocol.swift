@@ -5,10 +5,13 @@ import Foundation
 struct LLMMessage: Codable, Hashable {
     var role: String
     var content: String
+    var reasoningContent: String? = nil
 
     static func system(_ s: String) -> LLMMessage { .init(role: "system", content: s) }
     static func user(_ s: String) -> LLMMessage { .init(role: "user", content: s) }
-    static func assistant(_ s: String) -> LLMMessage { .init(role: "assistant", content: s) }
+    static func assistant(_ s: String, reasoningContent: String? = nil) -> LLMMessage {
+        .init(role: "assistant", content: s, reasoningContent: reasoningContent)
+    }
 }
 
 /// 发给 `tools` 的函数定义（OpenAI function calling）。
@@ -94,9 +97,21 @@ struct LLMRequest {
         providerLevel: ThinkingLevel,
         offStyle: ReasoningOffStyle = .none
     ) -> Data {
+        let serializedMessages: [[String: Any]] = messages.map { msg in
+            var dict: [String: Any] = ["role": msg.role, "content": msg.content]
+            // DeepSeek 协议原生支持在 assistant 消息上携带结构化 reasoning_content，
+            // 服务端会自动处理跨轮 KV Cache，不拼进 content 以免破坏缓存前缀命中。
+            if isDeepSeek,
+               msg.role == "assistant",
+               let reasoning = msg.reasoningContent,
+               !reasoning.isEmpty {
+                dict["reasoning_content"] = reasoning
+            }
+            return dict
+        }
         var body: [String: Any] = [
             "model": model,
-            "messages": messages.map { ["role": $0.role, "content": $0.content] },
+            "messages": serializedMessages,
             "stream": stream,
         ]
 
@@ -172,7 +187,8 @@ struct LLMRequest {
 
         body["max_tokens"] = maxTokens
 
-        return (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+        // 固定键序序列化，避免嵌套字典 hash 抖动破坏服务端 KV Cache 前缀匹配。
+        return (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()
     }
 
     private func effectiveLevel(providerLevel: ThinkingLevel) -> ThinkingLevel {

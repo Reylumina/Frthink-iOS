@@ -2258,6 +2258,65 @@ enum SelfCheck {
                     && OpenAICompatiblePreset.match(baseURL: "https://open.bigmodel.cn/api/paas/v4") == .zai,
                 "OpenAI 兼容预设反推不准确"
             )
+
+            // 动态按需激活：仅在超预算时筛选命中/黏性人物并保持原始顺序，并将远期无关事件压缩为单行脉络。
+            var manyChars: [CharacterCard] = (0..<8).map {
+                CharacterCard(
+                    id: "c\($0)",
+                    name: "路人\($0)",
+                    identity: String(repeating: "背景设定", count: 30)
+                )
+            }
+            manyChars.append(CharacterCard(id: "c_target", name: "沈照", aliases: ["阿照"]))
+            let manyEvents: [EventCard] = (0..<10).map {
+                EventCard(
+                    id: "e\($0)",
+                    title: "事件\($0)",
+                    characters: $0 == 0 ? ["沈照"] : ["路人\($0)"],
+                    consequence: String(repeating: "结果\($0) ", count: 20)
+                )
+            }
+            var dynWorld = WorldBook()
+            dynWorld.characters = manyChars
+            dynWorld.events = manyEvents
+            let dynSel = DynamicContextSelector.select(
+                world: dynWorld,
+                scanText: "阿照推门进屋",
+                inputBudget: 400,
+                stickyCharacterIDs: ["c2"],
+                stickyEventIDs: [],
+                enabled: true
+            )
+            try expect(
+                dynSel.characters.contains { $0.id == "c_target" }
+                    && dynSel.characters.contains { $0.id == "c2" }
+                    && dynSel.characters.count < manyChars.count,
+                "超预算时动态人物筛选应保留别名命中与 Sticky 角色并过滤无关路人"
+            )
+            try expect(
+                dynSel.renderedEvents.contains("【前情脉络】")
+                    && dynSel.renderedEvents.contains("• 【事件1】")
+                    && dynSel.renderedEvents.contains("【事件9】"),
+                "超预算时动态事件分层应保留近期/关联事件全貌并压缩远期无关事件"
+            )
+
+            // 深度蒸馏器：语言指纹统计 + 原著 Few-Shot 范文抽取 + 去 AI 味精修提示词。
+            let sampleProse = String(repeating: "风过长街。他按住刀柄，没有回头。“进来。”门后有人低声道。\n", count: 15)
+            let fp = StyleDistiller.analyzeFingerprint(sampleProse)
+            let exemplars = StyleDistiller.selectExemplarPassages(from: sampleProse)
+            let polishMsgs = StyleDistiller.polishMessages(
+                draft: "空气仿佛凝固，他嘴角勾起一抹冷笑。",
+                styleTemplate: "短句冷峻",
+                aiFlavorRules: ""
+            )
+            try expect(
+                fp.averageSentenceLength > 0 && fp.dialogueRatio > 0 && !exemplars.isEmpty,
+                "风格蒸馏器应正确统计语言指纹并抽取代表性原著范文"
+            )
+            try expect(
+                polishMsgs.count == 2 && polishMsgs[1].content.contains("短句冷峻"),
+                "去 AI 味精修应注入当前仿写风格指纹"
+            )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 

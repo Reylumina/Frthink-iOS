@@ -815,6 +815,10 @@ final class ProjectSession {
             guard message.variants.count > 1 else { return false }
             let selected = min(max(message.selectedVariant, 0), message.variants.count - 1)
             message.variants = [message.variants[selected]]
+            if let reasonings = message.variantReasonings {
+                let kept = reasonings.indices.contains(selected) ? reasonings[selected] : ""
+                message.variantReasonings = kept.isEmpty ? nil : [kept]
+            }
             message.selectedVariant = 0
             return true
         }
@@ -1063,9 +1067,12 @@ final class ProjectSession {
         }
     }
 
-    func finishAssistantMessage(_ messageID: String, model: String?) {
+    func finishAssistantMessage(_ messageID: String, model: String?, reasoning: String? = nil) {
         mutateMessage(messageID) { message in
             message.model = model ?? message.model
+            if let reasoning, !reasoning.isEmpty {
+                message.setReasoning(reasoning, forVariant: message.selectedVariant)
+            }
             return true
         }
     }
@@ -1074,6 +1081,9 @@ final class ProjectSession {
     func addVariant(to messageID: String) {
         mutateMessage(messageID, save: false) { message in
             message.variants.append("")
+            if message.variantReasonings != nil {
+                message.variantReasonings?.append("")
+            }
             message.selectedVariant = message.variants.count - 1
             return true
         }
@@ -1121,6 +1131,10 @@ final class ProjectSession {
         } else {
             let removed = min(max(message.selectedVariant, 0), message.variants.count - 1)
             message.variants.remove(at: removed)
+            if var reasonings = message.variantReasonings, reasonings.indices.contains(removed) {
+                reasonings.remove(at: removed)
+                message.variantReasonings = reasonings
+            }
             if message.selectedVariant >= message.variants.count {
                 message.selectedVariant = message.variants.count - 1
             }

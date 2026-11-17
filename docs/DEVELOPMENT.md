@@ -111,10 +111,10 @@ java -cp tools/jadx-1.5.6-all.jar jadx.cli.JadxCLI -d out/jadx dx/classes.dex
 | 编辑器窗口只覆盖书末 | 跳到更早章节会扩窗口至书末；改写仍拼全文 | `ProjectSession.editorWindow` |
 | 结构改动仍整份写 `payload.json` | 打字只写正文，世界/对话改动仍全量编码 | `ProjectSession.flushSave()` |
 | 后台执行只有约 30 秒额度 | 系统收回后流式中断，已收内容保留 | `WriterController.beginBackgroundTask()` |
-| 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` / `ArchiveSnapshot.swift` / `ArchiveRestore.swift` |
+| 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑/删除卡片已同步更新 `analysisMergedCards` | `WorldCharacterEditor.swift` / `WorldCharactersSection.swift` |
 | 长书首次发送仍主线程整本解密 | 初次执行续写或世界刷新时存在短暂卡顿，后续调用复用内存缓存 | `ProjectSession.manuscript` 是副作用 getter |
 | 生成检查点每 3 秒改 `payload.messages` | 写作台每 3 秒可能整页重算一次，与 PERFORMANCE §2.1 的描述不一致 | `WriterController.persistPendingDelta` |
-| P19 归纳预设只存不用 | 导入导出保持完整保真，但未注入任何提示词；在原版消费逻辑完成逆向取证前，暂不接入实际业务流程 | `ArchiveRestore.swift`、`PromptComposer+Material.swift` |
+| P19 归纳预设只存不用 | 已核对 `out-0.8.213` Java 与 smali，原版 `plotOutlineInstruction` / `imitationInstruction` 仅存在于设置模型与序列化中、无业务消费点，iOS 保持导入导出保真一致 | `ArchiveRestore.swift`、`PromptComposer+Material.swift` |
 | 长文编辑仍有一处在 sheet | `ManuscriptReaderSheet` 全屏读正文，DESIGN §5.10 要求 push | `ManuscriptReaderSheet` |
 
 ## 7. 约定
