@@ -40,6 +40,7 @@ struct WriterPane: View {
     @State private var cursorPlaced = false
     /// 对话只渲染最近 N 条；更早的按原版「加载更早的对话」补。
     @State private var visibleMessageCount = 15
+    @State private var expandedReasoningIDs: Set<String> = []
     @State private var budgetPresented = false
     @State private var activeSheet: WriterSheet?
     @State private var isImportingBody = false
@@ -791,6 +792,14 @@ struct WriterPane: View {
             isInterrupted: session.isInterrupted(message.id),
             bodyMaxWidth: bodyMaxWidth,
             userBubbleMaxWidth: userBubbleMaxWidth,
+            isReasoningExpanded: expandedReasoningIDs.contains(message.id),
+            onToggleReasoning: {
+                if expandedReasoningIDs.contains(message.id) {
+                    expandedReasoningIDs.remove(message.id)
+                } else {
+                    expandedReasoningIDs.insert(message.id)
+                }
+            },
             actions: actions
         )
 

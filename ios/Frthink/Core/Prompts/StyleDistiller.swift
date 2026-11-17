@@ -291,15 +291,15 @@ enum StyleDistiller {
         return parts.joined(separator: "\n\n")
     }
 
-    /// 为抽取的原著节选反推「情境指令 + 技法重心」，用于写作时构造高浓度 Few-Shot 对话示范。
+    /// 为抽取的原著节选反推纯写作技法指令（严禁包含原著人名、地名与剧情，避免写作时带偏正文衔接）。
     static func exemplarPromptsMessages(
         for passages: [String],
         fingerprint: LinguisticFingerprint? = nil
     ) -> [LLMMessage] {
         let statHint = fingerprint.map { "参考语言统计：\($0.summaryLine)\n" } ?? ""
         let system = """
-        \(statHint)请为下面每段原著节选各提炼一条「情境指令 + 技法重心」（30至55字），概括该段的情节动作、句式节奏与描写/对白重心，作为后续模仿写作的对照提示。
-        严格按输入顺序每段输出一行，不要编号、不要引号、不要 Markdown 或多余解释。
+        \(statHint)请为下面每段原著节选各提炼一条纯写作技法指令（25至45字），只概括该段的句式节奏、描写分寸、视角落点或对白留白技巧。
+        严禁出现任何原著人名、地名、具体物品或剧情事件；严格按输入顺序每段输出一行，不要编号、不要引号、不要 Markdown。
         """
         let numbered = passages.enumerated().map { idx, text in
             "[\(idx + 1)]\n\(text)"
@@ -323,7 +323,7 @@ enum StyleDistiller {
         }
     }
 
-    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造固定前置对话示范（user 指令 → assistant 原文）。
+    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造固定前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
         maxPairs: Int = 2,
@@ -343,9 +343,10 @@ enum StyleDistiller {
         for entry in samples.prefix(maxPairs) {
             let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
-            let prompt = isPlaceholder
-                ? "请贴合本书文风与叙事节奏继续写作下文。"
-                : "写作指令与技法重心：\(rawTitle)"
+            let technique = isPlaceholder
+                ? "保持本书的句式节奏、描写分寸与对白留白。"
+                : rawTitle
+            let prompt = "【文风示范（仅效仿笔法与语感，勿沿用其中人物与剧情）】\n技法要求：\(technique)"
             let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
             if let tokenBudget, !messages.isEmpty, usedTokens + pairCost > tokenBudget {
                 break
