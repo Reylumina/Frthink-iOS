@@ -10,7 +10,6 @@ struct CorpusLibraryManagerSheet: View {
 
     @State private var nameAction: CorpusLibraryNameAction?
     @State private var pendingDelete: CorpusLibrary?
-    @State private var confirmingClearAll = false
 
     private var libraries: [CorpusLibrary] {
         store.settings.corpusLibraries
@@ -40,13 +39,6 @@ struct CorpusLibraryManagerSheet: View {
                     librariesSectionContent
                 } header: {
                     AppSectionHeader(title: "语料库（\(libraries.count)）")
-                }
-                if !libraries.isEmpty {
-                    Section {
-                        Button("清空全部语料库", role: .destructive) {
-                            confirmingClearAll = true
-                        }
-                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -91,12 +83,6 @@ struct CorpusLibraryManagerSheet: View {
                     pendingDelete = nil
                 }
                 Button("取消", role: .cancel) { pendingDelete = nil }
-            }
-            .alert("清空全部语料库？", isPresented: $confirmingClearAll) {
-                Button("全部清空", role: .destructive) { clearAllLibraries() }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("将移除全部 \(libraries.count) 个语料库及其内所有条目，此操作不可撤销。")
             }
         }
         .sheetToast()
@@ -143,13 +129,6 @@ struct CorpusLibraryManagerSheet: View {
                     nameAction = .rename(library)
                 } label: {
                     Label("重命名", systemImage: "pencil")
-                }
-                if !library.entries.isEmpty {
-                    Button(role: .destructive) {
-                        clearEntries(in: library)
-                    } label: {
-                        Label("清空条目", systemImage: "eraser")
-                    }
                 }
                 Button(role: .destructive) {
                     pendingDelete = library
@@ -227,23 +206,6 @@ struct CorpusLibraryManagerSheet: View {
         }
         store.saveSettings()
         store.toast = "已删除语料库"
-    }
-
-    private func clearEntries(in library: CorpusLibrary) {
-        var updated = library
-        updated.entries = []
-        updated.processedKeys = []
-        updated.deletedTextKeys = []
-        updated.classifiedKeys = []
-        save(updated)
-        store.toast = "已清空「\(library.name)」的条目"
-    }
-
-    private func clearAllLibraries() {
-        store.settings.corpusLibraries = []
-        activeLibraryID = nil
-        store.saveSettings()
-        store.toast = "已清空全部语料库"
     }
 
     private func save(_ library: CorpusLibrary) {

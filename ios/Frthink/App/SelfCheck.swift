@@ -2326,7 +2326,7 @@ enum SelfCheck {
                     && fewShot.injectedEntryIDs == ["e1"],
                 "Few-Shot 示范注入应生成成对 user/assistant 对话轮次并去重"
             )
-            var isolatedSettings = AppSettings.default
+            var isolatedSettings = AppSettings()
             isolatedSettings.corpusEnabled = true
             isolatedSettings.corpusLibraries = [
                 CorpusLibrary(

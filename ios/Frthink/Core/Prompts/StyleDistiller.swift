@@ -76,7 +76,7 @@ enum StyleDistiller {
     /// 复用 `WorldDigest` 从正文前/中/后挑选最具代表性的原著节选（单句或过短碎片不计入）。
     static func selectExemplarPassages(from text: String, maxCount: Int = 3) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
-        let chunks = WorldDigest.chunks(of: text, tokenBudget: 1000, overlapTokens: 0)
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: 800, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { chunk in
                 guard chunk.count >= 200 else { return false }
@@ -160,14 +160,14 @@ enum StyleDistiller {
     /// 超预算时把全书切分若干连续区间，在每个区间内挑选兼具对白、句式变化与描写密度的代表段落。
     static func buildOverviewSample(from text: String, tokenBudget: Int) -> String {
         guard TokenEstimator.estimate(text) > tokenBudget else { return text }
-        let chunks = WorldDigest.chunks(of: text, tokenBudget: 1000, overlapTokens: 0)
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: 800, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !chunks.isEmpty else {
             return TokenEstimator.trimTail(text, toTokens: tokenBudget)
         }
 
-        let maxSegments = max(1, min(chunks.count, tokenBudget / 1020))
+        let maxSegments = max(1, min(chunks.count, tokenBudget / 820))
         func styleRichnessScore(_ chunk: String) -> Double {
             let count = max(1, chunk.count)
             let quoteCount = chunk.filter { $0 == "“" || $0 == "「" }.count
