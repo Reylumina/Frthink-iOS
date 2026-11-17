@@ -32,13 +32,15 @@ struct WriterMessageBubble: View {
     var bodyMaxWidth: CGFloat = .infinity
     /// 用户气泡的宽度上限 = 对话列宽的 80%（§5.3）。nil 表示列宽还没量到。
     var userBubbleMaxWidth: CGFloat?
+    /// 由外层列表统一维护展开态，确保外层 `NoPreviewContextMenu` 容器同步重算高度。
+    var isReasoningExpanded: Bool = false
+    var onToggleReasoning: () -> Void = {}
     let actions: WriterMessageActions
 
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，创作页跟着用同一个值。
     @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
-    @State private var reasoningExpanded = false
 
     /// 与流式视图、正文编辑器同一套字号。
     private var bodyFontSize: CGFloat {
@@ -128,7 +130,8 @@ struct WriterMessageBubble: View {
             if let reasoning = message.reasoning, !reasoning.isEmpty {
                 WriterCompletedReasoningBlock(
                     reasoning: reasoning,
-                    expanded: $reasoningExpanded,
+                    expanded: isReasoningExpanded,
+                    onToggle: onToggleReasoning,
                     fontSize: max(12, bodyFontSize * 0.82),
                     lineHeight: lineHeight
                 )
@@ -347,17 +350,19 @@ struct WriterStreamingBubble: View {
     }
 }
 
-/// 完成态气泡的思考过程折叠区：默认折叠，展开后置入限高滚动卡片，避免长文本重排整页导致折叠卡顿。
+/// 完成态气泡的思考过程折叠区：默认折叠，展开态由外层维护以驱动容器即时重排。
 private struct WriterCompletedReasoningBlock: View {
     let reasoning: String
-    @Binding var expanded: Bool
+    let expanded: Bool
+    let onToggle: () -> Void
     let fontSize: CGFloat
     let lineHeight: Double
 
     var body: some View {
         WriterReasoningDisclosure(
             characterCount: reasoning.count,
-            expanded: $expanded
+            expanded: expanded,
+            onToggle: onToggle
         ) {
             Text(reasoning)
                 .font(Theme.numeric)
@@ -369,7 +374,7 @@ private struct WriterCompletedReasoningBlock: View {
     }
 }
 
-/// 流式思考过程独立子视图：默认折叠时只读字数；展开后置入限高滚动卡片，避免整页重算与空间滞留。
+/// 流式思考过程独立子视图：默认折叠时只读字数。
 private struct WriterStreamingReasoningBlock: View {
     let controller: WriterController
     @Binding var expanded: Bool
@@ -379,7 +384,8 @@ private struct WriterStreamingReasoningBlock: View {
     var body: some View {
         WriterReasoningDisclosure(
             characterCount: controller.streamingReasoningCharacterCount,
-            expanded: $expanded
+            expanded: expanded,
+            onToggle: { expanded.toggle() }
         ) {
             if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
                 Text(reasoning)
@@ -396,18 +402,13 @@ private struct WriterStreamingReasoningBlock: View {
 /// 思考过程折叠头部与展开容器（流式与完成态共用）。
 private struct WriterReasoningDisclosure<Content: View>: View {
     let characterCount: Int
-    @Binding var expanded: Bool
+    let expanded: Bool
+    let onToggle: () -> Void
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            Button {
-                var tx = Transaction()
-                tx.disablesAnimations = true
-                withTransaction(tx) {
-                    expanded.toggle()
-                }
-            } label: {
+            Button(action: onToggle) {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.semibold))
@@ -422,29 +423,18 @@ private struct WriterReasoningDisclosure<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .zIndex(1)
             .accessibilityLabel(expanded ? "收起思考过程" : "展开思考过程")
 
             if expanded {
-                ViewThatFits(in: .vertical) {
-                    content()
-                        .padding(Theme.Spacing.s)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ScrollView(.vertical, showsIndicators: true) {
-                        content()
-                            .padding(Theme.Spacing.s)
-                    }
-                    .frame(height: 240)
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .background(
-                    Color.secondary.opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                )
-                .transition(.identity)
+                content()
+                    .padding(Theme.Spacing.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color.secondary.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    )
             }
         }
-        .animation(nil, value: expanded)
         .padding(.bottom, expanded ? Theme.Spacing.xs : 0)
     }
 }

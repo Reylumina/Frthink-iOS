@@ -52,6 +52,7 @@ struct NoPreviewContextMenu<Content: View>: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let container = UIView()
         container.backgroundColor = .clear
+        container.clipsToBounds = true
 
         let hostView = context.coordinator.hostingController.view!
         hostView.backgroundColor = .clear
