@@ -1,7 +1,7 @@
 import Foundation
 
-/// 深度文风蒸馏器：复用 `WorldDigest` 按预算分段，结合语言指纹统计、
-/// 原著代表性段落抽取（Few-Shot）与 5 维结构化风格提炼，以及二阶段「去 AI 味精修」。
+/// 深度蒸馏器：复用 `WorldDigest` 按预算分段，结合语言统计特征、
+/// 原著代表性节选抽取与纯文本仿写模板提炼。
 enum StyleDistiller {
 
     struct LinguisticFingerprint {
@@ -73,11 +73,16 @@ enum StyleDistiller {
         )
     }
 
-    /// 复用 `WorldDigest` 从正文前/中/后挑选最具代表性的原著片段作为 Few-Shot 范文。
+    /// 复用 `WorldDigest` 从正文前/中/后挑选最具代表性的原著节选（单句或过短碎片不计入）。
     static func selectExemplarPassages(from text: String, maxCount: Int = 3) -> [String] {
+        let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
         let chunks = WorldDigest.chunks(of: text, tokenBudget: 400, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { chunk in
+                guard chunk.count >= 200 else { return false }
+                let endCount = chunk.unicodeScalars.filter { sentenceEnds.contains($0) }.count
+                return endCount >= 3
+            }
         guard !chunks.isEmpty else { return [] }
         guard chunks.count > maxCount else { return chunks }
 
@@ -100,7 +105,7 @@ enum StyleDistiller {
         return picked
     }
 
-    /// 构造深度风格指纹蒸馏请求（按模型输入预算截取样章，不写死固定字数）。
+    /// 构造深度蒸馏请求（按模型输入预算截取样章，输出洗练纯文本仿写模板）。
     static func distillMessages(
         sampleText: String,
         fingerprint: LinguisticFingerprint,
@@ -108,32 +113,18 @@ enum StyleDistiller {
         inputBudget: Int
     ) -> [LLMMessage] {
         let system = """
-        请根据给定的原著片段和语言统计特征，整合一份可直接指导续写的中文仿写模板。
-        只写可迁移的写法规则，不复述剧情、不照搬原句、不写空泛评价（如“文笔优美”“节奏紧凑”），不要解释分析过程。
+        请细读给定的原著片段，参考篇幅与句长统计，整合一份可直接指导续写的中文仿写模板，使后续行文自然凝练、贴合原著神韵且远离模板化套路。
+        只写可迁移的写法，不复述人物与事件，不照搬原句；用精炼、克制的书面语撰写，不要解释分析过程，不要写空泛赞美或学术腔。
 
-        输出格式要求（严格遵守）：
-        1. 只输出纯文本，严禁使用 Markdown（不要 #、**、*、列表符 -、代码块或数字编号）。
-        2. 严格使用以下六个原版小标题分段，每个小标题单独占一行，下面用简洁平实的中文写可迁移规则：
+        用清晰的小标题覆盖以下六个方面：
+        - 叙事视角与结构：明确人称、限知边界与视角切换节点，以及单段内部的起承转合与行气贯通。
+        - 因果推进与节奏：概括事件因果的隐显脉络、信息铺垫与延迟揭晓，以及长短句错落与段落疏密对张力的调节。
+        - 句式用词与意象：结合篇幅统计概括句长分布与断句节律、动词与名词质感、意象取材方向，以及动作、感官、心理描写的分寸与情绪外化手法。
+        - 对白与人物推进：概括对话标签取舍与省笔、人物语气留白与言外之意，以及借对白推进关系与暗流的手法。
+        - 场景转场与段落收束：概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，避免强行议论升华。
+        - 应避免的写法：只依据原著笔触指出与之相悖的模板化表达，证据不足的特征不猜测。
 
-        叙事视角与结构
-        明确人称、限知或全知视角、视角切换规则，以及段落结构与单段内部的起承转合习惯。
-
-        因果推进与节奏
-        说明事件因果如何递进、冲突展开与信息释放的快慢节奏，以及长短句切换、段落切分如何配合节奏。
-
-        句式用词与意象
-        结合统计特征说明句长分布与断句习惯、高频偏好词性、意象来源、动作/感官/心理描写的比例及心理呈现方式，并说明修辞克制点。
-
-        对白与人物推进
-        说明对话标签写法与省略时机、人物语气留白与潜台词处理，以及如何通过对话推进信息与人物关系。
-
-        场景转场与段落收束
-        说明场景或时间切换的衔接手法，以及段落结尾和片段末尾的收束与留白习惯。
-
-        应避免的写法
-        只基于原著笔触列出与本文风相悖的表达习惯，证据不足的特征不猜测。
-
-        3. 若已有仿写模板非空，在其基础上补充或融合新的有效特征，保留原有有用规则，不要无故删减。
+        若已有仿写模板非空，在其基础上融合补充新的有效特征，保留原有可用规则。
         """
 
         let existingNote = existingTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,43 +133,80 @@ enum StyleDistiller {
         let sampleSlice = TokenEstimator.trimTail(sampleText, toTokens: sampleTokenBudget)
 
         let user = """
-        【统计指纹】
-        \(fingerprint.summaryLine)
+        参考统计：\(fingerprint.summaryLine)
 
-        【已有仿写模板（如有则增量融合去重，空则忽略）】
+        已有仿写模板（如有则融合去重，无则忽略）：
         \(existingNote.isEmpty ? "无" : existingNote)
 
-        【原著样章片段】
+        原著样章：
         \(sampleSlice)
         """
         return [.system(system), .user(user)]
     }
 
-    /// 构造「风格与审查精修」请求：严格依据用户配置的「仿写模板」与「去 AI 味规则」重写草稿。
-    static func polishMessages(
-        draft: String,
-        styleTemplate: String,
-        aiFlavorRules: String
-    ) -> [LLMMessage] {
+    /// 为抽取的原著节选反推简短写作指令，用于写作时构造 Few-Shot 对话示范。
+    static func exemplarPromptsMessages(for passages: [String]) -> [LLMMessage] {
         let system = """
-        你是小说编辑，负责按用户的「仿写风格指纹」与「全局审查规则（去 AI 味规则）」对初稿执行精修。
-        保留原草稿的全部剧情事件、人物动作与对话信息，只优化表达方式：
-        1. 严格遵循下方用户提供的仿写风格指纹与全局审查规则；
-        2. 保持叙事节奏与句式结构贴合目标文风，消除空洞概括与多余说教；
-        3. 直接输出精修后的正文，不要解释或加前后缀。
+        请为下面每段原著节选各反推一条简短的中文写作指令（15至30字），概括该段的情节动作与笔法重心，用于后续上下文示范。
+        严格按输入顺序每段输出一行，不要编号、不要引号、不要多余解释。
         """
+        let numbered = passages.enumerated().map { idx, text in
+            "[\(idx + 1)]\n\(text)"
+        }.joined(separator: "\n\n")
+        return [.system(system), .user(numbered)]
+    }
 
-        var constraints: [String] = []
-        let style = styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !style.isEmpty {
-            constraints.append("【仿写风格指纹】\n\(style)")
+    /// 解析反推指令列表；若行数不匹配或为空则按位置安全回退。
+    static func parseExemplarPrompts(_ raw: String, count: Int) -> [String] {
+        let lines = raw.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.count == count else { return [] }
+        return lines.map { line in
+            let cleaned = line.replacingOccurrences(
+                of: #"^(\[\d+\]|\d+[\.、\)]|[-•])\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            return String(cleaned.prefix(60))
         }
-        let flavor = aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !flavor.isEmpty {
-            constraints.append("【全局审查规则】\n\(flavor)")
+    }
+
+    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造固定前置对话示范（user 指令 → assistant 原文）。
+    static func fewShotDialoguePairs(
+        from corpus: [PromptAssembly.Corpus],
+        maxPairs: Int = 2,
+        tokenBudget: Int? = nil
+    ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
+        guard maxPairs > 0 else { return ([], []) }
+        let samples = corpus.filter {
+            $0.category == "仿写样本"
+                && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        let constraintBlock = constraints.isEmpty ? "" : constraints.joined(separator: "\n\n") + "\n\n"
-        let user = "\(constraintBlock)【待精修草稿】\n\(draft)"
-        return [.system(system), .user(user)]
+        guard !samples.isEmpty else { return ([], []) }
+
+        var messages: [LLMMessage] = []
+        var ids: Set<String> = []
+        var usedTokens = 0
+
+        for entry in samples.prefix(maxPairs) {
+            let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
+            let prompt = isPlaceholder
+                ? "请贴合本书文风与叙事节奏继续写作下文。"
+                : "写作指令：\(rawTitle)"
+            let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
+            if let tokenBudget, !messages.isEmpty, usedTokens + pairCost > tokenBudget {
+                break
+            }
+            if let tokenBudget, messages.isEmpty, pairCost > tokenBudget {
+                break
+            }
+            messages.append(.user(prompt))
+            messages.append(.assistant(entry.text))
+            ids.insert(entry.entryID)
+            usedTokens += pairCost
+        }
+        return (messages, ids)
     }
 }

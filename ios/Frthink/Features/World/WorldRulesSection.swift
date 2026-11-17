@@ -93,7 +93,7 @@ struct WorldRulesSection: View {
 
             Section {
                 updateRow(
-                    title: "深度蒸馏文风指纹与范文（推荐）",
+                    title: "深度蒸馏",
                     kind: .distillingStyle,
                     action: onDistillStyle
                 )

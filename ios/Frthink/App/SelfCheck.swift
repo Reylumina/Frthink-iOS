@@ -2300,22 +2300,31 @@ enum SelfCheck {
                 "超预算时动态事件分层应保留近期/关联事件全貌并压缩远期无关事件"
             )
 
-            // 深度蒸馏器：语言指纹统计 + 原著 Few-Shot 范文抽取 + 去 AI 味精修提示词。
+            // 深度蒸馏器：语言统计、成段节选抽取与 Few-Shot 对话示范构造。
             let sampleProse = String(repeating: "风过长街。他按住刀柄，没有回头。“进来。”门后有人低声道。\n", count: 15)
             let fp = StyleDistiller.analyzeFingerprint(sampleProse)
             let exemplars = StyleDistiller.selectExemplarPassages(from: sampleProse)
-            let polishMsgs = StyleDistiller.polishMessages(
-                draft: "空气仿佛凝固，他嘴角勾起一抹冷笑。",
-                styleTemplate: "短句冷峻",
-                aiFlavorRules: ""
+            let shortSingleSentence = StyleDistiller.selectExemplarPassages(from: "他推开门，看见走廊尽头站着一个人。")
+            let fewShot = StyleDistiller.fewShotDialoguePairs(from: [
+                PromptAssembly.Corpus(
+                    libraryID: "lib1",
+                    libraryName: "本书节选",
+                    entryID: "e1",
+                    entryName: "雨夜长街对峙",
+                    category: "仿写样本",
+                    text: "风过长街。他按住刀柄，没有回头。"
+                ),
+            ])
+            try expect(
+                fp.averageSentenceLength > 0 && fp.dialogueRatio > 0 && !exemplars.isEmpty && shortSingleSentence.isEmpty,
+                "深度蒸馏器应正确统计语言特征、抽取成段节选，并忽略单句碎片"
             )
             try expect(
-                fp.averageSentenceLength > 0 && fp.dialogueRatio > 0 && !exemplars.isEmpty,
-                "风格蒸馏器应正确统计语言指纹并抽取代表性原著范文"
-            )
-            try expect(
-                polishMsgs.count == 2 && polishMsgs[1].content.contains("短句冷峻"),
-                "去 AI 味精修应注入当前仿写风格指纹"
+                fewShot.messages.count == 2
+                    && fewShot.messages[0].role == "user"
+                    && fewShot.messages[1].role == "assistant"
+                    && fewShot.injectedEntryIDs == ["e1"],
+                "Few-Shot 示范注入应生成成对 user/assistant 对话轮次并去重"
             )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }

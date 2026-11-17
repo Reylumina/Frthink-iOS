@@ -278,11 +278,20 @@ enum WorldMaterialWorkflow {
         }
 
         if !exemplars.isEmpty {
-            let libName = "本书蒸馏范文 · \(session.project.title)"
+            let promptMsgs = StyleDistiller.exemplarPromptsMessages(for: exemplars)
+            let promptRaw = (try? await context.completeOrThrow(
+                promptMsgs,
+                errorPrefix: "生成节选示范指令失败"
+            )) ?? ""
+            let inferredPrompts = StyleDistiller.parseExemplarPrompts(promptRaw, count: exemplars.count)
+
+            let libName = "本书节选 · \(session.project.title)"
             let entries = exemplars.enumerated().map { idx, text in
-                CorpusEntry(
+                let inferred = idx < inferredPrompts.count ? inferredPrompts[idx] : ""
+                let title = inferred.isEmpty ? "原著节选 \(idx + 1)" : inferred
+                return CorpusEntry(
                     source: "distill-\(idx + 1)",
-                    title: "原著范文 \(idx + 1)",
+                    title: title,
                     text: text,
                     category: "仿写样本"
                 )
@@ -301,9 +310,10 @@ enum WorldMaterialWorkflow {
             store.settings.corpusLibraries = libraries
             store.settings.corpusEnabled = true
             store.saveSettings()
+            return "已更新仿写模板，并写入 \(exemplars.count) 段原著节选到语料库"
         }
 
-        return "已更新仿写模板，并写入 \(exemplars.count) 段原著范文到语料库"
+        return "已更新仿写模板（当前正文不足以抽取节选）"
     }
 
     // MARK: - 公共

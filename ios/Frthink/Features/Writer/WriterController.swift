@@ -225,52 +225,6 @@ final class WriterController {
         )
     }
 
-    /// 去 AI 味精修（Deslop Critic Pass）：将指定助手回复按当前仿写模板与审查规则重洗为新变体。
-    func polishMessage(messageID: String, session: ProjectSession, store: AppStore) {
-        guard !isGenerating, !isPreparing else { return }
-        guard let index = session.payload.messages.firstIndex(where: { $0.id == messageID }),
-              session.payload.messages[index].role == .assistant else {
-            store.toast = "该助手消息已不存在"
-            return
-        }
-        let draft = session.payload.messages[index].content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !draft.isEmpty else {
-            store.toast = "这条消息没有可精修的正文"
-            return
-        }
-        do {
-            let (client, provider) = try activeClient(store: store)
-            let plan = try budget(for: provider, settings: store.settings)
-            let messages = StyleDistiller.polishMessages(
-                draft: draft,
-                styleTemplate: session.payload.world.styleTemplate,
-                aiFlavorRules: store.settings.aiFlavorRules
-            )
-            let prepared = WriterPreparedPrompt(
-                messages: messages,
-                sourceIds: ["task:deslop-polish"],
-                omittedHistoryMessages: 0,
-                estimatedInputTokens: TokenEstimator.estimate(messages: messages)
-            )
-            let fallbackVariant = session.payload.messages[index].selectedVariant
-            session.clearInterrupted(messageID)
-            session.addVariant(to: messageID)
-            run(
-                client: client,
-                provider: provider,
-                plan: plan,
-                prepared: prepared,
-                session: session,
-                store: store,
-                messageID: messageID,
-                isNewMessage: false,
-                fallbackVariant: fallbackVariant
-            )
-        } catch {
-            store.errorMessage = error.localizedDescription
-        }
-    }
-
     /// 生成或准备中：界面上的编辑/删除动作都要禁用。
     var isBusy: Bool { isGenerating || isPreparing }
 
