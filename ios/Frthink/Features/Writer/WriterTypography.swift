@@ -6,8 +6,8 @@ import SwiftUI
 import UIKit
 
 enum WriterTypography {
-    /// 正文行高倍数。§2.3：流式气泡、正文编辑器、阅读页默认 1.4。
-    static let lineHeight: Double = 1.4
+    /// 正文行高倍数。流式气泡、正文编辑器、阅读页默认 1.2。
+    static let lineHeight: Double = 1.2
 
     /// 用户气泡最多占对话列宽的 80%（§5.3）。
     static let userBubbleWidthRatio: CGFloat = 0.8

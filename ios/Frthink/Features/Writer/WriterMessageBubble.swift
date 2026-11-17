@@ -337,15 +337,21 @@ struct WriterStreamingBubble: View {
             Button {
                 reasoningExpanded.toggle()
             } label: {
-                Text(reasoningExpanded
-                     ? "收起思考过程（\(characterCount.formatted()) 字）"
-                     : "思考过程（\(characterCount.formatted()) 字）")
-                    .font(Font.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: reasoningExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                    Text(reasoningExpanded
+                         ? "收起思考过程（\(characterCount.formatted()) 字）"
+                         : "思考过程（\(characterCount.formatted()) 字）")
+                        .font(Font.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: Theme.Layout.rowContentHeight * 0.72, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .zIndex(1)
             .accessibilityLabel(reasoningExpanded ? "收起思考过程" : "展开思考过程")
 
             if reasoningExpanded {
@@ -353,9 +359,16 @@ struct WriterStreamingBubble: View {
                     .font(Theme.numeric)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .padding(Theme.Spacing.s)
+                    .background(
+                        Color.secondary.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    )
             }
         }
+        .padding(.bottom, reasoningExpanded ? Theme.Spacing.xs : 0)
     }
 }
 

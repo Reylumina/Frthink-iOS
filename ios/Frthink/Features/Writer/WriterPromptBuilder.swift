@@ -93,6 +93,7 @@ enum WriterPromptBuilder {
         }
         try checkpoint()
 
+        let prefixMessages = PromptComposer.writingPrefixMessages(assembly: assembly)
         let history: [LLMMessage]
         let built: [LLMMessage]
         switch snapshot.action {
@@ -104,28 +105,40 @@ enum WriterPromptBuilder {
                 userInstruction: instruction
             )
         case .continueWriting:
-            history = PromptComposer.llmMessages(from: snapshot.messages)
-            let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })?.content ?? ""
-            built = PromptComposer.continueFragmentMessages(
-                assembly: assembly,
-                history: history,
-                fragment: lastAssistant
-            )
+            // 若最后一条就是助手消息，将其从历史中剥离并作为续接片段，避免同一内容重复发送两遍。
+            if let last = snapshot.messages.last, last.role == .assistant {
+                let fragment = last.content
+                history = PromptComposer.llmMessages(from: snapshot.messages.dropLast())
+                built = PromptComposer.continueFragmentMessages(
+                    assembly: assembly,
+                    history: history,
+                    fragment: fragment
+                )
+            } else {
+                history = PromptComposer.llmMessages(from: snapshot.messages)
+                let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })?.content ?? ""
+                built = PromptComposer.continueFragmentMessages(
+                    assembly: assembly,
+                    history: history,
+                    fragment: lastAssistant
+                )
+            }
         case .regenerate(let index):
             let prefix = index > 0
                 ? Array(snapshot.messages[..<min(index, snapshot.messages.count)])
                 : []
-            history = PromptComposer.llmMessages(from: prefix)
-            if let last = history.last, last.role == "assistant" {
+            var regenHistory = PromptComposer.llmMessages(from: prefix)
+            if let last = regenHistory.last, last.role == "assistant" {
+                regenHistory.removeLast()
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
-                    history: history,
+                    history: regenHistory,
                     fragment: last.content
                 )
             } else {
                 built = PromptComposer.writingMessages(
                     assembly: assembly,
-                    history: history,
+                    history: regenHistory,
                     userInstruction: nil
                 )
             }
@@ -134,6 +147,7 @@ enum WriterPromptBuilder {
 
         let trimmed = try trimHistory(
             built,
+            protectedPrefixCount: prefixMessages.count,
             budget: snapshot.inputBudget,
             checkpoint: checkpoint
         )
@@ -208,19 +222,21 @@ enum WriterPromptBuilder {
     // MARK: - 历史
 
     /// 历史裁剪（原版 `L1/e3.java:172-198`）：按「用户轮」从末尾整轮加入，
-    /// 超预算就停；不拆散用户指令与助手回复。system 块和本轮用户指令永远保留。
+    /// 超预算就停；不拆散用户指令与助手回复。system 块、只读上下文块（正文/长期规则/锚点）
+    /// 和本轮用户指令永远保留，仅裁剪对话历史。
     private static func trimHistory(
         _ messages: [LLMMessage],
+        protectedPrefixCount: Int,
         budget: Int,
         checkpoint: () throws -> Void
     ) rethrows -> (messages: [LLMMessage], omitted: Int) {
         guard messages.count > 1 else { return (messages, 0) }
-        var system: LLMMessage?
-        var tailMessages: [LLMMessage] = []
         var history = messages
-        if history.first?.role == "system" {
-            system = history.removeFirst()
-        }
+        let prefixCount = min(max(protectedPrefixCount, 0), history.count)
+        let protectedPrefix = Array(history.prefix(prefixCount))
+        history.removeFirst(prefixCount)
+
+        var tailMessages: [LLMMessage] = []
         if history.last?.role == "user" {
             let lastUser = history.removeLast()
             if lastUser.content == PromptLibrary.continueLastFragmentInstruction,
@@ -242,7 +258,7 @@ enum WriterPromptBuilder {
             }
         }
 
-        var used = (system.map { TokenEstimator.estimate($0.content) } ?? 0)
+        var used = protectedPrefix.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
             + tailMessages.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
         var keptTurns: [[LLMMessage]] = []
         for turn in turns.reversed() {
@@ -255,8 +271,7 @@ enum WriterPromptBuilder {
         let kept = keptTurns.reversed().flatMap { $0 }
         let omitted = history.count - kept.count
 
-        var result: [LLMMessage] = []
-        if let system { result.append(system) }
+        var result = protectedPrefix
         result.append(contentsOf: kept)
         result.append(contentsOf: tailMessages)
         return (result, omitted)

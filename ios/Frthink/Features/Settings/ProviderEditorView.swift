@@ -391,7 +391,15 @@ struct ProviderEditorView: View {
             do {
                 let client = try makeClient()
                 try await client.testConnection()
-                statusText = "连接成功"
+                let typed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !typed.isEmpty {
+                    store.setAPIKey(typed, for: draft.id)
+                    keyInput = ""
+                    keyRevision += 1
+                    statusText = "连接成功，已保存 API Key"
+                } else {
+                    statusText = "连接成功"
+                }
                 statusKind = .success
             } catch {
                 statusText = "连接失败：\(error.localizedDescription)"

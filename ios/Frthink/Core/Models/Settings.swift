@@ -184,7 +184,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         kind: ProviderKind,
         baseURL: String? = nil,
         model: String? = nil,
-        temperature: Double = 1.0,
+        temperature: Double = 0.2,
         maxTokens: Int = 30000,
         stream: Bool = true,
         enabled: Bool = true,
@@ -212,7 +212,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.kind = kind
         self.baseURL = (try? c.decode(String.self, forKey: .baseURL)) ?? kind.defaultBaseURL
         self.model = (try? c.decode(String.self, forKey: .model)) ?? kind.defaultModel
-        self.temperature = (try? c.decode(Double.self, forKey: .temperature)) ?? 1.0
+        self.temperature = (try? c.decode(Double.self, forKey: .temperature)) ?? 0.2
         self.maxTokens = (try? c.decode(Int.self, forKey: .maxTokens)) ?? 30000
         self.stream = (try? c.decode(Bool.self, forKey: .stream)) ?? true
         self.enabled = (try? c.decode(Bool.self, forKey: .enabled)) ?? true
@@ -396,7 +396,7 @@ struct AppSettings: Codable {
         worldBuildInstruction: String = "",
         plotOutlineInstruction: String = "",
         imitationInstruction: String = "",
-        autoConversationSummary: Bool = true,
+        autoConversationSummary: Bool = false,
         conversationSummaryThresholdPercent: Int = 95,
         excludeAssistantChatHistory: Bool = false,
         globalPreset: String = "",
@@ -499,7 +499,7 @@ struct AppSettings: Codable {
         imitationInstruction =
             (try? c.decode(String.self, forKey: .imitationInstruction)) ?? ""
         autoConversationSummary =
-            (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? true
+            (try? c.decode(Bool.self, forKey: .autoConversationSummary)) ?? false
         conversationSummaryThresholdPercent =
             (try? c.decode(Int.self, forKey: .conversationSummaryThresholdPercent)) ?? 95
         excludeAssistantChatHistory =

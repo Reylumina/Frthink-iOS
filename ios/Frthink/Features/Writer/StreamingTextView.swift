@@ -19,6 +19,8 @@ struct StreamingTextView: UIViewRepresentable {
         view.isEditable = false
         view.isScrollEnabled = false
         view.isSelectable = false
+        view.isUserInteractionEnabled = false
+        view.clipsToBounds = true
         view.backgroundColor = .clear
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0

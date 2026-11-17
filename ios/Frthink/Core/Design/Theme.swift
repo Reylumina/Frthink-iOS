@@ -184,7 +184,7 @@ enum Theme {
         /// 默认行高 1.4（额外行距 `fontSize × 0.4`）时保持 12.6pt 段距不变；
         /// 当阅读页行距调高至 1.8 或 2.0 时，段间距随额外行距按 1.4 倍同步放大，
         /// 避免出现行距加大后段间距相对过窄的不协调现象。
-        static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.4) -> CGFloat {
+        static func paragraphSpacing(fontSize: CGFloat, lineHeight: Double = 1.2) -> CGFloat {
             let lineSpacing = fontSize * CGFloat(max(0, lineHeight - 1))
             return max(fontSize * 0.7, lineSpacing * 1.4)
         }
