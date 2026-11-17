@@ -2326,6 +2326,34 @@ enum SelfCheck {
                     && fewShot.injectedEntryIDs == ["e1"],
                 "Few-Shot 示范注入应生成成对 user/assistant 对话轮次并去重"
             )
+            var isolatedSettings = AppSettings.default
+            isolatedSettings.corpusEnabled = true
+            isolatedSettings.corpusLibraries = [
+                CorpusLibrary(
+                    name: "本书节选 · 甲",
+                    entries: [CorpusEntry(source: "distill-1", title: "甲节选", text: "甲书正文")],
+                    enabled: true,
+                    projectID: "book-a"
+                ),
+                CorpusLibrary(
+                    name: "通用语料",
+                    entries: [CorpusEntry(source: "s1", title: "通用", text: "通用表达")],
+                    enabled: true,
+                    projectID: nil
+                ),
+            ]
+            let bookBAssembly = PromptAssembly.from(
+                world: WorldBook(),
+                manuscript: "",
+                assistantSupplement: "",
+                settings: isolatedSettings,
+                projectID: "book-b",
+                enabledUniverseEntryIDs: []
+            )
+            try expect(
+                bookBAssembly.corpus.count == 1 && bookBAssembly.corpus[0].entryName == "通用",
+                "切换书时应仅注入全局语料或本书绑定语料，不得串入他书节选"
+            )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 

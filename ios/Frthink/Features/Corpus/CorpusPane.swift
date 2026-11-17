@@ -15,6 +15,7 @@ struct CorpusPane: View {
     @State private var query = CorpusQuery()
     @State private var activeSheet: CorpusSheet?
     @State private var pendingDelete: CorpusEntry?
+    @State private var confirmingClearCurrent = false
     @State private var highlightCache = CorpusHighlightCache()
     /// 分类与标签候选集仅在当前库条目变更时重新计算，不随 body 求值重复执行。
     @State private var categories: [String] = []
@@ -80,6 +81,15 @@ struct CorpusPane: View {
                 }
                 .accessibilityLabel("新增语料")
                 .disabled(activeLibrary == nil)
+
+                if let current = activeLibrary, !current.entries.isEmpty {
+                    Button(role: .destructive) {
+                        confirmingClearCurrent = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("清空当前语料库")
+                }
             }
         }
         .onChange(of: activeLibrary, initial: true) { _, library in
@@ -120,6 +130,15 @@ struct CorpusPane: View {
                 pendingDelete = nil
             }
             Button("取消", role: .cancel) { pendingDelete = nil }
+        }
+        .alert(
+            "清空「\(activeLibrary?.name ?? "当前语料库")」？",
+            isPresented: $confirmingClearCurrent
+        ) {
+            Button("清空", role: .destructive) { clearActiveLibrary() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将清空当前语料库中的全部条目，库本身会保留。")
         }
     }
 
@@ -322,6 +341,17 @@ struct CorpusPane: View {
         var updatedLibrary = library
         updatedLibrary.entries.removeAll { $0.id == entry.id }
         saveLibrary(updatedLibrary)
+    }
+
+    private func clearActiveLibrary() {
+        guard let library = activeLibrary else { return }
+        var updatedLibrary = library
+        updatedLibrary.entries = []
+        updatedLibrary.processedKeys = []
+        updatedLibrary.deletedTextKeys = []
+        updatedLibrary.classifiedKeys = []
+        saveLibrary(updatedLibrary)
+        store.toast = "已清空「\(library.name)」"
     }
 
     private func saveLibrary(_ library: CorpusLibrary) {

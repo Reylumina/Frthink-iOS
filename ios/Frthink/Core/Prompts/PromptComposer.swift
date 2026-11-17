@@ -449,10 +449,16 @@ extension PromptAssembly {
         assembly.plotOutline = PromptComposer.renderEvents(world.events)
 
         // 8 · 语料条目（P09）：注入启用语料库的全部条目（0.8.213 全量注入）。
-        // 全局「语料收集库」开关关闭时一律不注入，表明本次写作流程不引用语料库内容。
+        // 仅注入全应用共享库（projectID == nil）或绑定当前书项目的库（projectID == projectID），避免跨书串入节选。
         if settings.corpusEnabled {
             assembly.corpus = settings.corpusLibraries
-                .filter { $0.enabled }
+                .filter { library in
+                    guard library.enabled else { return false }
+                    if let owner = library.projectID {
+                        return owner == projectID
+                    }
+                    return true
+                }
                 .flatMap { library in
                     library.promptEntries.map { entry in
                         Corpus(

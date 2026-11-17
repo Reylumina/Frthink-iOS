@@ -307,14 +307,19 @@ enum WorldMaterialWorkflow {
                 )
             }
             var libraries = store.settings.corpusLibraries
-            if let existingIdx = libraries.firstIndex(where: { $0.name == libName }) {
+            if let existingIdx = libraries.firstIndex(where: {
+                $0.projectID == session.project.id || $0.name == libName
+            }) {
+                libraries[existingIdx].name = libName
                 libraries[existingIdx].entries = entries
                 libraries[existingIdx].enabled = true
+                libraries[existingIdx].projectID = session.project.id
             } else {
                 libraries.append(CorpusLibrary(
                     name: libName,
                     entries: entries,
-                    enabled: true
+                    enabled: true,
+                    projectID: session.project.id
                 ))
             }
             store.settings.corpusLibraries = libraries

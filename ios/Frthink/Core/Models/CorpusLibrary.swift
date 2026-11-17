@@ -18,6 +18,8 @@ struct CorpusLibrary: Identifiable, Codable, Hashable {
     var processedKeys: [String]
     var deletedTextKeys: [String]
     var classifiedKeys: [String]
+    /// 可选所属书项目 ID；nil 表示全应用共享语料库，非 nil 表示仅对该书生效（如深度蒸馏节选）。
+    var projectID: String?
 
     init(
         id: String = UUID().uuidString,
@@ -28,7 +30,8 @@ struct CorpusLibrary: Identifiable, Codable, Hashable {
         rules: String = "",
         processedKeys: [String] = [],
         deletedTextKeys: [String] = [],
-        classifiedKeys: [String] = []
+        classifiedKeys: [String] = [],
+        projectID: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -39,6 +42,7 @@ struct CorpusLibrary: Identifiable, Codable, Hashable {
         self.processedKeys = processedKeys
         self.deletedTextKeys = deletedTextKeys
         self.classifiedKeys = classifiedKeys
+        self.projectID = projectID
     }
 
     init(from decoder: Decoder) throws {
@@ -52,6 +56,7 @@ struct CorpusLibrary: Identifiable, Codable, Hashable {
         processedKeys = (try? c.decode([String].self, forKey: .processedKeys)) ?? []
         deletedTextKeys = (try? c.decode([String].self, forKey: .deletedTextKeys)) ?? []
         classifiedKeys = (try? c.decode([String].self, forKey: .classifiedKeys)) ?? []
+        projectID = try? c.decodeIfPresent(String.self, forKey: .projectID)
     }
 
     /// 本次会进入提示词的条目：库启用、原句非空，按 0.8.213 全量注入（无 10 条上限）。
