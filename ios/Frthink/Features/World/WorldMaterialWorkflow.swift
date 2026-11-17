@@ -243,7 +243,7 @@ enum WorldMaterialWorkflow {
         return NotesOutcome(updated: true)
     }
 
-    /// 深度文风蒸馏：统计语言指纹 + 自动抽取原著 Few-Shot 范文入语料库 + 生成 5 维仿写模板。
+    /// 深度文风蒸馏：统计语言特征 + 自动抽取原著 Few-Shot 范文入语料库 + 生成纯文本仿写模板。
     static func distillStyleProfile(
         session: ProjectSession,
         store: AppStore
@@ -303,7 +303,7 @@ enum WorldMaterialWorkflow {
             store.saveSettings()
         }
 
-        return "已更新 6 维风格指纹，并写入 \(exemplars.count) 段原著范文到语料库"
+        return "已更新仿写模板，并写入 \(exemplars.count) 段原著范文到语料库"
     }
 
     // MARK: - 公共
