@@ -347,7 +347,7 @@ struct WriterStreamingBubble: View {
     }
 }
 
-/// 完成态气泡的思考过程折叠区：默认折叠，展开后由 SwiftUI `Text` 完整排版并隔离在独立卡片内，避免与正文堆叠。
+/// 完成态气泡的思考过程折叠区：默认折叠，展开后置入限高滚动卡片，避免长文本重排整页导致折叠卡顿。
 private struct WriterCompletedReasoningBlock: View {
     let reasoning: String
     @Binding var expanded: Bool
@@ -360,7 +360,7 @@ private struct WriterCompletedReasoningBlock: View {
             expanded: $expanded
         ) {
             Text(reasoning)
-                .font(.system(size: fontSize))
+                .font(Theme.numeric)
                 .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -369,7 +369,7 @@ private struct WriterCompletedReasoningBlock: View {
     }
 }
 
-/// 流式思考过程独立子视图：默认折叠时只读字数；展开后使用 SwiftUI `Text` 排版，确保高度随内容自动撑开不遮挡正文。
+/// 流式思考过程独立子视图：默认折叠时只读字数；展开后置入限高滚动卡片，避免整页重算与空间滞留。
 private struct WriterStreamingReasoningBlock: View {
     let controller: WriterController
     @Binding var expanded: Bool
@@ -383,7 +383,7 @@ private struct WriterStreamingReasoningBlock: View {
         ) {
             if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
                 Text(reasoning)
-                    .font(.system(size: fontSize))
+                    .font(Theme.numeric)
                     .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -402,7 +402,11 @@ private struct WriterReasoningDisclosure<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Button {
-                expanded.toggle()
+                var tx = Transaction()
+                tx.disablesAnimations = true
+                withTransaction(tx) {
+                    expanded.toggle()
+                }
             } label: {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -422,15 +426,25 @@ private struct WriterReasoningDisclosure<Content: View>: View {
             .accessibilityLabel(expanded ? "收起思考过程" : "展开思考过程")
 
             if expanded {
-                content()
-                    .padding(Theme.Spacing.s)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        Color.secondary.opacity(0.08),
-                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-                    )
+                ViewThatFits(in: .vertical) {
+                    content()
+                        .padding(Theme.Spacing.s)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        content()
+                            .padding(Theme.Spacing.s)
+                    }
+                    .frame(height: 240)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(
+                    Color.secondary.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                )
+                .transition(.identity)
             }
         }
+        .animation(nil, value: expanded)
         .padding(.bottom, expanded ? Theme.Spacing.xs : 0)
     }
 }

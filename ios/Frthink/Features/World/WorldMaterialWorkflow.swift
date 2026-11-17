@@ -243,7 +243,8 @@ enum WorldMaterialWorkflow {
         return NotesOutcome(updated: true)
     }
 
-    /// 深度文风蒸馏：统计语言特征 + 自动抽取原著 Few-Shot 范文入语料库 + 生成纯文本仿写模板。
+    /// 深度蒸馏：抽取全书代表性原著节选与「情境+技法重心」写入语料库做 Few-Shot 示范；
+    /// 仅在仿写模板为空时生成初版模板，已有模板保持不变以避免覆盖全书文风笔记结果。
     static func distillStyleProfile(
         session: ProjectSession,
         store: AppStore
@@ -251,34 +252,43 @@ enum WorldMaterialWorkflow {
         let manuscript = session.manuscript
         let trimmed = manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw WorldRunError(message: "当前正文为空，无法深度蒸馏文风。")
+            throw WorldRunError(message: "当前正文为空，无法深度蒸馏。")
         }
         let context = try WorldRequestContext.make(store: store)
 
         let fingerprint = StyleDistiller.analyzeFingerprint(trimmed)
         let exemplars = StyleDistiller.selectExemplarPassages(from: trimmed)
-        let budget = (try? PromptBudget.make(
-            settings: store.settings,
-            model: context.provider.resolvedModel
-        ))?.effectiveInputBudget ?? store.settings.inputBudgetTokens
-        let messages = StyleDistiller.distillMessages(
-            sampleText: trimmed,
-            fingerprint: fingerprint,
-            existingTemplate: session.payload.world.styleTemplate,
-            inputBudget: budget
-        )
-        let distilled = try await context.completeOrThrow(
-            messages,
-            errorPrefix: "深度蒸馏文风失败"
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingTemplate = session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        var generatedInitialTemplate = false
 
-        if !distilled.isEmpty {
-            session.payload.world.styleTemplate = distilled
-            session.scheduleSave()
+        if existingTemplate.isEmpty {
+            let budget = (try? PromptBudget.make(
+                settings: store.settings,
+                model: context.provider.resolvedModel
+            ))?.effectiveInputBudget ?? store.settings.inputBudgetTokens
+            let messages = StyleDistiller.distillMessages(
+                sampleText: trimmed,
+                fingerprint: fingerprint,
+                existingTemplate: "",
+                inputBudget: budget
+            )
+            let distilled = try await context.completeOrThrow(
+                messages,
+                errorPrefix: "深度蒸馏失败"
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !distilled.isEmpty {
+                session.payload.world.styleTemplate = distilled
+                session.scheduleSave()
+                generatedInitialTemplate = true
+            }
         }
 
         if !exemplars.isEmpty {
-            let promptMsgs = StyleDistiller.exemplarPromptsMessages(for: exemplars)
+            let promptMsgs = StyleDistiller.exemplarPromptsMessages(
+                for: exemplars,
+                fingerprint: fingerprint
+            )
             let promptRaw = (try? await context.completeOrThrow(
                 promptMsgs,
                 errorPrefix: "生成节选示范指令失败"
@@ -310,10 +320,15 @@ enum WorldMaterialWorkflow {
             store.settings.corpusLibraries = libraries
             store.settings.corpusEnabled = true
             store.saveSettings()
-            return "已更新仿写模板，并写入 \(exemplars.count) 段原著节选到语料库"
+            if generatedInitialTemplate {
+                return "已生成初版仿写模板，并写入 \(exemplars.count) 段 Few-Shot 节选到语料库"
+            }
+            return "已更新 \(exemplars.count) 段 Few-Shot 节选与技法示范到语料库（已有仿写模板保持不变）"
         }
 
-        return "已更新仿写模板（当前正文不足以抽取节选）"
+        return generatedInitialTemplate
+            ? "已生成初版仿写模板（当前正文不足以抽取节选）"
+            : "已有仿写模板保持不变（当前正文不足以抽取节选）"
     }
 
     // MARK: - 公共

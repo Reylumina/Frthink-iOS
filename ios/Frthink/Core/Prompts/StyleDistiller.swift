@@ -76,7 +76,7 @@ enum StyleDistiller {
     /// 复用 `WorldDigest` 从正文前/中/后挑选最具代表性的原著节选（单句或过短碎片不计入）。
     static func selectExemplarPassages(from text: String, maxCount: Int = 3) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
-        let chunks = WorldDigest.chunks(of: text, tokenBudget: 400, overlapTokens: 0)
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: 1000, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { chunk in
                 guard chunk.count >= 200 else { return false }
@@ -105,7 +105,7 @@ enum StyleDistiller {
         return picked
     }
 
-    /// 构造深度蒸馏请求（按模型输入预算截取样章，输出洗练纯文本仿写模板）。
+    /// 构造深度蒸馏请求（总览全书前中后样章，按模型输入预算均衡采样）。
     static func distillMessages(
         sampleText: String,
         fingerprint: LinguisticFingerprint,
@@ -113,16 +113,28 @@ enum StyleDistiller {
         inputBudget: Int
     ) -> [LLMMessage] {
         let system = """
-        请细读给定的原著片段，参考篇幅与句长统计，整合一份可直接指导续写的中文仿写模板，使后续行文自然凝练、贴合原著神韵且远离模板化套路。
+        请细读给定的全书代表性样章，参考篇幅与句长统计，整合一份可直接指导续写的中文仿写模板，使后续行文自然凝练、贴合原著神韵且远离模板化套路。
         只写可迁移的写法，不复述人物与事件，不照搬原句；用精炼、克制的书面语撰写，不要解释分析过程，不要写空泛赞美或学术腔。
 
-        用清晰的小标题覆盖以下六个方面：
-        - 叙事视角与结构：明确人称、限知边界与视角切换节点，以及单段内部的起承转合与行气贯通。
-        - 因果推进与节奏：概括事件因果的隐显脉络、信息铺垫与延迟揭晓，以及长短句错落与段落疏密对张力的调节。
-        - 句式用词与意象：结合篇幅统计概括句长分布与断句节律、动词与名词质感、意象取材方向，以及动作、感官、心理描写的分寸与情绪外化手法。
-        - 对白与人物推进：概括对话标签取舍与省笔、人物语气留白与言外之意，以及借对白推进关系与暗流的手法。
-        - 场景转场与段落收束：概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，避免强行议论升华。
-        - 应避免的写法：只依据原著笔触指出与之相悖的模板化表达，证据不足的特征不猜测。
+        请用清晰的中文小标题覆盖以下六个方面，每个小标题单独成行，下面用简洁凝练的短句分条说明（不要使用 > 引用块、+ 号、--- 分割线、代码块或多余的 ** 加粗）：
+
+        叙事视角与结构
+        明确人称、限知边界与视角切换节点，以及单段内部的起承转合与行气贯通。
+
+        因果推进与节奏
+        概括事件因果的隐显脉络、信息铺垫与延迟揭晓，以及长短句错落与段落疏密对张力的调节。
+
+        句式用词与意象
+        结合篇幅统计概括句长分布与断句节律、动词与名词质感、意象取材方向，以及动作、感官、心理描写的分寸与情绪外化手法。
+
+        对白与人物推进
+        概括对话标签取舍与省笔、人物语气留白与言外之意，以及借对白推进关系与暗流的手法。
+
+        场景转场与段落收束
+        概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，避免强行议论升华。
+
+        应避免的写法
+        只依据原著笔触指出与之相悖的模板化表达，证据不足的特征不猜测。
 
         若已有仿写模板非空，在其基础上融合补充新的有效特征，保留原有可用规则。
         """
@@ -130,7 +142,7 @@ enum StyleDistiller {
         let existingNote = existingTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         let reserved = TokenEstimator.estimate(system) + TokenEstimator.estimate(existingNote) + 256
         let sampleTokenBudget = max(512, inputBudget - reserved)
-        let sampleSlice = TokenEstimator.trimTail(sampleText, toTokens: sampleTokenBudget)
+        let sampleSlice = buildOverviewSample(from: sampleText, tokenBudget: sampleTokenBudget)
 
         let user = """
         参考统计：\(fingerprint.summaryLine)
@@ -138,17 +150,84 @@ enum StyleDistiller {
         已有仿写模板（如有则融合去重，无则忽略）：
         \(existingNote.isEmpty ? "无" : existingNote)
 
-        原著样章：
+        全书样章：
         \(sampleSlice)
         """
         return [.system(system), .user(user)]
     }
 
-    /// 为抽取的原著节选反推简短写作指令，用于写作时构造 Few-Shot 对话示范。
-    static func exemplarPromptsMessages(for passages: [String]) -> [LLMMessage] {
+    /// 按输入预算做「全书分层信息密度优选采样」：未超预算时保留全文；
+    /// 超预算时把全书切分若干连续区间，在每个区间内挑选兼具对白、句式变化与描写密度的代表段落。
+    static func buildOverviewSample(from text: String, tokenBudget: Int) -> String {
+        guard TokenEstimator.estimate(text) > tokenBudget else { return text }
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: 1000, overlapTokens: 0)
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !chunks.isEmpty else {
+            return TokenEstimator.trimTail(text, toTokens: tokenBudget)
+        }
+
+        let maxSegments = max(1, min(chunks.count, tokenBudget / 1020))
+        func styleRichnessScore(_ chunk: String) -> Double {
+            let count = max(1, chunk.count)
+            let quoteCount = chunk.filter { $0 == "“" || $0 == "「" }.count
+            let sentEndCount = chunk.filter { "。！？!?".contains($0) }.count
+            let commaCount = chunk.filter { "，；、".contains($0) }.count
+            let paraCount = chunk.split(whereSeparator: \.isNewline).filter {
+                !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }.count
+            // 兼顾对白与叙述混合、句式错落度与分段密度，避免挑中纯干瘪流水账或过短碎片。
+            let dialogueBonus = quoteCount > 0 ? min(12.0, Double(quoteCount) * 2.5) : 0.0
+            let lengthFactor = min(1.0, Double(count) / 350.0)
+            let paceScore = Double(sentEndCount) * 1.4 + Double(commaCount) * 0.35 + Double(paraCount) * 0.8
+            return (paceScore + dialogueBonus) * lengthFactor
+        }
+
+        var selectedIndices: [Int] = []
+        if maxSegments == 1 {
+            let best = chunks.indices.max(by: { styleRichnessScore(chunks[$0]) < styleRichnessScore(chunks[$1]) }) ?? 0
+            selectedIndices = [best]
+        } else {
+            for bucket in 0..<maxSegments {
+                let start = (bucket * chunks.count) / maxSegments
+                let end = max(start + 1, ((bucket + 1) * chunks.count) / maxSegments)
+                let clampedEnd = min(chunks.count, end)
+                if bucket == 0 {
+                    // 首区间优先保留开篇定调（前两段内择优），兼顾首章笔触。
+                    let headEnd = min(clampedEnd, start + 2)
+                    let best = (start..<headEnd).max(by: { styleRichnessScore(chunks[$0]) < styleRichnessScore(chunks[$1]) }) ?? start
+                    selectedIndices.append(best)
+                } else {
+                    let best = (start..<clampedEnd).max(by: { styleRichnessScore(chunks[$0]) < styleRichnessScore(chunks[$1]) }) ?? start
+                    if selectedIndices.last != best {
+                        selectedIndices.append(best)
+                    }
+                }
+            }
+        }
+
+        var parts: [String] = []
+        var usedTokens = 0
+        for idx in selectedIndices {
+            let pct = Int((Double(idx + 1) / Double(chunks.count) * 100.0).rounded())
+            let block = "[全书约 \(pct)% 处]\n\(chunks[idx])"
+            let cost = TokenEstimator.estimate(block)
+            if !parts.isEmpty && usedTokens + cost > tokenBudget { break }
+            parts.append(block)
+            usedTokens += cost
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
+    /// 为抽取的原著节选反推「情境指令 + 技法重心」，用于写作时构造高浓度 Few-Shot 对话示范。
+    static func exemplarPromptsMessages(
+        for passages: [String],
+        fingerprint: LinguisticFingerprint? = nil
+    ) -> [LLMMessage] {
+        let statHint = fingerprint.map { "参考语言统计：\($0.summaryLine)\n" } ?? ""
         let system = """
-        请为下面每段原著节选各反推一条简短的中文写作指令（15至30字），概括该段的情节动作与笔法重心，用于后续上下文示范。
-        严格按输入顺序每段输出一行，不要编号、不要引号、不要多余解释。
+        \(statHint)请为下面每段原著节选各提炼一条「情境指令 + 技法重心」（30至55字），概括该段的情节动作、句式节奏与描写/对白重心，作为后续模仿写作的对照提示。
+        严格按输入顺序每段输出一行，不要编号、不要引号、不要 Markdown 或多余解释。
         """
         let numbered = passages.enumerated().map { idx, text in
             "[\(idx + 1)]\n\(text)"
@@ -168,7 +247,7 @@ enum StyleDistiller {
                 with: "",
                 options: .regularExpression
             )
-            return String(cleaned.prefix(60))
+            return String(cleaned.prefix(100))
         }
     }
 
@@ -194,7 +273,7 @@ enum StyleDistiller {
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
             let prompt = isPlaceholder
                 ? "请贴合本书文风与叙事节奏继续写作下文。"
-                : "写作指令：\(rawTitle)"
+                : "写作指令与技法重心：\(rawTitle)"
             let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
             if let tokenBudget, !messages.isEmpty, usedTokens + pairCost > tokenBudget {
                 break
