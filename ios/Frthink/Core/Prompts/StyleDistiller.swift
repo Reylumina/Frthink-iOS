@@ -73,36 +73,108 @@ enum StyleDistiller {
         )
     }
 
-    /// 复用 `WorldDigest` 从正文前/中/后挑选最具代表性的原著节选（单句或过短碎片不计入）。
+    /// 从全书按职能互补抽取最多 3 段原著节选：
+    /// 第 1 段（800 token）：纯叙事/场景/心理描写；
+    /// 第 2 段（800 token）：对白与动作穿插互动；
+    /// 第 3 段（1200 token）：后半程综合推进段。
     static func selectExemplarPassages(from text: String, maxCount: Int = 3) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
-        let chunks = WorldDigest.chunks(of: text, tokenBudget: 800, overlapTokens: 0)
+        func isQualified(_ chunk: String) -> Bool {
+            guard chunk.count >= 200 else { return false }
+            let endCount = chunk.unicodeScalars.filter { sentenceEnds.contains($0) }.count
+            return endCount >= 3
+        }
+
+        let chunks800 = WorldDigest.chunks(of: text, tokenBudget: 800, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { chunk in
-                guard chunk.count >= 200 else { return false }
-                let endCount = chunk.unicodeScalars.filter { sentenceEnds.contains($0) }.count
-                return endCount >= 3
-            }
-        guard !chunks.isEmpty else { return [] }
-        guard chunks.count > maxCount else { return chunks }
-
-        func score(_ chunk: String) -> Double {
-            let hasQuote = chunk.contains("“") || chunk.contains("「")
-            let punctCount = chunk.filter { "。！？，；".contains($0) }.count
-            return Double(punctCount) + (hasQuote ? 10.0 : 0.0)
+            .filter(isQualified)
+        guard !chunks800.isEmpty else { return [] }
+        if chunks800.count == 1 || maxCount <= 1 {
+            return Array(chunks800.prefix(maxCount))
         }
 
-        let bucketSize = max(1, chunks.count / maxCount)
+        func dialogueStats(_ chunk: String) -> (quotes: Int, dialogueShare: Double, puncts: Int) {
+            var inQuote = false
+            var dialogueChars = 0
+            var quotes = 0
+            var puncts = 0
+            for ch in chunk {
+                if ch == "“" || ch == "「" {
+                    inQuote = true
+                    quotes += 1
+                } else if ch == "”" || ch == "」" {
+                    inQuote = false
+                } else if inQuote {
+                    dialogueChars += 1
+                }
+                if "。！？，；".contains(ch) {
+                    puncts += 1
+                }
+            }
+            let share = Double(dialogueChars) / Double(max(1, chunk.count))
+            return (quotes, share, puncts)
+        }
+
+        // 第 1 段：优先纯叙事/场景/心理段（低对白占比 + 高描写密度）。
+        func narrativeScore(_ chunk: String) -> Double {
+            let st = dialogueStats(chunk)
+            let lowDialogueBonus = st.quotes == 0 ? 20.0 : (st.dialogueShare < 0.15 ? 10.0 : -st.dialogueShare * 25.0)
+            let lenFactor = min(1.0, Double(chunk.count) / 450.0)
+            return (Double(st.puncts) + lowDialogueBonus) * lenFactor
+        }
+
+        // 第 2 段：优先对白与动作叙述均衡穿插的段落（避免纯水台词）。
+        func dialogueActionScore(_ chunk: String) -> Double {
+            let st = dialogueStats(chunk)
+            let balancedBonus: Double
+            if st.quotes >= 2 && st.dialogueShare >= 0.15 && st.dialogueShare <= 0.65 {
+                balancedBonus = 18.0
+            } else if st.quotes >= 1 {
+                balancedBonus = 6.0
+            } else {
+                balancedBonus = 0.0
+            }
+            let lenFactor = min(1.0, Double(chunk.count) / 450.0)
+            return (Double(st.puncts) + balancedBonus) * lenFactor
+        }
+
         var picked: [String] = []
-        for idx in 0..<maxCount {
-            let start = idx * bucketSize
-            guard start < chunks.count else { break }
-            let end = (idx == maxCount - 1) ? chunks.count : min(chunks.count, start + bucketSize)
-            if let best = chunks[start..<end].max(by: { score($0) < score($1) }) {
-                picked.append(best)
+        var usedIndices: Set<Int> = []
+
+        if let firstIdx = chunks800.indices.max(by: { narrativeScore(chunks800[$0]) < narrativeScore(chunks800[$1]) }) {
+            picked.append(chunks800[firstIdx])
+            usedIndices.insert(firstIdx)
+        }
+
+        if maxCount >= 2 {
+            let remaining = chunks800.indices.filter { !usedIndices.contains($0) }
+            if let secondIdx = remaining.max(by: { dialogueActionScore(chunks800[$0]) < dialogueActionScore(chunks800[$1]) }) {
+                picked.append(chunks800[secondIdx])
+                usedIndices.insert(secondIdx)
             }
         }
-        return picked
+
+        // 第 3 段：放宽至 1200 token，从后半程选取综合推进段（避免与前两段重复）。
+        if maxCount >= 3 {
+            let ns = text as NSString
+            let tailStart = ns.length / 2
+            let tailSlice = tailStart > 0 ? ns.substring(from: tailStart) : text
+            let chunks1200 = WorldDigest.chunks(of: tailSlice, tokenBudget: 1200, overlapTokens: 0)
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { chunk in
+                    isQualified(chunk) && !picked.contains(where: { chunk.contains($0) || $0.contains(chunk) })
+                }
+            if let third = chunks1200.max(by: { dialogueActionScore($0) < dialogueActionScore($1) }) {
+                picked.append(third)
+            } else {
+                let remaining = chunks800.indices.filter { !usedIndices.contains($0) }
+                if let fallbackThirdIdx = remaining.last {
+                    picked.append(chunks800[fallbackThirdIdx])
+                }
+            }
+        }
+
+        return Array(picked.prefix(maxCount))
     }
 
     /// 构造深度蒸馏请求（总览全书前中后样章，按模型输入预算均衡采样）。
