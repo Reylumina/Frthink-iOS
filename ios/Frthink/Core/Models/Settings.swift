@@ -113,7 +113,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
     case miniMax
     case hunyuan
     case grok
-    case ollama
+    case ollamaCloud
     case openCodeGo
     case commandCode
     case openDesign
@@ -131,7 +131,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         case .miniMax: return "MiniMax"
         case .hunyuan: return "腾讯混元"
         case .grok: return "Grok（xAI）"
-        case .ollama: return "Ollama（本地）"
+        case .ollamaCloud: return "Ollama Cloud"
         case .openCodeGo: return "OpenCode Go"
         case .commandCode: return "Command Code"
         case .openDesign: return "OpenDesign"
@@ -149,7 +149,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         case .miniMax: return "https://api.minimaxi.com/v1"
         case .hunyuan: return "https://api.hunyuan.cloud.tencent.com/v1"
         case .grok: return "https://api.x.ai/v1"
-        case .ollama: return "http://localhost:11434/v1"
+        case .ollamaCloud: return "https://ollama.com/v1"
         case .openCodeGo: return ProviderKind.openCodeGo.defaultBaseURL
         case .commandCode: return "https://api.commandcode.ai/v1"
         case .openDesign: return "https://api.opendesign.ai/v1"
@@ -160,7 +160,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         switch self {
         case .openCodeGo:
             return ProviderKind.openCodeGo.defaultModel
-        case .custom, .openAI, .gemini, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollama,
+        case .custom, .openAI, .gemini, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollamaCloud,
              .commandCode, .openDesign:
             return ""
         }
@@ -177,7 +177,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         case .miniMax: return "ProviderMiniMax"
         case .hunyuan: return "ProviderHuanyuan"
         case .grok: return "ProviderGrok"
-        case .ollama: return "ProviderOllama"
+        case .ollamaCloud: return "ProviderOllama"
         case .openCodeGo: return "ProviderOpenCode"
         case .commandCode: return "ProviderCommandCode"
         case .openDesign: return "ProviderOpenDesign"

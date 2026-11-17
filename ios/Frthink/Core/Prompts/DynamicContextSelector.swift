@@ -64,7 +64,8 @@ enum DynamicContextSelector {
             allActive,
             scanText: scanText,
             budget: sectionBudget,
-            stickyIDs: stickyCharacterIDs
+            stickyIDs: stickyCharacterIDs,
+            recentEvents: Array(world.events.suffix(2))
         )
         let (renderedEvents, matchedEvtIDs) = selectAndRenderEvents(
             world.events,
@@ -85,22 +86,28 @@ enum DynamicContextSelector {
         _ active: [CharacterCard],
         scanText: String,
         budget: Int,
-        stickyIDs: Set<String>
+        stickyIDs: Set<String>,
+        recentEvents: [EventCard] = []
     ) -> (cards: [CharacterCard], matchedIDs: Set<String>) {
         let totalTokens = TokenEstimator.estimate(PromptComposer.renderCharacters(active))
         guard totalTokens > budget else {
             return (active, Set(active.map(\.id)))
         }
 
+        let recentParticipants = Set(
+            recentEvents.flatMap(\.characters)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
         var matchedIDs: Set<String> = []
         var kept: [CharacterCard] = []
 
-        // 按原始顺序遍历，绝不打乱 system 前缀顺序。
+        // 按原始顺序遍历，绝不打乱 system 前缀顺序；最近事件参与者一并保底。
         for card in active {
             if matchesCharacter(card, in: scanText) {
                 matchedIDs.insert(card.id)
                 kept.append(card)
-            } else if stickyIDs.contains(card.id) {
+            } else if stickyIDs.contains(card.id) || matchesRecentParticipant(card, in: recentParticipants) {
                 kept.append(card)
             }
         }
@@ -150,23 +157,27 @@ enum DynamicContextSelector {
 
         var matchedIDs: Set<String> = []
         var fullCards: [EventCard] = []
+        var fullOrders: [Int] = []
         var compressedLines: [String] = []
 
         for (idx, event) in events.enumerated() {
+            let order = idx + 1
             let charLinked = event.characters.contains { activeNames.contains($0) }
             let titleHit = !event.title.isEmpty && scanText.localizedCaseInsensitiveContains(event.title)
             if recentFullIndices.contains(idx) || charLinked || titleHit {
                 matchedIDs.insert(event.id)
                 fullCards.append(event)
+                fullOrders.append(order)
             } else if stickyIDs.contains(event.id) {
                 fullCards.append(event)
+                fullOrders.append(order)
             } else {
                 let summary = PromptLibrary.singleLine(
                     event.consequence.isEmpty ? event.development : event.consequence
                 )
                 let line = summary.isEmpty
-                    ? "• 【\(PromptLibrary.singleLine(event.title))】"
-                    : "• 【\(PromptLibrary.singleLine(event.title))】\(summary)"
+                    ? "• 【\(PromptLibrary.singleLine(event.title))】[#\(order)]"
+                    : "• 【\(PromptLibrary.singleLine(event.title))】[#\(order)] \(summary)"
                 compressedLines.append(line)
             }
         }
@@ -176,7 +187,7 @@ enum DynamicContextSelector {
             sections.append("【前情脉络】\n" + compressedLines.joined(separator: "\n"))
         }
         if !fullCards.isEmpty {
-            sections.append(PromptComposer.renderEvents(fullCards))
+            sections.append(PromptComposer.renderEvents(fullCards, orders: fullOrders))
         }
         return (sections.joined(separator: "\n\n"), matchedIDs)
     }
@@ -222,5 +233,13 @@ enum DynamicContextSelector {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return candidates.contains { text.localizedCaseInsensitiveContains($0) }
+    }
+
+    private static func matchesRecentParticipant(_ card: CharacterCard, in names: Set<String>) -> Bool {
+        guard !names.isEmpty else { return false }
+        let candidates = ([card.name] + card.aliases)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return candidates.contains { names.contains($0) }
     }
 }

@@ -312,9 +312,10 @@ enum PromptComposer {
     ///
     /// 字段值内部换行压缩为「；」：P53 与 P08 均按「字段：值」单行格式解析，
     /// 合并操作（`WorldMerge.appended`）产生的无标签续行会被模型误识别为游离正文。
-    static func renderEvents(_ events: [EventCard]) -> String {
-        events.map { event in
-            var lines = ["【" + PromptLibrary.singleLine(event.title) + "】"]
+    static func renderEvents(_ events: [EventCard], orders: [Int]? = nil) -> String {
+        events.enumerated().map { idx, event in
+            let order = (orders != nil && idx < (orders?.count ?? 0)) ? orders![idx] : (idx + 1)
+            var lines = ["[#\(order)] 【" + PromptLibrary.singleLine(event.title) + "】"]
             if !event.scene.isEmpty {
                 lines.append("场景：" + PromptLibrary.singleLine(event.scene))
             }

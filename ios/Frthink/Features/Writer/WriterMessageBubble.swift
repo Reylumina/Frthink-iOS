@@ -347,7 +347,7 @@ struct WriterStreamingBubble: View {
     }
 }
 
-/// 完成态气泡的思考过程折叠区：默认折叠，展开后复用 `StreamingTextView` 渲染。
+/// 完成态气泡的思考过程折叠区：默认折叠，展开后由 SwiftUI `Text` 完整排版并隔离在独立卡片内，避免与正文堆叠。
 private struct WriterCompletedReasoningBlock: View {
     let reasoning: String
     @Binding var expanded: Bool
@@ -359,21 +359,17 @@ private struct WriterCompletedReasoningBlock: View {
             characterCount: reasoning.count,
             expanded: $expanded
         ) {
-            StreamingTextView(
-                text: reasoning,
-                characterCount: reasoning.count,
-                fontSize: fontSize,
-                lineHeight: lineHeight,
-                lineSpacing: WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight),
-                foregroundColor: .secondaryLabel
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .fixedSize(horizontal: false, vertical: true)
+            Text(reasoning)
+                .font(.system(size: fontSize))
+                .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
 
-/// 流式思考过程独立子视图：默认折叠时只读字数；展开后复用增量 `StreamingTextView` 避免主线程重排卡顿。
+/// 流式思考过程独立子视图：默认折叠时只读字数；展开后使用 SwiftUI `Text` 排版，确保高度随内容自动撑开不遮挡正文。
 private struct WriterStreamingReasoningBlock: View {
     let controller: WriterController
     @Binding var expanded: Bool
@@ -386,16 +382,12 @@ private struct WriterStreamingReasoningBlock: View {
             expanded: $expanded
         ) {
             if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                StreamingTextView(
-                    text: reasoning,
-                    characterCount: controller.streamingReasoningCharacterCount,
-                    fontSize: fontSize,
-                    lineHeight: lineHeight,
-                    lineSpacing: WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight),
-                    foregroundColor: .secondaryLabel
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+                Text(reasoning)
+                    .font(.system(size: fontSize))
+                    .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -412,21 +404,34 @@ private struct WriterReasoningDisclosure<Content: View>: View {
             Button {
                 expanded.toggle()
             } label: {
-                Text(expanded
-                     ? "收起思考过程（\(characterCount.formatted()) 字）"
-                     : "思考过程（\(characterCount.formatted()) 字）")
-                    .font(Font.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                    Text(expanded
+                         ? "收起思考过程（\(characterCount.formatted()) 字）"
+                         : "思考过程（\(characterCount.formatted()) 字）")
+                        .font(Font.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: Theme.Layout.rowContentHeight * 0.72, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .zIndex(1)
             .accessibilityLabel(expanded ? "收起思考过程" : "展开思考过程")
 
             if expanded {
                 content()
+                    .padding(Theme.Spacing.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color.secondary.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                    )
             }
         }
+        .padding(.bottom, expanded ? Theme.Spacing.xs : 0)
     }
 }
 
