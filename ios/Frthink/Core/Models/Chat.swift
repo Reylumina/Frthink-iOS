@@ -19,6 +19,8 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var createdAt: Date
     /// 生成该回复所使用的模型名称，便于历史回溯。
     var model: String?
+    /// 各版本对应的思考过程（思维链），与 `variants` 下标一一对应；nil 表示未记录。
+    var variantReasonings: [String]?
 
     var content: String {
         get {
@@ -35,6 +37,24 @@ struct ChatMessage: Identifiable, Codable, Hashable {
         }
     }
 
+    var reasoning: String? {
+        guard let list = variantReasonings,
+              list.indices.contains(selectedVariant) else { return nil }
+        let text = list[selectedVariant]
+        return text.isEmpty ? nil : text
+    }
+
+    mutating func setReasoning(_ text: String?, forVariant index: Int) {
+        let value = text ?? ""
+        if value.isEmpty, variantReasonings == nil { return }
+        var list = variantReasonings ?? Array(repeating: "", count: variants.count)
+        while list.count < variants.count { list.append("") }
+        if list.indices.contains(index) {
+            list[index] = value
+        }
+        variantReasonings = list
+    }
+
     var hasBranches: Bool { variants.count > 1 }
 
     init(
@@ -42,7 +62,8 @@ struct ChatMessage: Identifiable, Codable, Hashable {
         role: Role,
         content: String = "",
         createdAt: Date = Date(),
-        model: String? = nil
+        model: String? = nil,
+        variantReasonings: [String]? = nil
     ) {
         self.id = id
         self.role = role
@@ -50,6 +71,7 @@ struct ChatMessage: Identifiable, Codable, Hashable {
         self.selectedVariant = 0
         self.createdAt = createdAt
         self.model = model
+        self.variantReasonings = variantReasonings
     }
 }
 

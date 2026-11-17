@@ -408,6 +408,24 @@ final class AppStore {
         refreshAPIKeyCache()
     }
 
+    /// 返回服务商绑定的钥匙串账号：OpenAI 兼容的具名预设各自独立存储 Key。
+    func keyAccount(for provider: ProviderSetting) -> String {
+        if provider.kind == .openAICompatible,
+           let preset = provider.resolvedPreset,
+           preset != .custom {
+            return "\(provider.id).\(preset.rawValue)"
+        }
+        return provider.id
+    }
+
+    func apiKey(for provider: ProviderSetting) -> String {
+        apiKey(for: keyAccount(for: provider))
+    }
+
+    func setAPIKey(_ key: String, for provider: ProviderSetting) {
+        setAPIKey(key, for: keyAccount(for: provider))
+    }
+
     func apiKey(for providerID: String) -> String {
         if let cached = apiKeyCache[providerID] { return cached }
         return Keychain.get(Keychain.account(for: providerID)) ?? ""
@@ -426,7 +444,7 @@ final class AppStore {
     /// 有没有填过任何一个 Key。设置首页用它决定要不要提示。
     var hasAnyAPIKey: Bool {
         _ = apiKeyRevision
-        return settings.providers.contains { !apiKey(for: $0.id).isEmpty }
+        return settings.providers.contains { !apiKey(for: $0).isEmpty }
     }
 
     /// 判断服务商是否已启用且已填齐地址、模型与 API Key（用于创作页模型切换菜单过滤）。
@@ -435,14 +453,28 @@ final class AppStore {
         guard provider.enabled else { return false }
         let base = provider.baseURLForDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = provider.resolvedModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = apiKey(for: provider.id).trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = apiKey(for: provider).trimmingCharacters(in: .whitespacesAndNewlines)
         return !base.isEmpty && !model.isEmpty && !key.isEmpty
     }
 
     /// 供应方列表变化（新增/覆盖）后把缓存补齐。已有缓存不重复读钥匙串。
     func refreshAPIKeyCache() {
-        for provider in settings.providers where apiKeyCache[provider.id] == nil {
-            apiKeyCache[provider.id] = Keychain.get(Keychain.account(for: provider.id)) ?? ""
+        for provider in settings.providers {
+            let account = keyAccount(for: provider)
+            if apiKeyCache[account] == nil {
+                apiKeyCache[account] = Keychain.get(Keychain.account(for: account)) ?? ""
+            }
+            if provider.kind == .openAICompatible {
+                if apiKeyCache[provider.id] == nil {
+                    apiKeyCache[provider.id] = Keychain.get(Keychain.account(for: provider.id)) ?? ""
+                }
+                for preset in OpenAICompatiblePreset.allCases where preset != .custom {
+                    let presetAccount = "\(provider.id).\(preset.rawValue)"
+                    if apiKeyCache[presetAccount] == nil {
+                        apiKeyCache[presetAccount] = Keychain.get(Keychain.account(for: presetAccount)) ?? ""
+                    }
+                }
+            }
         }
     }
 
@@ -497,9 +529,9 @@ final class AppStore {
         guard !provider.baseURLForDisplay.isEmpty else {
             throw LLMError.badURL(provider.baseURL)
         }
-        let key = apiKeyOverride ?? apiKey(for: provider.id)
+        let key = apiKeyOverride ?? apiKey(for: provider)
         guard !key.isEmpty else {
-            throw LLMError.missingAPIKey(provider.kind.displayName)
+            throw LLMError.missingAPIKey(provider.displayTitle)
         }
         if provider.kind == .anthropic {
             return AnthropicClient(

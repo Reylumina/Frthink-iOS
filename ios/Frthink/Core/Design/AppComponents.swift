@@ -203,6 +203,7 @@ struct IconTile: View {
 struct ProviderIcon: View {
     let kind: ProviderKind
     var baseURL: String? = nil
+    var preset: OpenAICompatiblePreset? = nil
     var tint: Color = Theme.accent
     /// 显式尺寸（可选）。默认比 `IconTile` 大 4pt 容纳外框留白，使内部品牌标视觉尺寸与 28pt `IconTile` 一致。
     var size: CGFloat? = nil
@@ -210,7 +211,12 @@ struct ProviderIcon: View {
     @ScaledMetric(relativeTo: .body) private var scaledSize: CGFloat = Theme.Layout.iconTileSize + 4
 
     private var resolvedSize: CGFloat { size ?? scaledSize }
-    private var resolvedAsset: String? { kind.logoAssetName(forBaseURL: baseURL) }
+    private var resolvedAsset: String? {
+        if kind == .openAICompatible, let preset, preset != .custom {
+            return preset.logoAssetName
+        }
+        return kind.logoAssetName(forBaseURL: baseURL)
+    }
 
     var body: some View {
         Group {

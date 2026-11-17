@@ -43,6 +43,7 @@ struct SettingsConnectionPage: View {
                     ProviderIcon(
                         kind: provider.kind,
                         baseURL: provider.baseURL,
+                        preset: provider.resolvedPreset,
                         tint: hasActiveKey ? Theme.accent : AppTone.warning.color
                     )
                     Text(activeProviderName)
@@ -170,14 +171,14 @@ struct SettingsConnectionPage: View {
     private var hasActiveKey: Bool {
         _ = keyRevision
         guard let provider = store.settings.activeProvider else { return false }
-        return !store.apiKey(for: provider.id).isEmpty
+        return !store.apiKey(for: provider).isEmpty
     }
 
     @MainActor
     private var activeProviderName: String {
         guard let provider = store.settings.activeProvider else { return "尚未选择AI服务商" }
         let model = provider.resolvedModel
-        return "\(provider.kind.displayName) · \(model.isEmpty ? "未填写模型" : model)"
+        return "\(provider.displayTitle) · \(model.isEmpty ? "未填写模型" : model)"
     }
 
     private var translationModelShortLabel: String {
@@ -263,9 +264,10 @@ struct TranslationProviderPicker: View {
                     row(
                         kind: provider.kind,
                         baseURL: provider.baseURL,
+                        preset: provider.resolvedPreset,
                         title: provider.model.isEmpty
-                            ? provider.kind.displayName
-                            : "\(provider.kind.displayName) · \(provider.model)",
+                            ? provider.displayTitle
+                            : "\(provider.displayTitle) · \(provider.model)",
                         selected: store.settings.translationProviderID == provider.id
                     ) {
                         select(provider.id)
@@ -284,6 +286,7 @@ struct TranslationProviderPicker: View {
     private func row(
         kind: ProviderKind? = nil,
         baseURL: String? = nil,
+        preset: OpenAICompatiblePreset? = nil,
         title: String,
         selected: Bool,
         action: @escaping () -> Void
@@ -291,7 +294,7 @@ struct TranslationProviderPicker: View {
         Button(action: action) {
             HStack(spacing: Theme.Spacing.m) {
                 if let kind {
-                    ProviderIcon(kind: kind, baseURL: baseURL)
+                    ProviderIcon(kind: kind, baseURL: baseURL, preset: preset)
                 }
                 Text(title)
                     .font(Theme.label)
@@ -336,11 +339,12 @@ private struct ConnectionProviderRow: View {
                 ProviderIcon(
                     kind: provider.kind,
                     baseURL: provider.baseURL,
+                    preset: provider.resolvedPreset,
                     tint: isActive ? Theme.accent : .secondary
                 )
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.xs) {
-                        Text(provider.kind.displayName)
+                        Text(provider.displayTitle)
                             .font(Theme.label)
                             .foregroundStyle(.primary)
                         if isActive {

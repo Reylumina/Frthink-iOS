@@ -9,7 +9,8 @@ import UniformTypeIdentifiers
 struct SettingsArchivePage: View {
     let store: AppStore
 
-    @State private var importPickKind: ArchiveImportKind?
+    @State private var isPickingImportFile = false
+    @State private var activeImportKind: ArchiveImportKind = .project
     @State private var pendingImport: ArchiveImportRequest?
     @State private var importer: ArchiveImportController?
     @State private var exportDocument: ArchiveFileDocument?
@@ -21,35 +22,37 @@ struct SettingsArchivePage: View {
         Form {
             SettingsProjectArchiveSection(
                 store: store,
-                onPickFile: { importPickKind = .project },
+                onPickFile: {
+                    activeImportKind = .project
+                    isPickingImportFile = true
+                },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "书项目存档已导出")
                 }
             )
             SettingsFullArchiveSection(
                 store: store,
-                onPickFile: { importPickKind = .full },
+                onPickFile: {
+                    activeImportKind = .full
+                    isPickingImportFile = true
+                },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "全量存档已导出")
                 }
             )
         }
         .fileImporter(
-            isPresented: Binding(
-                get: { importPickKind != nil },
-                set: { if !$0 { importPickKind = nil } }
-            ),
+            isPresented: $isPickingImportFile,
             allowedContentTypes: [.item],
             allowsMultipleSelection: false
         ) { result in
-            let kind = importPickKind
-            importPickKind = nil
+            let kind = activeImportKind
             switch result {
             case .failure(let error):
                 guard !settingsIsUserCancelled(error) else { return }
                 store.errorMessage = "读取存档失败：\(error.localizedDescription)"
             case .success(let urls):
-                guard let url = urls.first, let kind else { return }
+                guard let url = urls.first else { return }
                 beginImport(kind, url: url)
             }
         }

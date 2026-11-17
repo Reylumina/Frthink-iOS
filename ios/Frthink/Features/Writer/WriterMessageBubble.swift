@@ -37,7 +37,8 @@ struct WriterMessageBubble: View {
     @Environment(AppStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 阅读页调过的行距，创作页跟着用同一个值。
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.5
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
+    @State private var reasoningExpanded = false
 
     /// 与流式视图、正文编辑器同一套字号。
     private var bodyFontSize: CGFloat {
@@ -111,7 +112,11 @@ struct WriterMessageBubble: View {
             )
             .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
-            .background(Theme.bubbleFill, in: Theme.containerShape())
+            .background(
+                Theme.bubbleFill,
+                in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
             .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -120,6 +125,14 @@ struct WriterMessageBubble: View {
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             header
+            if let reasoning = message.reasoning, !reasoning.isEmpty {
+                WriterCompletedReasoningBlock(
+                    reasoning: reasoning,
+                    expanded: $reasoningExpanded,
+                    fontSize: max(12, bodyFontSize * 0.82),
+                    lineHeight: lineHeight
+                )
+            }
             content
             if message.hasBranches, !isSelecting {
                 versionSwitcher
@@ -304,11 +317,13 @@ struct WriterStreamingBubble: View {
 
     @ViewBuilder
     private var content: some View {
-        // 思考过程默认收起：只是一行字，点一下展开，不加任何图标。
-        if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-            reasoningBlock(
-                reasoning,
-                characterCount: controller.streamingReasoningCharacterCount
+        // 思考过程独立成子视图并默认折叠：折叠态只观察字数，不订阅长字符串以消除卡顿。
+        if controller.streamingReasoningCharacterCount > 0 {
+            WriterStreamingReasoningBlock(
+                controller: controller,
+                expanded: $reasoningExpanded,
+                fontSize: max(12, bodyFontSize * 0.82),
+                lineHeight: lineHeight
             )
         }
 
@@ -330,17 +345,69 @@ struct WriterStreamingBubble: View {
             .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
 
-    /// 思考过程展开/收起按钮及内容视图。
-    private func reasoningBlock(_ reasoning: String, characterCount: Int) -> some View {
+/// 完成态气泡的思考过程折叠区：默认折叠，展开后由 SwiftUI `Text` 完整排版并隔离在独立卡片内，避免与正文堆叠。
+private struct WriterCompletedReasoningBlock: View {
+    let reasoning: String
+    @Binding var expanded: Bool
+    let fontSize: CGFloat
+    let lineHeight: Double
+
+    var body: some View {
+        WriterReasoningDisclosure(
+            characterCount: reasoning.count,
+            expanded: $expanded
+        ) {
+            Text(reasoning)
+                .font(.system(size: fontSize))
+                .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 流式思考过程独立子视图：默认折叠时只读字数；展开后使用 SwiftUI `Text` 排版，确保高度随内容自动撑开不遮挡正文。
+private struct WriterStreamingReasoningBlock: View {
+    let controller: WriterController
+    @Binding var expanded: Bool
+    let fontSize: CGFloat
+    let lineHeight: Double
+
+    var body: some View {
+        WriterReasoningDisclosure(
+            characterCount: controller.streamingReasoningCharacterCount,
+            expanded: $expanded
+        ) {
+            if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
+                Text(reasoning)
+                    .font(.system(size: fontSize))
+                    .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// 思考过程折叠头部与展开容器（流式与完成态共用）。
+private struct WriterReasoningDisclosure<Content: View>: View {
+    let characterCount: Int
+    @Binding var expanded: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Button {
-                reasoningExpanded.toggle()
+                expanded.toggle()
             } label: {
                 HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: reasoningExpanded ? "chevron.up" : "chevron.down")
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(.caption2.weight(.semibold))
-                    Text(reasoningExpanded
+                    Text(expanded
                          ? "收起思考过程（\(characterCount.formatted()) 字）"
                          : "思考过程（\(characterCount.formatted()) 字）")
                         .font(Font.caption.weight(.semibold))
@@ -352,23 +419,19 @@ struct WriterStreamingBubble: View {
             }
             .buttonStyle(.plain)
             .zIndex(1)
-            .accessibilityLabel(reasoningExpanded ? "收起思考过程" : "展开思考过程")
+            .accessibilityLabel(expanded ? "收起思考过程" : "展开思考过程")
 
-            if reasoningExpanded {
-                Text(reasoning)
-                    .font(Theme.numeric)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            if expanded {
+                content()
                     .padding(Theme.Spacing.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         Color.secondary.opacity(0.08),
                         in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
                     )
             }
         }
-        .padding(.bottom, reasoningExpanded ? Theme.Spacing.xs : 0)
+        .padding(.bottom, expanded ? Theme.Spacing.xs : 0)
     }
 }
 

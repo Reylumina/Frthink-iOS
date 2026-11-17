@@ -48,7 +48,7 @@ struct ProviderEditorView: View {
                 actionSection
                 dangerSection
             }
-            .navigationTitle(draft.kind.displayName)
+            .navigationTitle(draft.displayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .interactiveDismissDisabled(hasChanges)
             .toolbar {
@@ -109,37 +109,26 @@ struct ProviderEditorView: View {
 
     // MARK: - 连接
 
-    private enum ProviderPreset: String, CaseIterable, Identifiable {
-        case custom
-        case openCodeGo
-
-        var id: String { rawValue }
-        var title: String {
-            switch self {
-            case .custom: return "自定义"
-            case .openCodeGo: return "OpenCode Go"
-            }
-        }
-    }
-
-    private var presetBinding: Binding<ProviderPreset> {
+    private var presetBinding: Binding<OpenAICompatiblePreset> {
         Binding(
-            get: {
-                draft.baseURLForDisplay.lowercased().contains("opencode.ai")
-                    ? .openCodeGo : .custom
-            },
+            get: { draft.resolvedPreset ?? .custom },
             set: { preset in
-                switch preset {
-                case .openCodeGo:
-                    draft.baseURL = ProviderKind.openCodeGo.defaultBaseURL
-                    draft.model = ProviderKind.openCodeGo.defaultModel
-                case .custom:
-                    if draft.baseURLForDisplay.lowercased().contains("opencode.ai") {
+                let previous = draft.resolvedPreset ?? .custom
+                draft.preset = preset
+                if preset == .custom {
+                    // 从内置预设切回「自定义」时清空预设地址与模型，避免残留干扰。
+                    if previous != .custom {
                         draft.baseURL = ""
                         draft.model = ""
                     }
+                } else {
+                    draft.baseURL = preset.defaultBaseURL
+                    if !preset.defaultModel.isEmpty {
+                        draft.model = preset.defaultModel
+                    }
                 }
                 models = []
+                keyInput = ""
             }
         )
     }
@@ -147,7 +136,11 @@ struct ProviderEditorView: View {
     private var connectionSection: some View {
         Section {
             HStack(spacing: Theme.Spacing.m) {
-                ProviderIcon(kind: draft.kind, baseURL: draft.baseURL)
+                ProviderIcon(
+                    kind: draft.kind,
+                    baseURL: draft.baseURL,
+                    preset: draft.resolvedPreset
+                )
                 Text("类型")
                 Spacer(minLength: Theme.Spacing.s)
                 Text(draft.kind.displayName)
@@ -157,7 +150,7 @@ struct ProviderEditorView: View {
 
             if draft.kind == .openAICompatible {
                 Picker("预设", selection: presetBinding) {
-                    ForEach(ProviderPreset.allCases) { preset in
+                    ForEach(OpenAICompatiblePreset.allCases) { preset in
                         Text(preset.title).tag(preset)
                     }
                 }
@@ -349,7 +342,7 @@ struct ProviderEditorView: View {
     @MainActor
     private var storedKey: String {
         _ = keyRevision
-        return store.apiKey(for: draft.id)
+        return store.apiKey(for: draft)
     }
 
     @MainActor
@@ -393,7 +386,7 @@ struct ProviderEditorView: View {
                 try await client.testConnection()
                 let typed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !typed.isEmpty {
-                    store.setAPIKey(typed, for: draft.id)
+                    store.setAPIKey(typed, for: draft)
                     keyInput = ""
                     keyRevision += 1
                     statusText = "连接成功，已保存 API Key"
@@ -474,7 +467,7 @@ struct ProviderEditorView: View {
 
         let typed = keyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if !typed.isEmpty {
-            store.setAPIKey(typed, for: draft.id)
+            store.setAPIKey(typed, for: draft)
             keyInput = ""
             keyRevision += 1
         }
@@ -503,7 +496,7 @@ struct ProviderEditorView: View {
 
     @MainActor
     private func clearKey() {
-        store.setAPIKey("", for: draft.id)
+        store.setAPIKey("", for: draft)
         keyInput = ""
         keyRevision += 1
         statusText = "已清除这个AI服务商的 Key"

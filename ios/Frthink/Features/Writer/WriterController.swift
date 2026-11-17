@@ -970,6 +970,7 @@ final class WriterController {
         }
         session.finishGeneration()
 
+        let completedReasoning = reasoningBuffer.isEmpty ? nil : reasoningBuffer
         let wasStopped = stopRequested
         isGenerating = false
         streamingMessageID = nil
@@ -990,7 +991,7 @@ final class WriterController {
 
         if cancelled {
             if !produced.isEmpty {
-                session.finishAssistantMessage(messageID, model: model)
+                session.finishAssistantMessage(messageID, model: model, reasoning: completedReasoning)
                 store.toast = "生成已停止，已收到的部分内容保存在原气泡"
             } else {
                 if isNewMessage {
@@ -1024,7 +1025,7 @@ final class WriterController {
             return
         }
 
-        session.finishAssistantMessage(messageID, model: model)
+        session.finishAssistantMessage(messageID, model: model, reasoning: completedReasoning)
         #if DEBUG
         if LaunchArguments.mockStream {
             print("[MOCK STREAM DONE] chars=\(produced.count)")

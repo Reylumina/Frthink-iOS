@@ -104,6 +104,103 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// 「OpenAI 兼容」服务的显式预设，替代仅靠 URL 猜测厂商的做法。
+enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashable {
+    case custom
+    case openAI
+    case gemini
+    case kimi
+    case zai
+    case qwen
+    case miniMax
+    case hunyuan
+    case grok
+    case ollamaCloud
+    case openCodeGo
+    case commandCode
+    case openDesign
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .custom: return "自定义"
+        case .openAI: return "OpenAI"
+        case .gemini: return "Gemini（OpenAI 兼容）"
+        case .kimi: return "Kimi（Moonshot）"
+        case .zai: return "智谱 Z.ai"
+        case .qwen: return "通义千问（DashScope）"
+        case .miniMax: return "MiniMax"
+        case .hunyuan: return "腾讯混元"
+        case .grok: return "Grok（xAI）"
+        case .ollamaCloud: return "Ollama Cloud"
+        case .openCodeGo: return "OpenCode Go"
+        case .commandCode: return "Command Code"
+        case .openDesign: return "OpenDesign"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .custom: return ""
+        case .openAI: return "https://api.openai.com/v1"
+        case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
+        case .kimi: return "https://api.moonshot.cn/v1"
+        case .zai: return "https://open.bigmodel.cn/api/paas/v4"
+        case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        case .miniMax: return "https://api.minimaxi.com/v1"
+        case .hunyuan: return "https://api.hunyuan.cloud.tencent.com/v1"
+        case .grok: return "https://api.x.ai/v1"
+        case .ollamaCloud: return "https://ollama.com/v1"
+        case .openCodeGo: return ProviderKind.openCodeGo.defaultBaseURL
+        case .commandCode: return "https://api.commandcode.ai/v1"
+        case .openDesign: return "https://api.opendesign.ai/v1"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .openCodeGo:
+            return ProviderKind.openCodeGo.defaultModel
+        case .custom, .openAI, .gemini, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollamaCloud,
+             .commandCode, .openDesign:
+            return ""
+        }
+    }
+
+    /// 各预设对应的官方品牌图标资源名。
+    var logoAssetName: String {
+        switch self {
+        case .custom, .openAI: return "ProviderOpenAI"
+        case .gemini: return "ProviderGemini"
+        case .kimi: return "ProviderKimi"
+        case .zai: return "ProviderZai"
+        case .qwen: return "ProviderQwen"
+        case .miniMax: return "ProviderMiniMax"
+        case .hunyuan: return "ProviderHuanyuan"
+        case .grok: return "ProviderGrok"
+        case .ollamaCloud: return "ProviderOllama"
+        case .openCodeGo: return "ProviderOpenCode"
+        case .commandCode: return "ProviderCommandCode"
+        case .openDesign: return "ProviderOpenDesign"
+        }
+    }
+
+    /// 根据当前服务地址反推匹配的预设，未命中预设域名则视为「自定义」。
+    static func match(baseURL: String) -> OpenAICompatiblePreset {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return .custom }
+        let host = URL(string: trimmed)?.host?.lowercased() ?? trimmed
+        for preset in allCases where preset != .custom {
+            if let presetHost = URL(string: preset.defaultBaseURL)?.host?.lowercased(),
+               host == presetHost || host.contains(presetHost) {
+                return preset
+            }
+        }
+        return .custom
+    }
+}
+
 /// 思考档位。关闭时不发任何推理参数。
 enum ThinkingLevel: String, Codable, CaseIterable, Identifiable, Hashable {
     case off
@@ -178,6 +275,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
     var thinkingLevel: ThinkingLevel?
     /// 关闭思考时发什么字段；nil 等同 `.none`（原版行为）。
     var reasoningOffStyle: ReasoningOffStyle?
+    /// OpenAI 兼容服务商的显式预设；历史数据 nil 时由 `baseURL` 推断。
+    var preset: OpenAICompatiblePreset?
 
     init(
         id: String = UUID().uuidString,
@@ -190,7 +289,8 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         enabled: Bool = true,
         thinking: Bool? = nil,
         thinkingLevel: ThinkingLevel? = nil,
-        reasoningOffStyle: ReasoningOffStyle? = nil
+        reasoningOffStyle: ReasoningOffStyle? = nil,
+        preset: OpenAICompatiblePreset? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -203,6 +303,7 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.thinking = thinking
         self.thinkingLevel = thinkingLevel
         self.reasoningOffStyle = reasoningOffStyle
+        self.preset = preset
     }
 
     init(from decoder: Decoder) throws {
@@ -219,6 +320,21 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         self.thinking = try? c.decodeIfPresent(Bool.self, forKey: .thinking)
         self.thinkingLevel = try? c.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
         self.reasoningOffStyle = try? c.decodeIfPresent(ReasoningOffStyle.self, forKey: .reasoningOffStyle)
+        self.preset = try? c.decodeIfPresent(OpenAICompatiblePreset.self, forKey: .preset)
+    }
+
+    /// 实际生效的 OpenAI 兼容预设；历史记录缺失时按服务地址反推。
+    var resolvedPreset: OpenAICompatiblePreset? {
+        guard kind == .openAICompatible else { return nil }
+        return preset ?? OpenAICompatiblePreset.match(baseURL: baseURLForDisplay)
+    }
+
+    /// 供连接页与模型选择器展示的服务商标题。
+    var displayTitle: String {
+        if let resolved = resolvedPreset, resolved != .custom {
+            return resolved.title
+        }
+        return kind.displayName
     }
 
     var effectiveThinkingLevel: ThinkingLevel {
