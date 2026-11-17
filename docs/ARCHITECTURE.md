@@ -12,7 +12,9 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 
 目标是同一份 `.frthink` 在两端可互导且字段不丢，同一份输入产生同一份提示词（61 条模板逐字一致），四条流程在 iOS 上可用。
 
-不改进原版的产品设计，也不默认加入原版没有的能力。用户明确要求的思考档位和 OpenCode Go 是例外，关闭时请求体保持原样。
+不改进原版的产品设计，也不在 `main` 中默认加入原版没有的能力。思考档位、Anthropic 独立适配、`OpenAI 兼容` 显式预设（含预设独立 Key 绑定）、思维链持久化属于 `main` 保留的跨平台必要完善（关闭思考时请求体保持原样）。
+
+> 相对原 APK 的实验性增强（预算驱动的 `DynamicContextSelector` 动态激活、深度蒸馏 `StyleDistiller` 与 Few-Shot 对话示范注入、Depth-0 尾段风格锚定等）统一隔离在 `feat/dynamic-context-and-style-distiller` 分支，不合入 `main`。
 
 ## 3. 约束
 
@@ -100,7 +102,9 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 每次请求把实际发出的消息存进 `requestSnapshots`，事后可还原模型当时看到的内容。快照仅保留最近 30 条，可以单条删除或清空，删除不影响下一次请求。
 
-世界块里，P07 仿写模板取 `world.styleTemplate`；P08 剧情梗概直接渲染事件卡（APK `L1/W2.java:480-484`），`world.plotOutline` 字符串只随存档往返，不参与提示词，也不再单独提供编辑入口。
+世界块里，P07 仿写模板取 `world.styleTemplate`；P08 剧情梗概直接渲染事件卡（APK `L1/W2.java:480-484`）并附带 `[#N]` 时序编号明确发生先后，`world.plotOutline` 字符串只随存档往返，不参与提示词，也不再单独提供编辑入口。
+
+码字机助手消息额外持久化 `variantReasonings`（与 `variants` 下标对齐），流式与完成态统一由独立圆角卡片容器承载可折叠思维链。
 
 自动摘要流水线在此基础上增加一个环节：当上下文占用达到阈值时，依据 P54 模板将尚未摘要的用户轮次合并至长期规则中，并记录 `sourceMessageKeys`。该步骤仅更新长期规则，不删除既有对话消息。
 

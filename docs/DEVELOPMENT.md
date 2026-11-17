@@ -114,7 +114,7 @@ java -cp tools/jadx-1.5.6-all.jar jadx.cli.JadxCLI -d out/jadx dx/classes.dex
 | 人物卡 memories 与检查点 | 已在导入导出中建模；App 内编辑卡片不会同步更新 checkpoint 的 mergedCards | `Archive.swift` / `ArchiveSnapshot.swift` / `ArchiveRestore.swift` |
 | 长书首次发送仍主线程整本解密 | 初次执行续写或世界刷新时存在短暂卡顿，后续调用复用内存缓存 | `ProjectSession.manuscript` 是副作用 getter |
 | 生成检查点每 3 秒改 `payload.messages` | 写作台每 3 秒可能整页重算一次，与 PERFORMANCE §2.1 的描述不一致 | `WriterController.persistPendingDelta` |
-| P19 归纳预设只存不用 | 导入导出保持完整保真，但未注入任何提示词；在原版消费逻辑完成逆向取证前，暂不接入实际业务流程 | `ArchiveRestore.swift`、`PromptComposer+Material.swift` |
+| P19 归纳预设只存不用 | 导入导出保持完整保真，但 iOS 端暂未接入素材归纳提示词（原版 `L1/Q2` 将其拼入 `task:material-contract` 前缀的逻辑已在 `APK-NOTES.md` §九核实） | `ArchiveRestore.swift`、`PromptComposer+Material.swift` |
 | 长文编辑仍有一处在 sheet | `ManuscriptReaderSheet` 全屏读正文，DESIGN §5.10 要求 push | `ManuscriptReaderSheet` |
 
 ## 7. 约定
