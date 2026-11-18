@@ -124,6 +124,10 @@ enum StateSyncWorkflow {
                 if !card.aliases.isEmpty {
                     line += "（别称：\(card.aliases.joined(separator: "、"))）"
                 }
+                let goal = card.goals.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !goal.isEmpty {
+                    line += "｜当前目标：\(goal)"
+                }
                 if let snap = card.dynamicSnapshot?.renderedSummary(characterName: card.name) {
                     line += " -> \(snap)"
                 }

@@ -384,58 +384,41 @@ struct SummaryRevision: Codable, Hashable {
     }
 }
 
-/// 角色实时动态快照（覆盖式更新，不与静态档案拼接）。
+/// 角色场次瞬态快照（仅记录 P11 静态卡片不含的当前位置/伤势状态/随身物品，覆盖式更新）。
 struct CharacterDynamicSnapshot: Codable, Hashable {
     var location: String
-    var currentGoal: String
     var condition: String
     var possessions: [String]
-    var knownFacts: [String]
-    var relationshipNotes: String
     var updatedAt: Date
 
     init(
         location: String = "",
-        currentGoal: String = "",
         condition: String = "",
         possessions: [String] = [],
-        knownFacts: [String] = [],
-        relationshipNotes: String = "",
         updatedAt: Date = Date()
     ) {
         self.location = location
-        self.currentGoal = currentGoal
         self.condition = condition
         self.possessions = possessions
-        self.knownFacts = knownFacts
-        self.relationshipNotes = relationshipNotes
         self.updatedAt = updatedAt
     }
 
     var isEmpty: Bool {
         location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && currentGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && possessions.isEmpty
-            && knownFacts.isEmpty
-            && relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// 紧凑渲染为单行场景锚点摘要，用于末尾 `tailAnchor` 注入。
+    /// 按 NWM Appendix H 拍平为自然语言短句，避免机械符号标签污染文风。
     func renderedSummary(characterName: String) -> String? {
-        var segments: [String] = []
+        var clauses: [String] = []
         let loc = location.trimmingCharacters(in: .whitespacesAndNewlines)
-        let goal = currentGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         let cond = condition.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rel = relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !loc.isEmpty { segments.append("位置：\(loc)") }
-        if !cond.isEmpty { segments.append("状态：\(cond)") }
-        if !goal.isEmpty { segments.append("目标：\(goal)") }
-        if !possessions.isEmpty { segments.append("持有：\(possessions.joined(separator: "、"))") }
-        if !knownFacts.isEmpty { segments.append("已知：\(knownFacts.joined(separator: "；"))") }
-        if !rel.isEmpty { segments.append("关系：\(rel)") }
-        guard !segments.isEmpty else { return nil }
-        return "• \(characterName)：" + segments.joined(separator: "｜")
+        if !loc.isEmpty { clauses.append("现处\(loc)") }
+        if !cond.isEmpty { clauses.append("状态为\(cond)") }
+        if !possessions.isEmpty { clauses.append("随身持有\(possessions.joined(separator: "、"))") }
+        guard !clauses.isEmpty else { return nil }
+        return "• \(characterName)" + clauses.joined(separator: "，") + "。"
     }
 }
 
@@ -476,11 +459,11 @@ struct PlotThread: Identifiable, Codable, Hashable {
     var renderedLine: String {
         let head = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let body = obligation.trimmingCharacters(in: .whitespacesAndNewlines)
-        let chars = relatedCharacters.isEmpty ? "" : "（\(relatedCharacters.joined(separator: "、"))）"
+        let chars = relatedCharacters.isEmpty ? "" : "（涉及\(relatedCharacters.joined(separator: "、"))）"
         if body.isEmpty {
-            return "• [\(head)]\(chars)"
+            return "• \(head)\(chars)。"
         }
-        return "• [\(head)]\(chars) \(body)"
+        return "• \(head)\(chars)：\(body)"
     }
 }
 

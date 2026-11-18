@@ -395,6 +395,7 @@ enum WriterPromptBuilder {
                 activeWindowText: effectiveBodyText,
                 queryTerms: queryTerms,
                 instructionText: currentInstruction ?? "",
+                causalLimit: snapshot.continuationAnchor,
                 maxResults: 3,
                 maxTokens: 500
             )

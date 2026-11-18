@@ -288,17 +288,24 @@ enum WorldJSON {
                 guard !name.isEmpty else { continue }
                 let snap = CharacterDynamicSnapshot(
                     location: string(field(obj, ["location"])),
-                    currentGoal: string(field(obj, ["current_goal", "currentGoal", "goal"])),
                     condition: string(field(obj, ["condition", "status"])),
-                    possessions: strings(field(obj, ["possessions", "items"])),
-                    knownFacts: strings(field(obj, ["known_facts", "knownFacts"])),
-                    relationshipNotes: string(field(obj, ["relationship_notes", "relationshipNotes", "relationships"]))
+                    possessions: strings(field(obj, ["possessions", "items"]))
                 )
+                let currentGoal = string(field(obj, ["current_goal", "currentGoal", "goal"]))
+                let knownFacts = strings(field(obj, ["known_facts", "knownFacts"]))
+                let relationshipUpdate = string(field(obj, ["relationship_notes", "relationshipNotes", "relationships"]))
                 let conflictNote = string(field(obj, ["conflict_note", "conflictNote", "conflict"]))
-                if !snap.isEmpty || !conflictNote.isEmpty {
+                if !snap.isEmpty
+                    || !currentGoal.isEmpty
+                    || !knownFacts.isEmpty
+                    || !relationshipUpdate.isEmpty
+                    || !conflictNote.isEmpty {
                     payload.snapshotUpdates.append(WorldMerge.SnapshotUpdateInput(
                         characterName: name,
                         snapshot: snap,
+                        currentGoal: currentGoal,
+                        newKnownFacts: knownFacts,
+                        relationshipUpdate: relationshipUpdate,
                         conflictNote: conflictNote.isEmpty ? nil : conflictNote
                     ))
                 }

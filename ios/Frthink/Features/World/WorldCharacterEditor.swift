@@ -206,11 +206,6 @@ struct WorldCharacterEditor: View {
                 placeholder: "角色目前所处地点"
             )
             AppTextField(
-                title: "当前目标",
-                text: snapshotBinding(\.currentGoal),
-                placeholder: "当下最迫切的行动意图"
-            )
-            AppTextField(
                 title: "身心状态",
                 text: snapshotBinding(\.condition),
                 placeholder: "伤势、体能、情绪或身份暴露情况"
@@ -219,12 +214,6 @@ struct WorldCharacterEditor: View {
                 title: "持有关键物",
                 text: snapshotListBinding(\.possessions, separator: "、"),
                 placeholder: "用顿号分隔，例如：残剑、密信"
-            )
-            AppTextArea(
-                title: "已知关键信息（知情边界）",
-                text: snapshotListBinding(\.knownFacts, separator: "\n"),
-                placeholder: "每行一条，明确该角色当前知道什么秘密/情报",
-                minLines: 2
             )
         }
     }

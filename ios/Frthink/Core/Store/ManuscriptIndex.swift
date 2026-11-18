@@ -12,18 +12,20 @@ enum ManuscriptIndex {
         let score: Double
     }
 
-    /// 从完整正文中扣除已被 `activeWindowText` 覆盖的末尾部分，检索最相关的早期句窗。
+    /// 从完整正文中扣除已被 `activeWindowText` 覆盖的末尾部分，并遵循 `causalLimit` 截断未来剧情，检索最相关的早期句窗。
     static func recallHistoricalExcerpts(
         fullManuscript: String,
         activeWindowText: String,
         queryTerms: [String],
         instructionText: String = "",
+        causalLimit: Int? = nil,
         maxResults: Int = 3,
         maxTokens: Int = 600
     ) -> [Excerpt] {
         let prefix = uncoveredHistoryPrefix(
             fullManuscript: fullManuscript,
-            activeWindowText: activeWindowText
+            activeWindowText: activeWindowText,
+            causalLimit: causalLimit
         )
         guard !prefix.isEmpty else { return [] }
 
@@ -103,13 +105,20 @@ enum ManuscriptIndex {
 
     private static func uncoveredHistoryPrefix(
         fullManuscript: String,
-        activeWindowText: String
+        activeWindowText: String,
+        causalLimit: Int?
     ) -> String {
-        let fullCount = fullManuscript.count
+        let causalText: String
+        if let limit = causalLimit, limit > 0, limit <= (fullManuscript as NSString).length {
+            causalText = (fullManuscript as NSString).substring(to: limit)
+        } else {
+            causalText = fullManuscript
+        }
+        let fullCount = causalText.count
         let activeCount = activeWindowText.count
         guard fullCount > activeCount + 80 else { return "" }
-        let endIndex = fullManuscript.index(fullManuscript.endIndex, offsetBy: -activeCount)
-        return String(fullManuscript[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let endIndex = causalText.index(causalText.endIndex, offsetBy: -activeCount)
+        return String(causalText[..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func buildWindows(from text: String) -> [String] {

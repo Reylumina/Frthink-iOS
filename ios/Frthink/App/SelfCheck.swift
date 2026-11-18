@@ -2377,16 +2377,19 @@ enum SelfCheck {
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 
-        // WorldBook v2 Phase 1：动态快照覆盖更新、未决伏笔流转与解析兼容性
+        // WorldBook v2 Phase 1：场次瞬态覆盖更新 + P11 目标/记忆统一写入 + 未决伏笔流转
         check("world.stateSyncUpsert") {
             let initialSnap = CharacterDynamicSnapshot(
                 location: "青云山门",
-                currentGoal: "查明师父失踪原因",
                 condition: "左臂轻伤",
-                possessions: ["旧玉佩"],
-                knownFacts: ["黑衣人用的是南疆毒"]
+                possessions: ["旧玉佩"]
             )
-            let cards = [CharacterCard(name: "林昭", dynamicSnapshot: initialSnap)]
+            let cards = [CharacterCard(
+                name: "林昭",
+                goals: "查明师父失踪原因",
+                personalMemory: "黑衣人用的是南疆毒",
+                dynamicSnapshot: initialSnap
+            )]
             let rawSync = """
             {
               "character_snapshots": [
@@ -2397,6 +2400,7 @@ enum SelfCheck {
                   "condition": "",
                   "possessions": ["旧玉佩", "密信"],
                   "known_facts": ["城主与南疆有勾结"],
+                  "relationship_notes": "对城主起疑戒备",
                   "conflict_note": ""
                 }
               ],
@@ -2415,13 +2419,17 @@ enum SelfCheck {
                 existing: cards,
                 updates: parsed.snapshotUpdates
             )
-            let updatedSnap = snapResult.cards.first?.dynamicSnapshot
+            let updatedCard = snapResult.cards.first
+            let updatedSnap = updatedCard?.dynamicSnapshot
             try expect(updatedSnap?.location == "洛阳城西客栈", "位置应覆盖更新为新地点")
-            try expect(updatedSnap?.condition == "左臂轻伤", "未提及字段应保留旧快照")
+            try expect(updatedSnap?.condition == "左臂轻伤", "未提及瞬态字段应保留旧值")
+            try expect(updatedCard?.goals == "暗中盯住城主府", "当前目标应直接覆盖更新到 P11 goals 字段")
             try expect(
-                updatedSnap?.knownFacts.count == 2,
-                "已知信息应去重累计而非丢失"
+                updatedCard?.personalMemory.contains("南疆毒") == true
+                    && updatedCard?.personalMemory.contains("城主与南疆有勾结") == true,
+                "已知信息应并入 P11 personalMemory 而非丢失"
             )
+            try expect(updatedCard?.relationshipAttitudes == "对城主起疑戒备", "关系态度应更新至 P11 字段")
 
             let existingThreads = [
                 PlotThread(title: "城门接头暗号", obligation: "对上暗号进城", status: .open)
@@ -2436,13 +2444,16 @@ enum SelfCheck {
                 threadResult.threads.first(where: { $0.title == "城门接头暗号" })?.status == .resolved,
                 "已兑现伏笔应标记为 resolved"
             )
-            return "快照覆盖 / 伏笔流转 ok"
+            return "瞬态覆盖 / P11 统一写入 / 伏笔流转 ok"
         }
 
-        // WorldBook v2：单一场景工作记忆块与纯净末尾指令（移除 Depth-0 提示词拼接，保留 system KV 前缀）
+        // WorldBook v2：渐进式披露、单一场景工作记忆块、因果截断与纯净末尾指令
         check("writer.sceneMemoryBlock") {
-            let snap = CharacterDynamicSnapshot(location: "客栈二楼", currentGoal: "等待接头人")
-            let card = CharacterCard(name: "林昭", dynamicSnapshot: snap)
+            let snap = CharacterDynamicSnapshot(location: "客栈二楼", condition: "蓄势待发")
+            let onStage = CharacterCard(id: "c_lin", name: "林昭", goals: "等待接头人", dynamicSnapshot: snap)
+            let offStage = (0..<4).map {
+                CharacterCard(id: "c_off_\($0)", name: "远方配角\($0)", identity: "闲人")
+            }
             let thread = PlotThread(
                 title: "半枚印章",
                 obligation: "揭开印章所属势力",
@@ -2454,7 +2465,7 @@ enum SelfCheck {
                 obligation: "已完结",
                 status: .resolved
             )
-            var world = WorldBook(characters: [card], openThreads: [thread, resolvedThread])
+            var world = WorldBook(characters: [onStage] + offStage, openThreads: [thread, resolvedThread])
             world.styleTemplate = "短句冷峻"
             let settings = AppSettings()
             let prepared = WriterPromptBuilder.prepare(
@@ -2484,6 +2495,10 @@ enum SelfCheck {
                 "动态场景工作记忆不应写入 system 前缀破坏缓存"
             )
             try expect(
+                !systemText.contains("远方配角0"),
+                "超过 3 张人物卡时即便未爆总预算也应过滤未出场配角（L1/L2 渐进式披露）"
+            )
+            try expect(
                 lastUser == "林昭推开窗观察街面",
                 "末尾用户指令应保持纯净，不再注入 Depth-0 模板提醒：\(lastUser)"
             )
@@ -2493,7 +2508,26 @@ enum SelfCheck {
                     && !sceneBlock.contains("已完结"),
                 "场景工作记忆块应包含在场快照与 open 伏笔，过滤已解决伏笔"
             )
-            return "SceneMemoryBlock 与纯净指令 ok"
+
+            // 因果截断（Causal Cutoff）：锚点之后的未来文本不得被 BM25 召回
+            let pastChapter = "第一章：林昭在雾港城捡到一枚玄铁令牌。\n"
+                + String(repeating: "街巷行人匆匆而过。\n", count: 25)
+            let midCurrent = "第五章：林昭正准备前往客栈。"
+            let futureSpoiler = "\n第十章未来剧透：其实玄铁令牌是南疆王族信物。"
+            let fullBook = pastChapter + midCurrent + futureSpoiler
+            let causalEnd = (pastChapter + midCurrent as NSString).length
+            let recalledPast = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: fullBook,
+                activeWindowText: midCurrent,
+                queryTerms: ["林昭", "玄铁令牌", "南疆王族"],
+                instructionText: "玄铁令牌是什么",
+                causalLimit: causalEnd
+            ).map(\.text).joined(separator: "\n")
+            try expect(
+                recalledPast.contains("雾港城") && !recalledPast.contains("南疆王族信物"),
+                "BM25 检索必须遵守因果截断，不得泄漏锚点之后的未来剧情"
+            )
+            return "渐进式披露 / 因果截断 / SceneMemoryBlock ok"
         }
 
         // WorldBook v2 Phase 2：世界书常驻/关键词/1 层递归触发与原序输出

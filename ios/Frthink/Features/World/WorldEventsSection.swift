@@ -69,19 +69,33 @@ struct WorldEventsSection: View {
         .padding(.vertical, Theme.Spacing.s)
     }
 
-    /// 抽取按钮：次要操作样式，高度与搜索输入框保持一致。
+    /// 整理与审校菜单：收纳事件抽取、末段同步与一致性审校，保持列表清爽。
     private var extractButton: some View {
-        Button {
-            onExtract()
+        let anyBusy = isBusy || isSyncingState || isCheckingConsistency
+        return Menu {
+            Button {
+                onExtract()
+            } label: {
+                Label("从正文抽取事件卡", systemImage: "text.badge.plus")
+            }
+            Button {
+                onSyncState()
+            } label: {
+                Label("同步末段状态与伏笔", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button {
+                onCheckConsistency()
+            } label: {
+                Label("检查设定与情节一致性", systemImage: "checkmark.shield")
+            }
         } label: {
-            // 任务进度由主状态栏统一呈现。
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "wand.and.stars")
                     .font(Font.footnote)
-                Text("从正文抽取")
+                Text("整理与审校")
                     .font(Font.footnote.weight(.medium))
             }
-            .foregroundStyle(isBusy ? Color.secondary : Theme.accent)
+            .foregroundStyle(anyBusy ? Color.secondary : Theme.accent)
             .padding(.horizontal, Theme.Spacing.m)
             .frame(minHeight: controlSize)
             .background(Theme.field, in: Capsule())
@@ -89,7 +103,6 @@ struct WorldEventsSection: View {
             .frame(minHeight: Theme.Layout.rowContentHeight)
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
         .disabled(isActionDisabled)
     }
 
@@ -105,39 +118,12 @@ struct WorldEventsSection: View {
                 }
                 .onDelete(perform: deleteThreads)
 
-                HStack(spacing: Theme.Spacing.m) {
-                    Button {
-                        onSyncState()
-                    } label: {
-                        Label(
-                            isSyncingState ? "正在同步…" : "同步末段状态与伏笔",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                        .font(Font.footnote.weight(.medium))
-                    }
-                    .disabled(isActionDisabled)
-
-                    Spacer(minLength: 0)
-
-                    Button {
-                        showingNewThreadAlert = true
-                    } label: {
-                        Label("手动记伏笔", systemImage: "plus")
-                            .font(Font.footnote)
-                    }
-                    .buttonStyle(.borderless)
-                }
-
                 Button {
-                    onCheckConsistency()
+                    showingNewThreadAlert = true
                 } label: {
-                    Label(
-                        isCheckingConsistency ? "正在审校一致性…" : "检查设定与情节一致性",
-                        systemImage: "checkmark.shield"
-                    )
-                    .font(Font.footnote.weight(.medium))
+                    Label("手动记伏笔", systemImage: "plus")
+                        .font(Font.footnote.weight(.medium))
                 }
-                .disabled(isActionDisabled)
             } header: {
                 let openCount = session.payload.world.openThreads.filter { $0.status == .open }.count
                 AppSectionHeader(title: "未决伏笔（\(openCount) 条待兑现）")

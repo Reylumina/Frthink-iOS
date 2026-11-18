@@ -109,7 +109,7 @@ enum DynamicContextSelector {
         recentEvents: [EventCard] = []
     ) -> (cards: [CharacterCard], matchedIDs: Set<String>) {
         let totalTokens = TokenEstimator.estimate(PromptComposer.renderCharacters(active))
-        guard totalTokens > budget else {
+        if active.count <= 3 && totalTokens <= budget {
             return (active, Set(active.map(\.id)))
         }
 
@@ -121,7 +121,7 @@ enum DynamicContextSelector {
         var matchedIDs: Set<String> = []
         var kept: [CharacterCard] = []
 
-        // 按原始顺序遍历，绝不打乱 system 前缀顺序；最近事件参与者一并保底。
+        // 按原始顺序遍历，绝不打乱 system 前缀顺序；最近事件参与者与黏性角色一并保底。
         for card in active {
             if matchesCharacter(card, in: scanText) {
                 matchedIDs.insert(card.id)
@@ -131,16 +131,31 @@ enum DynamicContextSelector {
             }
         }
 
-        // 若当前窗口未命中任何角色，回退按预算从前向后保留核心人物卡。
+        // 若当前窗口未命中任何角色，回退从前向后保留最多 3 张核心人物卡。
         if kept.isEmpty {
             var used = 0
-            for card in active {
+            for card in active.prefix(3) {
                 let cost = TokenEstimator.estimate(PromptLibrary.characterBlock(for: card))
                 if !kept.isEmpty && used + cost > budget { break }
                 used += cost
                 kept.append(card)
             }
+            return (kept, matchedIDs)
         }
+
+        // 在场名单超过预算时按原序裁出可容纳条目，防止长场次群戏爆预算。
+        if TokenEstimator.estimate(PromptComposer.renderCharacters(kept)) > budget {
+            var budgeted: [CharacterCard] = []
+            var used = 0
+            for card in kept {
+                let cost = TokenEstimator.estimate(PromptLibrary.characterBlock(for: card))
+                if !budgeted.isEmpty && used + cost > budget { continue }
+                used += cost
+                budgeted.append(card)
+            }
+            return (budgeted, matchedIDs)
+        }
+
         return (kept, matchedIDs)
     }
 
@@ -152,7 +167,7 @@ enum DynamicContextSelector {
         stickyIDs: Set<String>
     ) -> (rendered: String, matchedIDs: Set<String>) {
         let fullRendered = PromptComposer.renderEvents(events)
-        guard TokenEstimator.estimate(fullRendered) > budget else {
+        if events.count <= 3 && TokenEstimator.estimate(fullRendered) <= budget {
             return (fullRendered, Set(events.map(\.id)))
         }
 
@@ -162,11 +177,12 @@ enum DynamicContextSelector {
                 .filter { !$0.isEmpty }
         })
 
-        // 从末尾按半数预算保留近期完整事件，确保最新剧情因果完整。
+        // 仅保留末尾最多 3 条完整近期事件（L2），其余远期事件默认折叠为 L1 单行脉络。
         let recencyBudget = max(1, budget / 2)
         var recentUsed = 0
         var recentFullIndices: Set<Int> = []
         for idx in events.indices.reversed() {
+            if recentFullIndices.count >= 3 { break }
             let single = PromptComposer.renderEvents([events[idx]])
             let cost = TokenEstimator.estimate(single)
             if !recentFullIndices.isEmpty && recentUsed + cost > recencyBudget { break }

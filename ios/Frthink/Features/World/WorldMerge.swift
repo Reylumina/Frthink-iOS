@@ -407,7 +407,26 @@ enum WorldMerge {
     struct SnapshotUpdateInput {
         let characterName: String
         let snapshot: CharacterDynamicSnapshot
+        let currentGoal: String
+        let newKnownFacts: [String]
+        let relationshipUpdate: String
         let conflictNote: String?
+
+        init(
+            characterName: String,
+            snapshot: CharacterDynamicSnapshot,
+            currentGoal: String = "",
+            newKnownFacts: [String] = [],
+            relationshipUpdate: String = "",
+            conflictNote: String? = nil
+        ) {
+            self.characterName = characterName
+            self.snapshot = snapshot
+            self.currentGoal = currentGoal
+            self.newKnownFacts = newKnownFacts
+            self.relationshipUpdate = relationshipUpdate
+            self.conflictNote = conflictNote
+        }
     }
 
     struct SnapshotSyncResult {
@@ -422,31 +441,24 @@ enum WorldMerge {
         var resolvedCount: Int
     }
 
-    /// 用新快照覆盖更新既有字段；空字段保留旧值，避免单次增量同步误删未提及状态。
+    /// 用新瞬态覆盖更新既有位置/状态/持有物；空字段保留旧值，避免单次增量同步误删未提及状态。
     static func upsertSnapshot(
         existing: CharacterDynamicSnapshot?,
         incoming: CharacterDynamicSnapshot
     ) -> CharacterDynamicSnapshot {
         guard var base = existing else { return incoming }
         let loc = incoming.location.trimmingCharacters(in: .whitespacesAndNewlines)
-        let goal = incoming.currentGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         let cond = incoming.condition.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rel = incoming.relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !loc.isEmpty { base.location = loc }
-        if !goal.isEmpty { base.currentGoal = goal }
         if !cond.isEmpty { base.condition = cond }
         if !incoming.possessions.isEmpty {
             base.possessions = uniqueStrings(incoming.possessions)
         }
-        if !incoming.knownFacts.isEmpty {
-            base.knownFacts = uniqueStrings(base.knownFacts + incoming.knownFacts)
-        }
-        if !rel.isEmpty { base.relationshipNotes = rel }
         base.updatedAt = incoming.updatedAt
         return base
     }
 
-    /// 批量将状态同步输出覆盖写入对应人物卡。只更新已存在卡片，避免静默造出重名幽灵卡。
+    /// 批量将状态同步输出统一写回对应人物卡：瞬态走 `dynamicSnapshot`，目标/记忆/关系直接更新至原版 P11 字段。
     static func upsertCharacterSnapshots(
         existing: [CharacterCard],
         updates: [SnapshotUpdateInput]
@@ -467,6 +479,23 @@ enum WorldMerge {
                     card.dynamicSnapshot = nextSnap
                     changed = true
                 }
+            }
+            let nextGoal = item.currentGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nextGoal.isEmpty && card.goals != nextGoal {
+                card.goals = nextGoal
+                changed = true
+            }
+            if !item.newKnownFacts.isEmpty {
+                let nextMemory = appended(card.personalMemory, item.newKnownFacts.joined(separator: "；"))
+                if nextMemory != card.personalMemory {
+                    card.personalMemory = nextMemory
+                    changed = true
+                }
+            }
+            let nextRelation = item.relationshipUpdate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nextRelation.isEmpty && card.relationshipAttitudes != nextRelation {
+                card.relationshipAttitudes = nextRelation
+                changed = true
             }
             if let note = item.conflictNote?.trimmingCharacters(in: .whitespacesAndNewlines),
                !note.isEmpty {
