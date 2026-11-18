@@ -133,15 +133,12 @@ enum WriterPromptBuilder {
         ) {
             assembly.appendedBlocks.append(sceneMemory)
         }
-        let fewShotQuery = [currentInstruction, PromptComposer.codePointTail(effective.text, limit: 1_200)]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
         let styleRef = StyleDistiller.styleReferenceBlock(
             from: assembly.corpus,
             maxSamples: 2,
             tokenBudget: max(1, snapshot.inputBudget / 4),
-            queryText: fewShotQuery
+            instructionText: currentInstruction,
+            queryText: PromptComposer.codePointTail(effective.text, limit: 800)
         )
         if let block = styleRef.block {
             assembly.appendedBlocks.append(block)

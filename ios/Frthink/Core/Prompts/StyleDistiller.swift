@@ -333,17 +333,21 @@ enum StyleDistiller {
 
     /// 从语料库中挑选最多 `maxSamples` 条「仿写样本」，封装为显式隔离的只读参考块（`system` 侧），
     /// 避免伪装成 `role: "assistant"` 对话轮次导致模型将其误认为前文结尾。
+    /// 当 `maxSamples >= 2` 且存在匹配样本时，固定保留全书主基调质心样本（首条）+ 当前场景最佳匹配样本。
     static func styleReferenceBlock(
         from corpus: [PromptAssembly.Corpus],
         maxSamples: Int = 2,
         tokenBudget: Int? = nil,
+        instructionText: String? = nil,
         queryText: String? = nil
     ) -> (block: PromptBlock?, injectedEntryIDs: Set<String>) {
         let picked = selectExemplars(
             from: corpus,
             maxCount: maxSamples,
             tokenBudget: tokenBudget,
-            queryText: queryText
+            instructionText: instructionText,
+            queryText: queryText,
+            anchorCentroid: true
         )
         guard !picked.isEmpty else { return (nil, []) }
 
@@ -381,7 +385,9 @@ enum StyleDistiller {
             from: corpus,
             maxCount: maxPairs,
             tokenBudget: tokenBudget,
-            queryText: queryText
+            instructionText: nil,
+            queryText: queryText,
+            anchorCentroid: false
         )
         var messages: [LLMMessage] = []
         for item in picked {
@@ -396,7 +402,9 @@ enum StyleDistiller {
         from corpus: [PromptAssembly.Corpus],
         maxCount: Int,
         tokenBudget: Int?,
-        queryText: String?
+        instructionText: String?,
+        queryText: String?,
+        anchorCentroid: Bool
     ) -> [(entry: PromptAssembly.Corpus, technique: String)] {
         guard maxCount > 0 else { return [] }
         let samples = corpus.filter {
@@ -405,11 +413,18 @@ enum StyleDistiller {
         }
         guard !samples.isEmpty else { return [] }
 
+        let trimmedInstruction = instructionText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedQuery = queryText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
         let orderedSamples: [PromptAssembly.Corpus]
-        if let queryText, !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let queryTokens = Set(ManuscriptIndex.tokenize(queryText))
-            let queryFP = analyzeFingerprint(queryText)
-            orderedSamples = samples.enumerated()
+        if !trimmedQuery.isEmpty || !trimmedInstruction.isEmpty {
+            // 仅用本轮指令做关键词匹配，避免正文高频词锁死特定样本；无独立指令时回退兼容 queryText。
+            let keywordSource = instructionText != nil ? trimmedInstruction : trimmedQuery
+            let queryTokens = keywordSource.isEmpty ? [] : Set(ManuscriptIndex.tokenize(keywordSource))
+            let fingerprintSource = trimmedQuery.isEmpty ? trimmedInstruction : trimmedQuery
+            let queryFP = analyzeFingerprint(fingerprintSource)
+
+            var scored = samples.enumerated()
                 .compactMap { idx, entry -> (offset: Int, element: PromptAssembly.Corpus, score: Double)? in
                     guard let score = exemplarMatchScore(
                         entry,
@@ -426,6 +441,15 @@ enum StyleDistiller {
                     return lhs.offset < rhs.offset
                 }
                 .map(\.element)
+
+            if anchorCentroid, maxCount >= 2, let centroid = samples.first, !scored.isEmpty {
+                let topSceneMatch = scored[0]
+                if topSceneMatch.entryID != centroid.entryID,
+                   !scored.prefix(maxCount).contains(where: { $0.entryID == centroid.entryID }) {
+                    scored = [centroid, topSceneMatch]
+                }
+            }
+            orderedSamples = scored
         } else {
             orderedSamples = samples
         }
