@@ -25,22 +25,17 @@ python script/prompt_check.py
 python script/design_check.py
 ```
 
-本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上均为本地秒级检查，每批代码变更后即可运行，不依赖 CI。CI 按批次执行：完成单个功能点或一组相关变更后，触发一次 `Self Check`；需要 IPA 产物时触发 `iOS Build`；界面变更批次完成后执行 `UI Screenshots` 并按 `DESIGN.md` §9 进行人工目检；流式相关变更则执行 `Stream Check`。
+本机 `python` 不在 PATH 上，用 `py script/...` 代替；CI 里用 `python3`。以上均为本地秒级检查，每批代码变更后即可运行。需要编译校验与导出未签名 IPA 时，通过 `gh workflow run ios.yml --ref <分支>` 触发 `iOS Build`。
 
-CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检查（清单见 `ios/Frthink/App/SelfCheck.swift`）。结果写入 stdout 后退出，工作流用 `grep -q "ALL PASS"` 断言。真实备份检查需要 `fixture-backup.frthink`，缺少该文件时跳过。
+代码内置的运行时自检入口为启动参数 `-runSelfCheck`（清单见 `ios/Frthink/App/SelfCheck.swift`），在模拟器或真机运行后将结果写入 stdout 并退出（`ALL PASS`）。
 
 ## 3. CI 流水线
 
 | 文件 | 产物 | 触发 |
 |---|---|---|
-| `.github/workflows/self-check.yml` | SwiftLint 结果 + 自检日志（65 项） | push main、手动 |
-| `.github/workflows/real-import.yml` | 真实备份导入/导出/重开/落盘 | 手动 |
-| `.github/workflows/ios.yml` | 未签名 IPA | 手动 |
-| `.github/workflows/ui-screenshots.yml` | 各 Tab 与二、三级页截图（出图前先跑自检） | 手动、push main |
-| `.github/workflows/stream-check.yml` | mock SSE 连续执行三次 + 正文行数/段落断言 | 手动 |
-| `.github/workflows/cleanup-runs.yml` | 删除旧的已完成运行（保留最近 N 次） | 每周一 03:00 UTC、手动 |
+| `.github/workflows/ios.yml` | 模拟器编译校验、真机归档与未签名 IPA | 手动（`workflow_dispatch`） |
 
-分支上的变更不会自动触发 CI，需使用 `gh workflow run self-check.yml --ref <分支>` 手动执行；同 workflow 同 ref 仅保留最新一次，重复触发会取消正在排队或运行中的任务，避免在运行期间重复触发。
+分支上的变更不会自动触发 CI，需使用 `gh workflow run ios.yml --ref <分支>` 手动执行；同 workflow 同 ref 仅保留最新一次，重复触发会取消正在排队或运行中的任务。
 
 仓库为 public，标准 macOS runner 免费。private 仓库额度耗尽时，job 将在 3 至 5 秒内被拒绝，annotation 是 `The job was not started because recent account payments have failed...`。该失败属于额度问题，与代码无关。
 
@@ -68,15 +63,15 @@ CI 的运行时自检在启动时传 `-runSelfCheck`，执行 65 项纯逻辑检
 9. 人物分组和去重在真实数据上的行为。
 10. 设置和各二级页逐级进出，返回不丢失状态。
 11. Android 端读取 iOS 导出的全量备份。
-12. iOS 26 的 sheet 关闭用 `Button(role: .close)`（×）、确认用 `.confirm`（✓）——需在模拟器或真机环境中确认。
-13. 用户气泡（`.systemGray5` 底 + `.label` 字）在浅色与深色模式下的实际观感与对比度。
+12. iOS 26 的 sheet 关闭按钮用 `Button(role: .close)`、确认按钮用 `.confirm`——需在模拟器或真机环境中确认。
+13. 用户气泡（`.systemGray5` 背景与 `.label` 文字）在浅色与深色模式下的实际观感与对比度。
 14. 摇一摇撤销、⌘Z/⇧⌘Z、编辑菜单里的撤销重做。
 15. 应用退入后台 30 秒后再切回前台，确认末尾输入内容未丢失（通过 `beginBackgroundTask` 保护落盘过程，实际后台时长由系统分配）。
 16. iPad 常规宽度：正文 36 字宽、对话列 720、表单 640 的居中观感。
 
 验证方式：安装至真机，在设置页填 API Key，测试连接，然后按 A1 至 A3 逐项执行验证。
 
-已知问题：DeepSeek 思考开启时，输出会落在 `reasoning_content`，关闭档位时显式发 `thinking: disabled`。思考档位在供应方编辑页设置，默认关闭。
+已知问题：DeepSeek 思考开启时，输出会落在 `reasoning_content`；关闭思考时由各模型规则表自动匹配对应请求参数（如 `thinking: disabled` 或 `reasoning_effort: none`），无需在编辑器手动配置。思考档位在供应方编辑页设置，默认关闭。
 
 ## 5. 原版行为核对
 

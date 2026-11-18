@@ -14,13 +14,13 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 
 不改进原版的产品设计，也不在 `main` 中默认加入原版没有的能力。思考档位、Anthropic 独立适配、`OpenAI 兼容` 显式预设（含预设独立 Key 绑定）、思维链持久化属于 `main` 保留的跨平台必要完善（关闭思考时请求体保持原样）。
 
-> 相对原 APK 的实验性增强（预算驱动的 `DynamicContextSelector` 动态激活、深度蒸馏 `StyleDistiller` 与 Few-Shot 对话示范注入、Depth-0 尾段风格锚定等）统一隔离在 `feat/dynamic-context-and-style-distiller` 分支，不合入 `main`。
+> 相对原 APK 的实验性增强（预算驱动的 `DynamicContextSelector` 动态激活、深度蒸馏 `StyleDistiller` 与 Few-Shot 对话示范注入、`SceneMemoryBuilder`、`StateSyncWorkflow`、`ConsistencyCheckWorkflow` 与白名单 `prefillCoT` 等）统一隔离在 `feat/context-distill` 分支，不合入 `main`。
 
 ## 3. 约束
 
 | 约束 | 来源 | 影响 |
 |---|---|---|
-| 只发 `POST /chat/completions`（OpenAI 兼容）或 `POST /v1/messages`（Anthropic）与 `GET /models` | 反编译确认 + iOS 扩展 | 无法直接使用第三方服务商 SDK |
+| 只发 `POST /chat/completions`（OpenAI 兼容）、`POST /v1/messages`（Anthropic）或 `POST /v1beta/models/...:generateContent`（Gemini）与 `GET /models` | 反编译确认与 iOS 扩展 | 无法直接使用第三方服务商 SDK |
 | 基础请求体 7 个键，没有 `top_p`、`stop`、`response_format` | 反编译确认 | 结构化输出需通过提示词约束 JSON 格式，思考模式开启时根据服务商追加 reasoning 相关字段 |
 | `thinking` 只对 `api.deepseek.com` 发，OpenRouter 用 `reasoning`，OpenAI 兼容用 `reasoning_effort` | 反编译和官方 API | 服务提供方抽象层需识别供应方类型及思考档位 |
 | 存档格式是 JSON 包 gzip 再 base64 | 反编译确认 | Foundation 的 `.zlib` 采用 RFC1950 规范，无法直接适配 |
@@ -32,13 +32,13 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 
 ```
 App/            入口、根导航、演示数据、运行时自检（`SelfCheck` + `ContextEngineSelfCheck`）
-Features/       按业务域切的界面层：Writer（含 `SceneMemoryBuilder`）、World、Translation（Reader）、Library、Universe、Settings
+Features/       按业务域切的界面层：Writer（`WriterPane+Actions`、增强分支含 `SceneMemoryBuilder`）、World（`WorldJSON` + `WorldProseNormalizer`）、Translation（Reader）、Library、Universe、Settings
 Core/
   Models/       值类型：Project、World、Chat、Settings（含 `ProviderKind.gemini` 与规则表）、Universe
   Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、ManuscriptIndex（端侧 BM25 因果回查，增强分支）、TextFileCodec（正文编解码与导出）、Keychain
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）、DynamicContextSelector / StyleDistiller（增强分支）
-  LLM/          协议抽象（`ReasoningDialect`）、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、token 估算
-  Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
+  LLM/          协议抽象（`ReasoningDialect`）、`LLMHTTPTransport`、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、token 估算
+  Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（`WritableKeyPath` 合并策略、恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
   Design/       Theme、AppComponents、AppFormComponents、JustifiedText 等
 ```
 
@@ -66,7 +66,7 @@ Core/
 
 世界刷新、事件、文风、长期规则四种任务按书登记在 `AppStore`：`registerWorldTask(_:for:)` 返回一个令牌，任务收尾用同一令牌调 `finishWorldTask(for:token:)`，仅会清理自身对应的任务记录；切换项目、移入回收站或彻底删除则调用 `cancelWorldTask`。若缺乏令牌机制，旧任务结束时容易误将同项目后续发起的新任务一并清除。
 
-正文与气泡排版统一走 TextKit：阅读页段落、码字机完成态气泡、用户指令气泡（`shrinksToFitWidth: true`）均使用 `Core/Design/JustifiedText.swift`（`UITextView`，`.justified` + `.pushOut` + `0.85` 断字系数），创作页全屏正文编辑器使用 `ManuscriptTextEditor`，流式气泡使用 `StreamingTextView`（按已完成段落前缀做 `O(末段)` 增量 `NSTextStorage` 替换）。各处统一复用 `WriterTypography`、`MarkdownInline.runs(_:)` 与 `Theme.Layout.paragraphSpacing(fontSize:lineHeight:)`。SwiftUI 的 `Text` 不支持两端对齐与段落级样式控制，因此正文与气泡层均基于 TextKit 实现。
+正文与气泡排版统一走 TextKit：阅读页段落、码字机完成态气泡、用户指令气泡（`shrinksToFitWidth: true`）均使用 `Core/Design/JustifiedText.swift`（`UITextView`，采用 `.justified`、`.pushOut` 与 `0.85` 断字系数），创作页全屏正文编辑器使用 `ManuscriptTextEditor`，流式气泡使用 `StreamingTextView`（按已完成段落前缀做 `O(末段)` 增量 `NSTextStorage` 替换）。各处统一复用 `WriterTypography`、`MarkdownInline.runs(_:)` 与 `Theme.Layout.paragraphSpacing(fontSize:lineHeight:)`。SwiftUI 的 `Text` 不支持两端对齐与段落级样式控制，因此正文与气泡层均基于 TextKit 实现。
 
 写作台对话列表采用 `VStack` 而非 `LazyVStack`：整个列表已预先根据 `visibleMessageCount` 截断，行数存在明确上限；而流式生成行可能包含上万字，`LazyVStack` 估算行高配合 33ms 跟踪器的 `scrollTo`，在生成结束切换气泡时容易产生偏移计算误差并定位至内容区域之外，导致界面呈现全屏空白（此问题已在 Stream Check 中复现）。
 
@@ -85,7 +85,7 @@ Archive/<name>.frthink
 
 gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMPRESSION_ZLIB` 采用 RFC1950 规范，与原版的 `GZIPInputStream` 不兼容。
 
-世界刷新、素材归纳、长期规则分别由 `WorldWorkflow`、`WorldMaterialWorkflow`、`WorldRulesWorkflow` 承担，共用 `WorldRequestContext`（当前服务商 + 客户端 + 一次性请求参数）；增强分支另设 `StateSyncWorkflow`（采纳正文后后台防抖同步动态快照与伏笔）与 `ConsistencyCheckWorkflow`（按需五维证据审校），各 workflow 只保留业务逻辑。
+世界刷新、素材归纳、长期规则分别由 `WorldWorkflow`、`WorldMaterialWorkflow`、`WorldRulesWorkflow` 承担，共用 `WorldRequestContext`（当前服务商、客户端与一次性请求参数）；增强分支另设 `StateSyncWorkflow`（采纳正文后后台防抖同步动态快照与伏笔）与 `ConsistencyCheckWorkflow`（按需五维证据审校），各 workflow 只保留业务逻辑。
 
 `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 用 AES-256-GCM 加密，文件头 `FRTHENC1`，主密钥 32 字节存 Keychain。读取时按文件头判断：旧版本的明文文件解码后立即加密写回。导出不加密——原版密钥在 AndroidKeyStore，跨平台环境下密钥并不共享，导出保持明文才能实现双端互通。
 
@@ -108,7 +108,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 自动摘要流水线在此基础上增加一个环节：当上下文占用达到阈值时，依据 P54 模板将尚未摘要的用户轮次合并至长期规则中，并记录 `sourceMessageKeys`。该步骤仅更新长期规则，不删除既有对话消息。
 
-**增强分支（`feat/dynamic-context-and-style-distiller`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词/1 层递归触发）、`SceneMemoryBuilder`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3+2 伏笔配额与 `ManuscriptIndex` BM25 因果截断回查）、`StateSyncWorkflow.syncSmart`（基于 `WorldBook.lastStateSyncOffset` 游标自动切换全书分段建档与增量同步）、`StyleDistiller`（五维 MMR 选样 + 四维语域门控 Few-Shot），以及独立原生 `GeminiClient` 与白名单 `prefillCoT`（DeepSeek `/beta` + `prefix: true` + `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）配合 `ThinkTagStreamSplitter` 流式/非流式 `<think>` 剥离。
+**增强分支（`feat/context-distill`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词或 1 层递归触发）、`SceneMemoryBuilder`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3 条活跃与 2 条长期伏笔配额以及 `ManuscriptIndex` BM25 因果截断回查）、`StateSyncWorkflow.syncSmart`（基于 `WorldBook.lastStateSyncOffset` 游标自动切换全书分段建档与增量同步）、`StyleDistiller`（五维 MMR 选样与四维语域门控 Few-Shot），以及白名单 `prefillCoT`（DeepSeek `/beta` 开启 `prefix: true` 与 `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）。`GeminiClient` 原生 `/v1beta` 与 `ThinkTagStreamSplitter` `<think>` 剥离已同步合入 `main`。
 
 ### 4.6 错误模型
 
