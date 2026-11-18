@@ -137,14 +137,17 @@ enum WriterPromptBuilder {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
-        let fewShot = StyleDistiller.fewShotDialoguePairs(
+        let styleRef = StyleDistiller.styleReferenceBlock(
             from: assembly.corpus,
-            maxPairs: 2,
+            maxSamples: 2,
             tokenBudget: max(1, snapshot.inputBudget / 4),
             queryText: fewShotQuery
         )
-        if !fewShot.injectedEntryIDs.isEmpty {
-            assembly.corpus.removeAll { fewShot.injectedEntryIDs.contains($0.entryID) }
+        if let block = styleRef.block {
+            assembly.appendedBlocks.append(block)
+        }
+        if !styleRef.injectedEntryIDs.isEmpty {
+            assembly.corpus.removeAll { styleRef.injectedEntryIDs.contains($0.entryID) }
         }
         if snapshot.settings.dynamicContextActivation {
             assembly.corpus = DynamicContextSelector.selectCorpus(
@@ -156,8 +159,7 @@ enum WriterPromptBuilder {
         try checkpoint()
 
         let prefixMessages = PromptComposer.writingPrefixMessages(
-            assembly: assembly,
-            fewShotMessages: fewShot.messages
+            assembly: assembly
         )
         let reasoningPolicy = snapshot.settings.reasoningContextPolicy
         let history: [LLMMessage]
@@ -168,8 +170,7 @@ enum WriterPromptBuilder {
             built = PromptComposer.writingMessages(
                 assembly: assembly,
                 history: history,
-                userInstruction: instruction,
-                fewShotMessages: fewShot.messages
+                userInstruction: instruction
             )
         case .continueWriting:
             // 若最后一条就是助手消息，将其从历史中剥离并作为续接片段，避免同一内容重复发送两遍。
@@ -182,20 +183,17 @@ enum WriterPromptBuilder {
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: history,
-                    fragment: fragment,
-                    fewShotMessages: fewShot.messages
+                    fragment: fragment
                 )
             } else {
                 history = PromptComposer.llmMessages(
                     from: snapshot.messages,
                     reasoningPolicy: reasoningPolicy
                 )
-                let lastAssistant = snapshot.messages.last(where: { $0.role == .assistant })?.content ?? ""
-                built = PromptComposer.continueFragmentMessages(
+                built = PromptComposer.writingMessages(
                     assembly: assembly,
                     history: history,
-                    fragment: lastAssistant,
-                    fewShotMessages: fewShot.messages
+                    userInstruction: PromptLibrary.continueLatestBubbleInstruction
                 )
             }
         case .regenerate(let index):
@@ -211,15 +209,13 @@ enum WriterPromptBuilder {
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: regenHistory,
-                    fragment: last.content,
-                    fewShotMessages: fewShot.messages
+                    fragment: last.content
                 )
             } else {
                 built = PromptComposer.writingMessages(
                     assembly: assembly,
                     history: regenHistory,
-                    userInstruction: nil,
-                    fewShotMessages: fewShot.messages
+                    userInstruction: nil
                 )
             }
         }

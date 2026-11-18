@@ -331,20 +331,79 @@ enum StyleDistiller {
         }
     }
 
-    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
-    /// 当传入 `queryText` 时，按技法标签重合度与当前场景对白密度动态精选最契合的样本，避免静态盲投。
+    /// 从语料库中挑选最多 `maxSamples` 条「仿写样本」，封装为显式隔离的只读参考块（`system` 侧），
+    /// 避免伪装成 `role: "assistant"` 对话轮次导致模型将其误认为前文结尾。
+    static func styleReferenceBlock(
+        from corpus: [PromptAssembly.Corpus],
+        maxSamples: Int = 2,
+        tokenBudget: Int? = nil,
+        queryText: String? = nil
+    ) -> (block: PromptBlock?, injectedEntryIDs: Set<String>) {
+        let picked = selectExemplars(
+            from: corpus,
+            maxCount: maxSamples,
+            tokenBudget: tokenBudget,
+            queryText: queryText
+        )
+        guard !picked.isEmpty else { return (nil, []) }
+
+        let sections = picked.enumerated().map { idx, item in
+            """
+            <style_reference index="\(idx + 1)" do_not_continue="true">
+            技法要求：\(item.technique)
+            \(item.entry.text)
+            </style_reference>
+            """
+        }
+        let body = """
+        <style_reference_only do_not_continue="true">
+        以下节选仅用于效仿句式节奏、用词质感与对白留白；严禁将其视为前文结尾，严禁续写其中的人物或剧情。
+        \(sections.joined(separator: "\n\n"))
+        </style_reference_only>
+        """
+        let block = PromptBlock(
+            key: "corpus:style-reference",
+            category: .worldbook,
+            title: "文风参考样本（仅仿笔法）",
+            body: body
+        )
+        return (block, Set(picked.map(\.entry.entryID)))
+    }
+
+    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（保留供自检验证）。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
         maxPairs: Int = 5,
         tokenBudget: Int? = nil,
         queryText: String? = nil
     ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
-        guard maxPairs > 0 else { return ([], []) }
+        let picked = selectExemplars(
+            from: corpus,
+            maxCount: maxPairs,
+            tokenBudget: tokenBudget,
+            queryText: queryText
+        )
+        var messages: [LLMMessage] = []
+        for item in picked {
+            let prompt = "【文风示范（仅效仿笔法与语感，勿沿用其中人物与剧情）】\n技法要求：\(item.technique)"
+            messages.append(.user(prompt))
+            messages.append(.assistant(item.entry.text))
+        }
+        return (messages, Set(picked.map(\.entry.entryID)))
+    }
+
+    private static func selectExemplars(
+        from corpus: [PromptAssembly.Corpus],
+        maxCount: Int,
+        tokenBudget: Int?,
+        queryText: String?
+    ) -> [(entry: PromptAssembly.Corpus, technique: String)] {
+        guard maxCount > 0 else { return [] }
         let samples = corpus.filter {
             $0.category == "仿写样本"
                 && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard !samples.isEmpty else { return ([], []) }
+        guard !samples.isEmpty else { return [] }
 
         let orderedSamples: [PromptAssembly.Corpus]
         if let queryText, !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -371,30 +430,26 @@ enum StyleDistiller {
             orderedSamples = samples
         }
 
-        var messages: [LLMMessage] = []
-        var ids: Set<String> = []
+        var selected: [(entry: PromptAssembly.Corpus, technique: String)] = []
         var usedTokens = 0
 
-        for entry in orderedSamples.prefix(maxPairs) {
+        for entry in orderedSamples.prefix(maxCount) {
             let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
             let technique = isPlaceholder
                 ? "保持本书的句式节奏、描写分寸与对白留白。"
                 : rawTitle
-            let prompt = "【文风示范（仅效仿笔法与语感，勿沿用其中人物与剧情）】\n技法要求：\(technique)"
-            let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
-            if let tokenBudget, !messages.isEmpty, usedTokens + pairCost > tokenBudget {
+            let pairCost = TokenEstimator.estimate(technique) + TokenEstimator.estimate(entry.text) + 40
+            if let tokenBudget, !selected.isEmpty, usedTokens + pairCost > tokenBudget {
                 break
             }
-            if let tokenBudget, messages.isEmpty, pairCost > tokenBudget {
+            if let tokenBudget, selected.isEmpty, pairCost > tokenBudget {
                 break
             }
-            messages.append(.user(prompt))
-            messages.append(.assistant(entry.text))
-            ids.insert(entry.entryID)
+            selected.append((entry, technique))
             usedTokens += pairCost
         }
-        return (messages, ids)
+        return selected
     }
 
     private static func exemplarMatchScore(
