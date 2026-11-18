@@ -327,7 +327,7 @@ enum WorldMerge {
         return entries
     }
 
-    private static func uniqueStrings(_ values: [String]) -> [String] {
+    static func uniqueStrings(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         var result: [String] = []
         for value in values {

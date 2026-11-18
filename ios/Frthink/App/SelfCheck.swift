@@ -2667,7 +2667,7 @@ enum SelfCheck {
             settings.providers = [
                 ProviderSetting(
                     kind: .openCodeGo,
-                    model: "kimi-k2.5",
+                    model: "kimi-k3.1-pro",
                     thinkingLevel: .high
                 )
             ]
@@ -2675,7 +2675,7 @@ enum SelfCheck {
             ocSnap.settings = settings
             let ocPrepared = WriterPromptBuilder.prepare(ocSnap)
             let ocBody = LLMRequest(
-                model: "kimi-k2.5",
+                model: "kimi-k3.1-pro",
                 messages: ocPrepared.messages,
                 stream: true,
                 temperature: 0.7,

@@ -33,9 +33,9 @@ App/            入口、根导航、演示数据、运行时自检
 Features/       按业务域切的界面层：Writer、World、Translation（Reader）、Library、Universe、Settings
 Core/
   Models/       值类型：Project、World、Chat、Settings、Universe
-  Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、TextFileCodec（正文编解码与导出）、Keychain
-  Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）
-  LLM/          协议抽象、OpenAI 兼容与 Anthropic 实现、token 估算
+  Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、ManuscriptIndex（端侧 BM25 因果回查，增强分支）、TextFileCodec（正文编解码与导出）、Keychain
+  Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）、DynamicContextSelector / StyleDistiller（增强分支）
+  LLM/          协议抽象、ThinkTagStreamSplitter、OpenAI 兼容与 Anthropic 实现、token 估算
   Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
   Design/       Theme、AppComponents、AppFormComponents、JustifiedText 等
 ```
@@ -83,7 +83,7 @@ Archive/<name>.frthink
 
 gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMPRESSION_ZLIB` 采用 RFC1950 规范，与原版的 `GZIPInputStream` 不兼容。
 
-世界刷新、素材归纳、长期规则分别由 `WorldWorkflow`、`WorldMaterialWorkflow`、`WorldRulesWorkflow` 承担，共用 `WorldRequestContext`（当前服务商 + 客户端 + 一次性请求参数）；各 workflow 只保留业务逻辑。
+世界刷新、素材归纳、长期规则分别由 `WorldWorkflow`、`WorldMaterialWorkflow`、`WorldRulesWorkflow` 承担，共用 `WorldRequestContext`（当前服务商 + 客户端 + 一次性请求参数）；增强分支另设 `StateSyncWorkflow`（采纳正文后后台防抖同步动态快照与伏笔）与 `ConsistencyCheckWorkflow`（按需五维证据审校），各 workflow 只保留业务逻辑。
 
 `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 用 AES-256-GCM 加密，文件头 `FRTHENC1`，主密钥 32 字节存 Keychain。读取时按文件头判断：旧版本的明文文件解码后立即加密写回。导出不加密——原版密钥在 AndroidKeyStore，跨平台环境下密钥并不共享，导出保持明文才能实现双端互通。
 
@@ -103,6 +103,8 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 世界块里，P07 仿写模板取 `world.styleTemplate`；P08 剧情梗概直接渲染事件卡（APK `L1/W2.java:480-484`），`world.plotOutline` 字符串只随存档往返，不参与提示词，也不再单独提供编辑入口。
 
 自动摘要流水线在此基础上增加一个环节：当上下文占用达到阈值时，依据 P54 模板将尚未摘要的用户轮次合并至长期规则中，并记录 `sourceMessageKeys`。该步骤仅更新长期规则，不删除既有对话消息。
+
+**增强分支（`feat/dynamic-context-and-style-distiller`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词/1 层递归触发）、`SceneMemoryBlock`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3+2 伏笔配额与 `ManuscriptIndex` BM25 因果截断回查）、`StyleDistiller`（五维 MMR 选样 + 四维语域门控 Few-Shot），以及可选的 `prefillCoT` 分通道卡思维链预填充（DeepSeek `/beta` + `prefix: true` + `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）配合 `ThinkTagStreamSplitter` 流式/非流式 `<think>` 剥离。
 
 ### 4.6 错误模型
 
