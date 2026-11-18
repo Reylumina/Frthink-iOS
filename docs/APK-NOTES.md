@@ -73,7 +73,7 @@ AI 中文小说写作工具。主要功能是将长篇小说写作所需的上�
 - 没有 `top_p`、`stop`、`response_format`、`presence_penalty`
 - **不发送** OpenRouter 的 `HTTP-Referer` / `X-Title`（字符串表全表无此字符串）
 - 超时：connect 20s / read 300s / callTimeout 4h
-- 应用层**未实现**重试退避机制，`V2.c` 中的退避阶梯逻辑未实际生效
+- 应用层**未实现**重试退避机制：`L1.T` 仅在 HTTP `400` / `422` 报错同时含 `stream_options` 与不支持关键词时触发一次 `compatibilityRetry`（无延迟）；`L1.X2.c` 中虽定义了 `1s → 2s → 4s → 8s → 15s` 退避阶梯函数，但在全包内无任何调用处，未实际生效
 
 ## 六、数据层
 
@@ -99,18 +99,18 @@ AES-256-GCM 加密，密钥保存在 AndroidKeyStore 内部且不可导出。因
 
 - [SwiftUI 重写](../README.md)，提示词主体保持严格一致（[`script/prompt_check.py`](../script/prompt_check.py) 比对通过率 61/61）。
 - **世界刷新（`L1/W2.B`）**：UI 入口仅写人物卡；普通模式按 `clamp(min(4000, contextBudget × 0.2), 256, 4000)` token 切段（96 token 重叠），**每轮上限 256 段**（`L1/K0.smali:5774-5776`）；长文本模式（码点数 `≥ 500,000`）单次仅分析上下文容量允许的前缀（收尾文案「已分析正文前 N 字，其余未分析」），并扣除已有角色卡字符串（上限 6000 字）与 `4096` 等预算；写库前先按姓名/别称执行连通分量合并（`L1.r.b`/`q0`）再执行 P32–P34 全书去重。
-- **素材归纳（`L1/W2.Q0` / `L1/Q2`）**：按 **3000 token** 切段、最多 256 段；剧情模式仅接收「事件数组」或「`events` / `plot_events` 恰好一个」（若同时出现则报错 `事件卡结果必须包含唯一事件数组`），**不写入 `plotOutline`**；每段结束写回 `materialChunkHashes` 与 `materialSourceProgress` 并更新 `StateFlow<C0>` 落盘。
+- **素材归纳（`L1/W2.Q0` / `L1/Q2`）**：按 **3000 token** 切段、最多 256 段（温度 `0.2`）；`Q2` 将 `plotOutlineInstruction`（剧情事件）或 `imitationInstruction`（文风仿写）作为前缀并追加固定契约后缀拼入 `task:material-contract`（单次全量模式追加全书核对提示）；剧情模式仅接收「事件数组」或「`events` / `plot_events` 恰好一个」（若同时出现则报错 `事件卡结果必须包含唯一事件数组`），**不写入 `plotOutline`**；每段结束写回 `materialChunkHashes` 与 `materialSourceProgress` 并更新 `StateFlow<C0>` 落盘。
 - **语料全量注入（`L1/W2.java:489-530`）**：注入所有启用语料库的全部条目，无 10 条上限。
 - **长期规则门控（`L1/W2.java:606-658`）**：要求 `enabled == true && rulesVersion == 1 && !content.isBlank() && content != "暂无长期规则。"`，且所有 `sourceMessageKeys` 以 `"user:"` 开头、`sourceHash == p000a.a.o(sourceMessageKeys)`；`previousRevisions` 保留最近 10 条。
 - **人物卡工具路径（`L1/W.smali:423-805`）**：`create_character_card` schema 字段与层级已完整验证；首次请求不发 `thinking`，仅在 HTTP 400 返回同时含 `thinking mode` 与 `tool[_\s-]?choice` 时，无条件附带 `"thinking": {"type": "disabled"}` 与 `Idempotency-Key: {attemptId}-thinking-disabled` 重试。
 - **写作台范围限制**：支持 `1–1,000,000` 字「正文范围」配置与保存回执。
 - **正文与存档导入导出（`L1/U2.java` / `I1/l3.java` / `I1/x3.java`）**：正文导入文件上限为 12 MiB，支持 `.txt`/`.md`/`.markdown` 扩展名、UTF-8/UTF-16LE/BE BOM 识别及 `GB18030` 编码回退，拒绝包含 `\0` 字节的二进制内容并统一换行为 `\n`；正文导出将 Markdown 标题与行内格式剥离后输出为纯文本 `.txt`；`.frthink` 存档导入上限为 300 MiB，包含完整的 `StoredSettings` 字段集与 `continuationAnchorOffset` 续写锚点偏移。
 
-## 九、原版逆向局限与 iOS 对应实现
+## 九、原版补充反编译核实与 iOS 对应实现
 
-以下条目记录的是**反编译原版 Android APK 时的取证限制**，并非 iOS 端未实现的功能：
+以下条目已通过 `jadx --deobf --no-inline-kotlin-lambda` 与单类 `--fallback` 模式全部解出并核实：
 
-- **阅读页 `J5.i0`**：原版方法体包含 9923 条指令，jadx 未能反编译出 Java 源码，内部分页算法**未验证**；iOS 端已独立实现 `body.pages/*.bin` 分页落盘、`ReaderDocument` 按块懒加载与 TextKit 两端对齐。
-- **`L1/K0` 系列（世界设定抽取的核心逻辑）**：jadx 反编译失败，但**已直接依据 `.smali` 字节码核实完毕**；iOS 端已完整对齐 256 段切分、96 token 重叠、长文前缀分析、连通分量合并与 `P32–P34` 全书去重。
-- **自动保存去抖间隔、SSE 重连退避**：原版精确参数**未验证**；iOS 端采用 `2s` 落盘防抖、`400ms` 正文提交防抖、`1.5s` 章节扫描防抖及 `33ms` 合帧流式渲染。
-- **`M1/v2.smali` 与 `M1/V2.smali`**：在 Windows 环境发生大小写碰撞，仅影响本地反编译目录；保留下来的 `v2.1.smali` 已完整核实「Tab 到界面」分发逻辑，iOS 端由原生 `TabView` 承载五个一级页面。
+- **阅读页 `M1.J5.i0` / `M1.P4`**：已完整反编译。原版并非左右翻页分页，而是通过 `J5.R1` 按 **1200 字符**目标窗口切分正文（在 `[i+400, i+1200]` 内优先于 `\n\n`、其次 `\n` 断行并避开 UTF-16 代理对），生成 `ReaderSection(startCodePoint, text)` 放入 `LazyColumn`（水平内边距 `22dp`、段间距 `9dp`；纯文本字号 `17 * scale sp`、行高 `30 * scale sp`）；跳转 `I0` 反向查找最后一个 `startCodePoint ≤ target` 的段落。iOS 端在此基础上进一步实现了 `body.pages/*.bin` 真正按页分页落盘、`ReaderDocument` 按块懒加载与 TextKit 两端对齐。
+- **`L1/K0`、`L1/Q2`、`L1/T`**：已全部通过 `--fallback` 模式解出 Java 控制流与 `.smali` 交叉核实；`K0` 世界刷新（256 段上限、96 token 重叠、长文前缀分析、连通分量合并与 `P32–P34` 全书去重）及 `Q2` 素材归纳（P19 模板拼接与 `0.2` 温度）均已明确。
+- **自动保存去抖间隔、SSE 重连退避**：已核实原版项目存档自动保存去抖为 **`700ms`**（`L1.F0`），正文同步去抖为 **`150ms`**（`L1.z0`）；SSE 仅实现 `stream_options` 兼容重试，`L1.X2.c` 退避函数无调用处。iOS 端采用 `2s` 落盘防抖、`400ms` 正文提交防抖、`1.5s` 章节扫描防抖及 `33ms` 合帧流式渲染。
+- **`M1/v2` 与 `M1/V2`**：通过 `--deobf` 已分别完整反编译为 `C2217v2.java` 与 `C1988V2.java`，Windows 大小写碰撞已消除；iOS 端由原生 `TabView` 承载五个一级页面。

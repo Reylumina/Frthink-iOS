@@ -343,26 +343,7 @@ final class OpenAICompatibleClient: LLMClient {
     /// 发送单次请求并统一收口 HTTP 状态：规范化取消异常，非 2xx 附带原始响应。
     /// 供单次补全、连通性探测及模型列表查询复用，统一状态码判定逻辑。
     private func send(_ urlRequest: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: urlRequest)
-        } catch {
-            // URLSession 取消抛出 URLError.cancelled，与结构化并发取消类型不同；
-            // 统一映射为 LLMError.cancelled，便于调用方区分主动终止与执行失败。
-            if error.isLLMCancellation { throw LLMError.cancelled }
-            throw error
-        }
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("未获取到 HTTP 状态码")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw LLMError.http(
-                status: http.statusCode,
-                body: String(data: data, encoding: .utf8) ?? ""
-            )
-        }
-        return (data, http)
+        try await LLMHTTPTransport.performData(urlRequest, session: session)
     }
 
     /// `/chat/completions` 的非流式响应。返回解码结果和原文，正文/思考的判断留给调用方。

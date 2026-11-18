@@ -175,7 +175,7 @@ final class GeminiClient: LLMClient {
         _ request: LLMRequest,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async {
-        do {
+        await LLMHTTPTransport.runStream(continuation: continuation) {
             var req = request
             req.stream = true
             let encodedModel = req.model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? req.model
@@ -185,21 +185,8 @@ final class GeminiClient: LLMClient {
                 accept: "text/event-stream",
                 attemptId: req.attemptId
             )
-            let (bytes, response) = try await session.bytes(for: urlRequest)
-            guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("未获取到 HTTP 状态码")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let body = try await OpenAICompatibleClient.drain(bytes)
-                throw LLMError.http(status: http.statusCode, body: body)
-            }
+            let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
             try await consumeStream(bytes, continuation: continuation)
-        } catch is CancellationError {
-            continuation.finish(throwing: LLMError.cancelled)
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            continuation.finish(throwing: LLMError.cancelled)
-        } catch {
-            continuation.finish(throwing: error)
         }
     }
 
@@ -375,21 +362,7 @@ final class GeminiClient: LLMClient {
     }
 
     private func performData(_ urlRequest: URLRequest) async throws -> Data {
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: urlRequest)
-        } catch {
-            if error.isLLMCancellation { throw LLMError.cancelled }
-            throw error
-        }
-        guard let http = response as? HTTPURLResponse else {
-            throw LLMError.decoding("未获取到 HTTP 状态码")
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw LLMError.http(status: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
-        }
-        return data
+        try await LLMHTTPTransport.performData(urlRequest, session: session).0
     }
 
     // MARK: - 响应结构

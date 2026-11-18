@@ -205,7 +205,7 @@ final class AnthropicClient: LLMClient {
         _ request: LLMRequest,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async {
-        do {
+        await LLMHTTPTransport.runStream(continuation: continuation) {
             var req = request
             req.stream = true
             let urlRequest = try makeRequest(
@@ -213,25 +213,12 @@ final class AnthropicClient: LLMClient {
                 body: Self.requestBody(for: req, providerLevel: provider.effectiveThinkingLevel),
                 accept: "text/event-stream"
             )
-            let (bytes, response) = try await session.bytes(for: urlRequest)
-            guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("未获取到 HTTP 状态码")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let body = try await OpenAICompatibleClient.drain(bytes)
-                throw LLMError.http(status: http.statusCode, body: body)
-            }
+            let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
             try await consumeStream(
                 bytes,
                 startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: req.messages),
                 continuation: continuation
             )
-        } catch is CancellationError {
-            continuation.finish(throwing: LLMError.cancelled)
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            continuation.finish(throwing: LLMError.cancelled)
-        } catch {
-            continuation.finish(throwing: error)
         }
     }
 
@@ -424,21 +411,7 @@ final class AnthropicClient: LLMClient {
     }
 
     private func performData(_ urlRequest: URLRequest) async throws -> Data {
-        do {
-            let (data, response) = try await session.data(for: urlRequest)
-            guard let http = response as? HTTPURLResponse else {
-                throw LLMError.decoding("未获取到 HTTP 状态码")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let body = String(data: data, encoding: .utf8) ?? ""
-                throw LLMError.http(status: http.statusCode, body: body)
-            }
-            return data
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            throw LLMError.cancelled
-        } catch is CancellationError {
-            throw LLMError.cancelled
-        }
+        try await LLMHTTPTransport.performData(urlRequest, session: session).0
     }
 
     // MARK: - 响应模型
@@ -501,21 +474,13 @@ private enum AnyCodableValue: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if container.decodeNil() {
-            self = .null
-        } else if let b = try? container.decode(Bool.self) {
-            self = .bool(b)
-        } else if let d = try? container.decode(Double.self) {
-            self = .number(d)
-        } else if let s = try? container.decode(String.self) {
-            self = .string(s)
-        } else if let arr = try? container.decode([AnyCodableValue].self) {
-            self = .array(arr)
-        } else if let obj = try? container.decode([String: AnyCodableValue].self) {
-            self = .object(obj)
-        } else {
-            self = .null
-        }
+        if container.decodeNil() { self = .null; return }
+        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
+        if let d = try? container.decode(Double.self) { self = .number(d); return }
+        if let s = try? container.decode(String.self) { self = .string(s); return }
+        if let arr = try? container.decode([AnyCodableValue].self) { self = .array(arr); return }
+        if let obj = try? container.decode([String: AnyCodableValue].self) { self = .object(obj); return }
+        self = .null
     }
 
     var jsonValue: Any {

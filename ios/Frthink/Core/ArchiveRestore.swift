@@ -331,21 +331,16 @@ extension FrthinkArchive {
         var summaryModel: String?
 
         func apply(to settings: inout AppSettings) {
-            if let globalPreset, !globalPreset.isEmpty {
-                settings.globalPreset = globalPreset
+            func assignNonEmpty(_ value: String?, to keyPath: WritableKeyPath<AppSettings, String>) {
+                guard let value, !value.isEmpty else { return }
+                settings[keyPath: keyPath] = value
             }
-            if let aiFlavorRules, !aiFlavorRules.isEmpty {
-                settings.aiFlavorRules = aiFlavorRules
-            }
-            if let worldBuildInstruction, !worldBuildInstruction.isEmpty {
-                settings.worldBuildInstruction = worldBuildInstruction
-            }
-            if let plotOutlineInstruction, !plotOutlineInstruction.isEmpty {
-                settings.plotOutlineInstruction = plotOutlineInstruction
-            }
-            if let imitationInstruction, !imitationInstruction.isEmpty {
-                settings.imitationInstruction = imitationInstruction
-            }
+            assignNonEmpty(globalPreset, to: \.globalPreset)
+            assignNonEmpty(aiFlavorRules, to: \.aiFlavorRules)
+            assignNonEmpty(worldBuildInstruction, to: \.worldBuildInstruction)
+            assignNonEmpty(plotOutlineInstruction, to: \.plotOutlineInstruction)
+            assignNonEmpty(imitationInstruction, to: \.imitationInstruction)
+
             if let inputBudgetTokens, inputBudgetTokens > 0 {
                 settings.inputBudgetTokens = min(max(inputBudgetTokens, 1024), 1_000_000)
             }
@@ -847,76 +842,42 @@ extension FrthinkArchive {
         result.hapticsEnabled = local.hapticsEnabled
 
         // 未映射 / 缺键的字段：Android 备份没有对应键，解出来是出厂默认值。
-        func archived(_ names: String...) -> Bool {
-            names.contains { archivedKeys.contains($0) }
+        func keepLocal<Value>(
+            _ keyPath: WritableKeyPath<AppSettings, Value>,
+            unlessArchived names: String...
+        ) {
+            guard !names.contains(where: { archivedKeys.contains($0) }) else { return }
+            result[keyPath: keyPath] = local[keyPath: keyPath]
         }
-        if !archived("streamByDefault", "streamingResponses") {
-            result.streamByDefault = local.streamByDefault
-        }
+
         // 语料库依据「是否存在条目」判定，而非仅检查键名是否存在：Android 备份顶层
         // `corpusLibrary` 字段类型为 `CorpusLibrary?` 且默认为 null（spec 03 §5.1），仓库
         // fixture 中亦仅包含无条目的空节点。若键存在但无任何条目，不视为存档提供了该字段，
         // 避免全量导入时清空本地语料库并直接持久化。
-        let hasCorpusContent = imported.corpusLibraries.contains { !$0.entries.isEmpty }
-        if !hasCorpusContent {
+        if !imported.corpusLibraries.contains(where: { !$0.entries.isEmpty }) {
             result.corpusLibraries = local.corpusLibraries
             result.corpusEnabled = local.corpusEnabled
         }
-        if !archived("enabledUniverseEntryIDs") {
-            result.enabledUniverseEntryIDs = local.enabledUniverseEntryIDs
-        }
-        if !archived("defaultTemperature") {
-            result.defaultTemperature = local.defaultTemperature
-        }
-        if !archived("defaultMaxTokens") {
-            result.defaultMaxTokens = local.defaultMaxTokens
-        }
-        if !archived("contextWindowTokens") {
-            result.contextWindowTokens = local.contextWindowTokens
-        }
-        if !archived("inputBudgetTokens") {
-            result.inputBudgetTokens = local.inputBudgetTokens
-        }
-        if !archived("reservedOutputTokens", "outputBudgetTokens") {
-            result.reservedOutputTokens = local.reservedOutputTokens
-        }
-        if !archived("tokenUsageTotal") {
-            result.tokenUsageTotal = local.tokenUsageTotal
-        }
-        if !archived("translationProviderID") {
-            result.translationProviderID = local.translationProviderID
-        }
-        if !archived("summaryModel") {
-            result.summaryModel = local.summaryModel
-        }
-        if !archived("worldBuildInstruction") {
-            result.worldBuildInstruction = local.worldBuildInstruction
-        }
-        if !archived("plotOutlineInstruction") {
-            result.plotOutlineInstruction = local.plotOutlineInstruction
-        }
-        if !archived("imitationInstruction") {
-            result.imitationInstruction = local.imitationInstruction
-        }
-        if !archived("autoConversationSummary") {
-            result.autoConversationSummary = local.autoConversationSummary
-        }
-        if !archived("conversationSummaryThresholdPercent") {
-            result.conversationSummaryThresholdPercent =
-                local.conversationSummaryThresholdPercent
-        }
-        if !archived("excludeAssistantChatHistory") {
-            result.excludeAssistantChatHistory = local.excludeAssistantChatHistory
-        }
-        if !archived("globalPreset") {
-            result.globalPreset = local.globalPreset
-        }
-        if !archived("aiFlavorRules") {
-            result.aiFlavorRules = local.aiFlavorRules
-        }
-        if !archived("skills") {
-            result.skills = local.skills
-        }
+
+        keepLocal(\.streamByDefault, unlessArchived: "streamByDefault", "streamingResponses")
+        keepLocal(\.enabledUniverseEntryIDs, unlessArchived: "enabledUniverseEntryIDs")
+        keepLocal(\.defaultTemperature, unlessArchived: "defaultTemperature")
+        keepLocal(\.defaultMaxTokens, unlessArchived: "defaultMaxTokens")
+        keepLocal(\.contextWindowTokens, unlessArchived: "contextWindowTokens")
+        keepLocal(\.inputBudgetTokens, unlessArchived: "inputBudgetTokens")
+        keepLocal(\.reservedOutputTokens, unlessArchived: "reservedOutputTokens", "outputBudgetTokens")
+        keepLocal(\.tokenUsageTotal, unlessArchived: "tokenUsageTotal")
+        keepLocal(\.translationProviderID, unlessArchived: "translationProviderID")
+        keepLocal(\.summaryModel, unlessArchived: "summaryModel")
+        keepLocal(\.worldBuildInstruction, unlessArchived: "worldBuildInstruction")
+        keepLocal(\.plotOutlineInstruction, unlessArchived: "plotOutlineInstruction")
+        keepLocal(\.imitationInstruction, unlessArchived: "imitationInstruction")
+        keepLocal(\.autoConversationSummary, unlessArchived: "autoConversationSummary")
+        keepLocal(\.conversationSummaryThresholdPercent, unlessArchived: "conversationSummaryThresholdPercent")
+        keepLocal(\.excludeAssistantChatHistory, unlessArchived: "excludeAssistantChatHistory")
+        keepLocal(\.globalPreset, unlessArchived: "globalPreset")
+        keepLocal(\.aiFlavorRules, unlessArchived: "aiFlavorRules")
+        keepLocal(\.skills, unlessArchived: "skills")
         return result
     }
 

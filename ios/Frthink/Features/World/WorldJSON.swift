@@ -1,11 +1,8 @@
-// 世界设定 JSON 提取与解析：去除 Markdown 代码块包裹、提取闭合括号、容错读取字段。
+// 世界设定 JSON 提取与解析：定位有效 JSON 片段，通过 Codable + 容错值模型反序列化。
 
 import Foundation
 
 /// 世界刷新 / 事件卡的响应解析。
-///
-/// 兼容处理模型输出的 Markdown 围栏或解释性前缀，定位首个有效闭合的 JSON 对象或数组，
-/// 并通过 `JSONSerialization` 进行多类型容错解析。
 enum WorldJSON {
 
     // MARK: - 结果
@@ -24,30 +21,29 @@ enum WorldJSON {
 
     // MARK: - 提取
 
-    /// 从模型响应里截出 JSON 对象或数组。
-    ///
-    /// 括号配对时会跳过字符串内部的内容和反斜杠转义，所以 `style_notes`
-    /// 里出现 `{`、`}` 或 ``` 不会截错。
-    ///
-    /// 顺序尝试各候选开括号起点，由 `JSONSerialization` 校验有效性；
-    /// 优先选取对象或对象数组，跳过前置文本中的标量括号片段，空数组作为回退候选。
+    private static let maxStartAttempts = 128
+
+    /// 从模型响应里截出首个有效闭合的 JSON 对象或对象数组；空数组作回退候选。
     static func extractJSON(from raw: String) -> String? {
         var emptyArrayFallback: String?
         var attempts = 0
         var searchStart = raw.startIndex
+
         while attempts < maxStartAttempts,
               let start = raw[searchStart...].firstIndex(where: { $0 == "{" || $0 == "[" }) {
             attempts += 1
             if let candidate = balancedJSON(in: raw, from: start),
                let data = candidate.data(using: .utf8),
-               let root = try? JSONSerialization.jsonObject(with: data) {
-                if root is [String: Any] { return candidate }
-                if let list = root as? [Any] {
-                    if list.isEmpty {
-                        if emptyArrayFallback == nil { emptyArrayFallback = candidate }
-                    } else if list.contains(where: { $0 is [String: Any] }) {
-                        return candidate
-                    }
+               let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
+                switch value {
+                case .object:
+                    return candidate
+                case .array(let list) where list.isEmpty:
+                    emptyArrayFallback = emptyArrayFallback ?? candidate
+                case .array(let list) where list.contains(where: \.isObject):
+                    return candidate
+                default:
+                    break
                 }
             }
             searchStart = raw.index(after: start)
@@ -55,17 +51,13 @@ enum WorldJSON {
         return emptyArrayFallback
     }
 
-    /// 括号起点搜索次数上限，防止在超长异常响应中产生性能瓶颈。
-    private static let maxStartAttempts = 128
-
     /// 从 `start` 起做括号配对，返回第一个完整的对象/数组；括号不配对返回 nil。
     private static func balancedJSON(in raw: String, from start: String.Index) -> String? {
         var expectedClosers: [Character] = []
         var inString = false
         var escaping = false
-        var index = start
 
-        while index < raw.endIndex {
+        for index in raw[start...].indices {
             let character = raw[index]
             if inString {
                 if escaping {
@@ -75,36 +67,35 @@ enum WorldJSON {
                 } else if character == "\"" {
                     inString = false
                 }
-            } else {
-                switch character {
-                case "\"":
-                    inString = true
-                case "{":
-                    expectedClosers.append("}")
-                case "[":
-                    expectedClosers.append("]")
-                case "}", "]":
-                    guard expectedClosers.last == character else { return nil }
-                    expectedClosers.removeLast()
-                    if expectedClosers.isEmpty {
-                        return String(raw[start...index])
-                    }
-                default:
-                    break
-                }
+                continue
             }
-            index = raw.index(after: index)
+            switch character {
+            case "\"":
+                inString = true
+            case "{":
+                expectedClosers.append("}")
+            case "[":
+                expectedClosers.append("]")
+            case "}", "]":
+                guard expectedClosers.last == character else { return nil }
+                expectedClosers.removeLast()
+                if expectedClosers.isEmpty {
+                    return String(raw[start...index])
+                }
+            default:
+                break
+            }
         }
         return nil
     }
 
-    private static func decodeRoot(_ raw: String) throws -> Any {
+    private static func decodeRoot(_ raw: String) throws -> JSONValue {
         guard let json = extractJSON(from: raw),
               let data = json.data(using: .utf8) else {
             throw WorldJSONError.noJSON
         }
         do {
-            return try JSONSerialization.jsonObject(with: data, options: [])
+            return try JSONDecoder().decode(JSONValue.self, from: data)
         } catch {
             throw WorldJSONError.invalidJSON(error.localizedDescription)
         }
@@ -112,72 +103,48 @@ enum WorldJSON {
 
     // MARK: - 世界刷新
 
-    /// 解析 `{"characters":[...],"style_notes":"...","plot_events":"..."}`。
-    ///
-    /// 兼容直接返回人物数组的顶层结构；无任何有效数据字段时抛出异常交由外层处理。
+    /// 解析 `{"characters":[...],"style_notes":"...","plot_events":"..."}` 或顶层人物数组。
     static func parseWorldRefresh(_ raw: String) throws -> WorldRefreshPayload {
-        // 整个响应只有增量标记（不是 JSON）也算正常收尾。
         if raw.trimmingCharacters(in: .whitespacesAndNewlines) == PromptLibrary.noAdditionsMarker {
             return WorldRefreshPayload(hadNoAdditions: true)
         }
 
         let root = try decodeRoot(raw)
 
-        if let array = root as? [Any] {
-            if array.isEmpty { return WorldRefreshPayload() }
-            var payload = WorldRefreshPayload()
-            payload.characters = try characterCards(from: array)
-            if payload.characters.isEmpty {
+        if case .array(let list) = root {
+            guard !list.isEmpty else { return WorldRefreshPayload() }
+            let cards = try decodeCharacters(from: list)
+            guard !cards.isEmpty else {
                 throw WorldJSONError.invalidJSON("人物数组里没有一张有效的卡")
             }
-            return payload
+            return WorldRefreshPayload(characters: cards)
         }
 
-        guard let rootObject = root as? [String: Any] else {
+        guard case .object(let object) = root else {
             throw WorldJSONError.invalidJSON("顶层不是 JSON 对象或数组")
-        }
-
-        let characterValue: Any? = rootObject["characters"]
-            ?? rootObject["characters_list"]
-        let characterItems: [Any]
-        switch characterValue {
-        case .none:
-            characterItems = []
-        case .some(let rawValue):
-            if let list = rawValue as? [Any] {
-                characterItems = list
-            } else if let single = rawValue as? [String: Any] {
-                // 少数模型把单个对象当数组返回。
-                characterItems = [single]
-            } else if rawValue is NSNull {
-                characterItems = []
-            } else {
-                throw WorldJSONError.invalidJSON("characters 不是数组")
-            }
-        }
-        var payload = WorldRefreshPayload()
-        payload.characters = try characterCards(from: characterItems)
-
-        let notes = string(field(rootObject, ["style_notes", "styleNotes"]))
-        payload.hadNoAdditions = isNoAdditions(notes)
-        payload.styleNotes = payload.hadNoAdditions ? "" : notes
-
-        let plot = string(field(rootObject, ["plot_events", "plotEvents"]))
-        payload.plotEvents = isNoAdditions(plot) ? "" : plot
-
-        // 存在 characters 原始列表但未能解析出任何有效卡片，判定为解析失败抛出异常。
-        if !characterItems.isEmpty, payload.characters.isEmpty, payload.isEmpty {
-            throw WorldJSONError.invalidJSON(
-                "characters 有 \(characterItems.count) 项，但都没有可用的 name"
-            )
         }
 
         let knownKeys = [
             "characters", "characters_list", "style_notes", "styleNotes",
             "plot_events", "plotEvents",
         ]
-        guard knownKeys.contains(where: { rootObject[$0] != nil }) else {
+        guard knownKeys.contains(where: { object[$0] != nil }) else {
             throw WorldJSONError.invalidJSON("响应里没有 characters / style_notes / plot_events")
+        }
+
+        let rawItems = try extractCharacterItems(from: object)
+        var payload = WorldRefreshPayload()
+        payload.characters = try decodeCharacters(from: rawItems)
+
+        let notes = object.firstPresent(["style_notes", "styleNotes"])?.proseString ?? ""
+        payload.hadNoAdditions = isNoAdditions(notes)
+        payload.styleNotes = payload.hadNoAdditions ? "" : notes
+
+        let plot = object.firstPresent(["plot_events", "plotEvents"])?.proseString ?? ""
+        payload.plotEvents = isNoAdditions(plot) ? "" : plot
+
+        if !rawItems.isEmpty, payload.characters.isEmpty, payload.isEmpty {
+            throw WorldJSONError.invalidJSON("characters 有 \(rawItems.count) 项，但都没有可用的 name")
         }
         return payload
     }
@@ -191,62 +158,39 @@ enum WorldJSON {
     // MARK: - 事件卡
 
     /// 解析事件卡 JSON 数组；也接受 `{"events":[...]}` 或单个事件对象。
-    ///
-    /// 要求 `events` 与 `plot_events` 键仅出现其一，避免并发同类字段造成数据二义性。
     static func parseEvents(_ raw: String) throws -> [EventCard] {
-        let root = try decodeRoot(raw)
-
-        let items: [Any]
-        if let array = root as? [Any] {
-            items = array
-        } else if let rootObject = root as? [String: Any] {
-            let candidates = ["events", "plot_events"]
-                .compactMap { rootObject[$0] }
-                .filter { !($0 is NSNull) }
-            if candidates.count > 1 {
-                throw WorldJSONError.invalidJSON("事件卡结果必须包含唯一事件数组")
-            }
-            if let array = candidates.first as? [Any] {
-                items = array
-            } else if candidates.count == 1 {
-                throw WorldJSONError.invalidJSON("事件卡 events 不是数组")
-            } else if rootObject["title"] != nil {
-                items = [rootObject]
-            } else {
-                throw WorldJSONError.invalidJSON("事件卡响应里没有 events 数组")
-            }
-        } else {
-            throw WorldJSONError.invalidJSON("顶层不是 JSON 数组")
-        }
-
+        let items = try extractEventItems(from: try decodeRoot(raw))
         var events: [EventCard] = []
         var skipped = 0
-        for item in items {
-            guard let object = dictionary(item) else {
-                skipped += 1
-                continue
-            }
-            let title = eventTitle(string(field(object, ["title", "name"])))
+
+        for case .object(let object) in items {
+            let title = WorldProseNormalizer.normalizeEventTitle(
+                object.firstNonNull(["title", "name"])?.proseString ?? ""
+            )
             guard !title.isEmpty else {
                 skipped += 1
                 continue
             }
-            let scene = prose(field(object, ["scene"]))
-            // 人物字段仅支持字符串或字符串数组；格式不合法时抛出异常。
-            let characterValue = field(object, ["characters", "casts"])
-            if let characterValue, !isValidEventCharacters(characterValue) {
-                throw WorldJSONError.invalidJSON("事件卡人物格式无效")
+
+            if let charValue = object.firstNonNull(["characters", "casts"]) {
+                guard charValue.isStringOrStringArray else {
+                    throw WorldJSONError.invalidJSON("事件卡人物格式无效")
+                }
             }
-            let characters = strings(characterValue)
-            let cause = prose(field(object, ["cause"]))
-            let development = prose(field(object, ["development"]))
-            let consequence = prose(field(object, ["consequence", "result"]))
-            // 只有标题、没有任何事件内容，按提示词属于无效项，跳过。
-            if scene.isEmpty && characters.isEmpty && cause.isEmpty
-                && development.isEmpty && consequence.isEmpty {
+
+            let characters = object.firstNonNull(["characters", "casts"])?.stringList ?? []
+            let scene = WorldProseNormalizer.normalizeProse(object.firstNonNull(["scene"])?.proseString ?? "")
+            let cause = WorldProseNormalizer.normalizeProse(object.firstNonNull(["cause"])?.proseString ?? "")
+            let development = WorldProseNormalizer.normalizeProse(object.firstNonNull(["development"])?.proseString ?? "")
+            let consequence = WorldProseNormalizer.normalizeProse(object.firstNonNull(["consequence", "result"])?.proseString ?? "")
+
+            let hasContent = !scene.isEmpty || !characters.isEmpty || !cause.isEmpty
+                || !development.isEmpty || !consequence.isEmpty
+            guard hasContent else {
                 skipped += 1
                 continue
             }
+
             events.append(
                 EventCard(
                     title: title,
@@ -258,6 +202,7 @@ enum WorldJSON {
                 )
             )
         }
+        skipped += items.filter { !$0.isObject }.count
 
         if events.isEmpty && skipped > 0 {
             throw WorldJSONError.invalidJSON("事件卡缺少标题或事件内容")
@@ -387,24 +332,63 @@ enum WorldJSON {
 
     // MARK: - 人物卡
 
-    /// 事件卡 `characters` 的合法形态：字符串（按分隔符切）或字符串数组。
-    /// 空值在调用处已过滤；对象、数字、混合数组都算非法。
-    private static func isValidEventCharacters(_ value: Any) -> Bool {
-        if value is String { return true }
-        guard let list = value as? [Any] else { return false }
-        return list.allSatisfy { $0 is String || $0 is NSNull }
+    /// 从 tool call JSON Data 直接解析单张人物卡。
+    static func parseCharacter(from data: Data) -> CharacterCard? {
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .object(let object) = value else {
+            return nil
+        }
+        return character(from: object)
     }
 
-    /// 逐项解析人物卡，并在别称类型不对时报错。
-    ///
-    /// `aliases` 仅接受字符串、字符串数组或空值；类型非法时抛出异常以防后续去重失效。
-    private static func characterCards(from items: [Any]) throws -> [CharacterCard] {
+    private static func extractCharacterItems(from object: [String: JSONValue]) throws -> [JSONValue] {
+        guard let rawValue = object["characters"] ?? object["characters_list"] else {
+            return []
+        }
+        switch rawValue {
+        case .array(let list):
+            return list
+        case .object:
+            return [rawValue]
+        case .null:
+            return []
+        default:
+            throw WorldJSONError.invalidJSON("characters 不是数组")
+        }
+    }
+
+    private static func extractEventItems(from root: JSONValue) throws -> [JSONValue] {
+        if case .array(let array) = root { return array }
+        guard case .object(let object) = root else {
+            throw WorldJSONError.invalidJSON("顶层不是 JSON 数组")
+        }
+
+        let candidates = ["events", "plot_events"].compactMap { key -> JSONValue? in
+            guard let val = object[key], !val.isNull else { return nil }
+            return val
+        }
+        if candidates.count > 1 {
+            throw WorldJSONError.invalidJSON("事件卡结果必须包含唯一事件数组")
+        }
+        if let first = candidates.first {
+            guard case .array(let array) = first else {
+                throw WorldJSONError.invalidJSON("事件卡 events 不是数组")
+            }
+            return array
+        }
+        if object["title"] != nil {
+            return [.object(object)]
+        }
+        throw WorldJSONError.invalidJSON("事件卡响应里没有 events 数组")
+    }
+
+    private static func decodeCharacters(from items: [JSONValue]) throws -> [CharacterCard] {
         var cards: [CharacterCard] = []
-        for item in items {
-            guard let object = dictionary(item) else { continue }
-            let aliasValue = field(object, ["aliases", "alias", "别称"])
-            if let aliasValue, !isValidAliasValue(aliasValue) {
-                throw WorldJSONError.invalidJSON("人物别称格式无效")
+        for case .object(let object) in items {
+            if let aliasValue = object.firstNonNull(["aliases", "alias", "别称"]) {
+                guard aliasValue.isStringOrStringArray else {
+                    throw WorldJSONError.invalidJSON("人物别称格式无效")
+                }
             }
             if let card = character(from: object) {
                 cards.append(card)
@@ -413,280 +397,45 @@ enum WorldJSON {
         return cards
     }
 
-    private static func isValidAliasValue(_ value: Any) -> Bool {
-        if value is String { return true }
-        guard let list = value as? [Any] else { return false }
-        return list.allSatisfy { $0 is String || $0 is NSNull }
-    }
-
-    static func character(from object: [String: Any]) -> CharacterCard? {
-        let name = string(field(object, ["name", "canonical_name", "姓名"]))
+    private static func character(from object: [String: JSONValue]) -> CharacterCard? {
+        let name = object.firstNonNull(["name", "canonical_name", "姓名"])?.proseString ?? ""
         guard !name.isEmpty else { return nil }
         return CharacterCard(
             name: name,
-            identity: string(field(object, ["identity", "身份"])),
-            personality: string(field(object, ["personality", "性格"])),
-            voice: string(field(object, ["voice", "语气", "说话方式"])),
-            goals: string(field(object, ["goals", "goal", "目标"])),
-            boundaries: string(field(object, ["boundaries", "boundary", "底线", "边界"])),
-            aliases: strings(field(object, ["aliases", "alias", "别称"])),
-            personalMemory: string(field(object, ["personal_memory", "personalMemory", "人物记忆"])),
-            relationshipAttitudes: string(field(object, ["relationship_attitudes", "relationshipAttitudes", "关系态度"])),
-            customEntries: customEntries(from: field(object, ["custom_entries", "customEntries", "自定义词条"]))
+            identity: object.firstNonNull(["identity", "身份"])?.proseString ?? "",
+            personality: object.firstNonNull(["personality", "性格"])?.proseString ?? "",
+            voice: object.firstNonNull(["voice", "语气", "说话方式"])?.proseString ?? "",
+            goals: object.firstNonNull(["goals", "goal", "目标"])?.proseString ?? "",
+            boundaries: object.firstNonNull(["boundaries", "boundary", "底线", "边界"])?.proseString ?? "",
+            aliases: object.firstNonNull(["aliases", "alias", "别称"])?.stringList ?? [],
+            personalMemory: object.firstNonNull(["personal_memory", "personalMemory", "人物记忆"])?.proseString ?? "",
+            relationshipAttitudes: object.firstNonNull(["relationship_attitudes", "relationshipAttitudes", "关系态度"])?.proseString ?? "",
+            customEntries: customEntries(from: object.firstNonNull(["custom_entries", "customEntries", "自定义词条"]))
         )
     }
 
-    private static func customEntries(from value: Any?) -> [CharacterCard.CustomEntry] {
+    private static func customEntries(from value: JSONValue?) -> [CharacterCard.CustomEntry] {
         guard let value else { return [] }
-
-        // 少数模型会把词条写成 `{"标题": "内容"}` 的对象。
-        if let object = value as? [String: Any] {
-            var entries: [CharacterCard.CustomEntry] = []
-            for (title, bodyValue) in object {
-                let body = string(bodyValue)
-                guard !body.isEmpty else { continue }
-                entries.append(CharacterCard.CustomEntry(title: title, body: body))
-            }
-            return entries
-        }
-
-        guard let list = value as? [Any] else { return [] }
-        return list.compactMap { item in
-            if let object = item as? [String: Any] {
-                let title = string(field(object, ["title", "name", "heading", "标题"]))
-                let body = string(field(object, ["body", "content", "text", "value", "内容"]))
-                if title.isEmpty && body.isEmpty { return nil }
-                return CharacterCard.CustomEntry(
-                    title: title.isEmpty ? "资料" : title,
-                    body: body
-                )
-            }
-            let text = string(item)
-            return text.isEmpty ? nil : CharacterCard.CustomEntry(title: "资料", body: text)
-        }
-    }
-
-    // MARK: - 字段取值
-
-    static func dictionary(_ value: Any?) -> [String: Any]? {
-        value as? [String: Any]
-    }
-
-    private static func field(_ object: [String: Any], _ keys: [String]) -> Any? {
-        for key in keys {
-            if let value = object[key], !(value is NSNull) { return value }
-        }
-        return nil
-    }
-
-    /// 把任意 JSON 值转成一段文本：字符串原样，数组用「；」拼接，
-    /// 对象里常见的 `text`/`content` 等字段也认。
-    static func string(_ value: Any?) -> String {
-        guard let value else { return "" }
         switch value {
-        case let text as String:
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
-        case let number as NSNumber:
-            return number.stringValue
-        case let list as [Any]:
-            return list
-                .map { string($0) }
-                .filter { !$0.isEmpty }
-                .joined(separator: "；")
-        case let object as [String: Any]:
-            return string(field(object, ["text", "content", "value", "body", "summary", "description"]))
-        default:
-            return ""
-        }
-    }
-
-    /// 事件卡叙述文本段落规范化：合并换行、转换全半角标点并补齐句读；
-    /// 保留空行作为自然段落分隔符，英文文本采用空格合并。
-    static func prose(_ value: Any?) -> String {
-        let lines = string(value)
-            .components(separatedBy: .newlines)
-            .map { stripListMarker($0.trimmingCharacters(in: .whitespaces)) }
-
-        var paragraphs: [[String]] = []
-        var current: [String] = []
-        for line in lines {
-            if line.isEmpty {
-                if !current.isEmpty {
-                    paragraphs.append(current)
-                    current = []
+        case .object(let map):
+            return map.compactMap { title, bodyValue in
+                let body = bodyValue.proseString
+                return body.isEmpty ? nil : CharacterCard.CustomEntry(title: title, body: body)
+            }
+        case .array(let list):
+            return list.compactMap { item in
+                if case .object(let object) = item {
+                    let title = object.firstNonNull(["title", "name", "heading", "标题"])?.proseString ?? ""
+                    let body = object.firstNonNull(["body", "content", "text", "value", "内容"])?.proseString ?? ""
+                    guard !title.isEmpty || !body.isEmpty else { return nil }
+                    return CharacterCard.CustomEntry(title: title.isEmpty ? "资料" : title, body: body)
                 }
-            } else {
-                current.append(line)
+                let text = item.proseString
+                return text.isEmpty ? nil : CharacterCard.CustomEntry(title: "资料", body: text)
             }
+        default:
+            return []
         }
-        if !current.isEmpty { paragraphs.append(current) }
-
-        // 多个自然段间以空行分隔，保持文本编辑器内的段落层级清晰。
-        return paragraphs
-            .map(mergedParagraph)
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-    }
-
-    /// 段内并句：行间缺分隔补「，」，段末补「。」，半角转全角。
-    private static func mergedParagraph(_ lines: [String]) -> String {
-        guard !lines.isEmpty else { return "" }
-        guard lines.contains(where: { containsHan($0) }) else {
-            return lines.joined(separator: " ")
-        }
-
-        var result = ""
-        for line in lines {
-            let normalized = normalizePunctuation(line)
-            if result.isEmpty {
-                result = normalized
-                continue
-            }
-            if !endsWithClause(result) {
-                result += "，"
-            }
-            result += normalized
-        }
-        result = collapsePunctuation(result)
-        if !endsWithSentence(result) {
-            while let last = result.last, "，、；：".contains(last) {
-                result.removeLast()
-            }
-            result += "。"
-        }
-        return result
-    }
-
-    /// 规范化事件标题：去除首尾多余标点与列表编号标记。
-    static func eventTitle(_ raw: String) -> String {
-        stripListMarker(raw)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "。！？；，、："))
-            .trimmingCharacters(in: .whitespaces)
-    }
-
-    // MARK: - 事件文本标点
-
-    private static func containsHan(_ text: String) -> Bool {
-        text.contains { isHan($0) }
-    }
-
-    /// 去除模型输出的前置列表标记或序号前缀。
-    private static func stripListMarker(_ line: String) -> String {
-        line
-            .replacingOccurrences(
-                of: #"^\s*[-–—•·]\s+"#,
-                with: "",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"^\s*\d+[.、)]\s*"#,
-                with: "",
-                options: .regularExpression
-            )
-    }
-
-    /// 中文行里的半角标点转全角；数字小数、英文缩写不动。
-    ///
-    /// 规范化标点符号：连续句点规范为标准省略号，汉字相邻处的半角标点转为全角标点。
-    private static func normalizePunctuation(_ text: String) -> String {
-        let prepared = text.replacingOccurrences(of: "...", with: "……")
-        let chars = Array(prepared)
-        var result = ""
-        result.reserveCapacity(chars.count)
-        for (index, ch) in chars.enumerated() {
-            guard let fullwidth = fullwidthPunctuation(ch) else {
-                result.append(ch)
-                continue
-            }
-            let previous = index > 0 ? chars[index - 1] : nil
-            let next = index + 1 < chars.count ? chars[index + 1] : nil
-            if isHan(previous) || isHan(next) {
-                result.append(fullwidth)
-            } else {
-                result.append(ch)
-            }
-        }
-        return result
-            .replacingOccurrences(
-                of: #"\s+([，。！？；：、」』”’）])"#,
-                with: "$1",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"([「『“‘（])\s+"#,
-                with: "$1",
-                options: .regularExpression
-            )
-    }
-
-    /// 半角标点的全角形态。句点要的是中文句号，不是全角句点，单独处理。
-    private static func fullwidthPunctuation(_ ch: Character) -> Character? {
-        guard ",;:!?".contains(ch) || ch == "." else { return nil }
-        if ch == "." { return "。" }
-        return String(ch)
-            .applyingTransform(.fullwidthToHalfwidth, reverse: true)?
-            .first
-    }
-
-    private static func isHan(_ ch: Character?) -> Bool {
-        guard let ch, ch.unicodeScalars.count == 1,
-              let scalar = ch.unicodeScalars.first else { return false }
-        return (0x4E00...0x9FFF).contains(scalar.value)
-    }
-
-    private static func endsWithClause(_ text: String) -> Bool {
-        guard let last = text.last else { return false }
-        return "。！？…，、；：」』”’）".contains(last)
-    }
-
-    private static func endsWithSentence(_ text: String) -> Bool {
-        guard let last = text.last else { return false }
-        return "。！？…」』”’）".contains(last)
-    }
-
-    /// 并段后清掉「，。」「。。」「，，」这类重复标点，并去掉标点前空格。
-    private static func collapsePunctuation(_ text: String) -> String {
-        text
-            .replacingOccurrences(
-                of: #"\s+([，。！？；：、])"#,
-                with: "$1",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"[，、；：]+(?=[。！？…])"#,
-                with: "",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"。{2,}"#,
-                with: "。",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"([。！？…])[，、；：]+"#,
-                with: "$1",
-                options: .regularExpression
-            )
-            .replacingOccurrences(
-                of: #"[，、；：]{2,}"#,
-                with: "，",
-                options: .regularExpression
-            )
-    }
-
-    /// 字符串数组字段：数组逐个取字符串；模型写成「A、B」时按中文顿号等切分。
-    static func strings(_ value: Any?) -> [String] {
-        guard let value else { return [] }
-        if let list = value as? [Any] {
-            return list.map { string($0) }.filter { !$0.isEmpty }
-        }
-        if let text = value as? String {
-            return text
-                .components(separatedBy: CharacterSet(charactersIn: "、,，;；/|\n"))
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        }
-        return []
     }
 
     /// 错误提示里引用的原始响应片段，太长会截断。
@@ -695,6 +444,101 @@ enum WorldJSON {
         if trimmed.isEmpty { return "（空响应）" }
         guard trimmed.count > limit else { return trimmed }
         return String(trimmed.prefix(limit)) + "\n…（共 \(trimmed.count) 字，已截断）"
+    }
+}
+
+// MARK: - 容错 JSON 值模型
+
+private enum JSONValue: Decodable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null; return }
+        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
+        if let d = try? container.decode(Double.self) { self = .number(d); return }
+        if let s = try? container.decode(String.self) { self = .string(s); return }
+        if let arr = try? container.decode([JSONValue].self) { self = .array(arr); return }
+        if let obj = try? container.decode([String: JSONValue].self) { self = .object(obj); return }
+        self = .null
+    }
+
+    var isNull: Bool {
+        if case .null = self { return true }
+        return false
+    }
+
+    var isObject: Bool {
+        if case .object = self { return true }
+        return false
+    }
+
+    var isStringOrStringArray: Bool {
+        switch self {
+        case .string:
+            return true
+        case .array(let list):
+            return list.allSatisfy {
+                switch $0 {
+                case .string, .null: return true
+                default: return false
+                }
+            }
+        default:
+            return false
+        }
+    }
+
+    var proseString: String {
+        switch self {
+        case .string(let text):
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .number(let number):
+            return NSNumber(value: number).stringValue
+        case .bool(let flag):
+            return flag ? "true" : "false"
+        case .array(let list):
+            return list.map(\.proseString).filter { !$0.isEmpty }.joined(separator: "；")
+        case .object(let object):
+            return object.firstNonNull(["text", "content", "value", "body", "summary", "description"])?.proseString ?? ""
+        case .null:
+            return ""
+        }
+    }
+
+    var stringList: [String] {
+        switch self {
+        case .array(let list):
+            return list.map(\.proseString).filter { !$0.isEmpty }
+        case .string(let text):
+            return text
+                .components(separatedBy: CharacterSet(charactersIn: "、,，;；/|\n"))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        default:
+            return []
+        }
+    }
+}
+
+private extension Dictionary where Key == String, Value == JSONValue {
+    func firstPresent(_ keys: [String]) -> JSONValue? {
+        for key in keys {
+            if let value = self[key] { return value }
+        }
+        return nil
+    }
+
+    func firstNonNull(_ keys: [String]) -> JSONValue? {
+        for key in keys {
+            if let value = self[key], !value.isNull { return value }
+        }
+        return nil
     }
 }
 
