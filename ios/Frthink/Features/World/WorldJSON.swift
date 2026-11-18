@@ -271,6 +271,7 @@ enum WorldJSON {
         var snapshotUpdates: [WorldMerge.SnapshotUpdateInput] = []
         var newThreads: [PlotThread] = []
         var resolvedThreads: [String] = []
+        var epistemicGaps: [String] = []
     }
 
     /// 解析单段状态同步响应：支持 `character_snapshots` / `new_threads` / `resolved_threads`。
@@ -332,6 +333,9 @@ enum WorldJSON {
 
         if let rawResolved = field(object, ["resolved_threads", "resolvedThreads"]) {
             payload.resolvedThreads = strings(rawResolved)
+        }
+        if let rawGaps = field(object, ["epistemic_gaps", "epistemicGaps"]) {
+            payload.epistemicGaps = strings(rawGaps)
         }
 
         return payload

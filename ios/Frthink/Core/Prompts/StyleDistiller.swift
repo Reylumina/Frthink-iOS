@@ -331,11 +331,13 @@ enum StyleDistiller {
         }
     }
 
-    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造固定前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
+    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
+    /// 当传入 `queryText` 时，按技法标签重合度与当前场景对白密度动态精选最契合的样本，避免静态盲投。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
         maxPairs: Int = 5,
-        tokenBudget: Int? = nil
+        tokenBudget: Int? = nil,
+        queryText: String? = nil
     ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
         guard maxPairs > 0 else { return ([], []) }
         let samples = corpus.filter {
@@ -344,11 +346,34 @@ enum StyleDistiller {
         }
         guard !samples.isEmpty else { return ([], []) }
 
+        let orderedSamples: [PromptAssembly.Corpus]
+        if let queryText, !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           samples.count > maxPairs {
+            let queryTokens = Set(ManuscriptIndex.tokenize(queryText))
+            let queryDialogueRatio = analyzeFingerprint(queryText).dialogueRatio
+            orderedSamples = samples.enumerated().sorted { lhs, rhs in
+                let lScore = exemplarMatchScore(
+                    lhs.element,
+                    queryTokens: queryTokens,
+                    queryDialogueRatio: queryDialogueRatio
+                )
+                let rScore = exemplarMatchScore(
+                    rhs.element,
+                    queryTokens: queryTokens,
+                    queryDialogueRatio: queryDialogueRatio
+                )
+                if abs(lScore - rScore) > 0.001 { return lScore > rScore }
+                return lhs.offset < rhs.offset
+            }.map(\.element)
+        } else {
+            orderedSamples = samples
+        }
+
         var messages: [LLMMessage] = []
         var ids: Set<String> = []
         var usedTokens = 0
 
-        for entry in samples.prefix(maxPairs) {
+        for entry in orderedSamples.prefix(maxPairs) {
             let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
             let technique = isPlaceholder
@@ -368,5 +393,17 @@ enum StyleDistiller {
             usedTokens += pairCost
         }
         return (messages, ids)
+    }
+
+    private static func exemplarMatchScore(
+        _ entry: PromptAssembly.Corpus,
+        queryTokens: Set<String>,
+        queryDialogueRatio: Double
+    ) -> Double {
+        let entryTokens = Set(ManuscriptIndex.tokenize(entry.entryName))
+        let overlapCount = queryTokens.intersection(entryTokens).count
+        let textDialogueRatio = analyzeFingerprint(entry.text).dialogueRatio
+        let dialogueSim = 1.0 - min(1.0, abs(queryDialogueRatio - textDialogueRatio) * 2.0)
+        return Double(overlapCount) * 1.5 + dialogueSim
     }
 }

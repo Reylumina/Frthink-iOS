@@ -13,6 +13,7 @@ enum DynamicContextSelector {
     struct SelectionResult {
         let characters: [CharacterCard]
         let matchedCharacterIDs: Set<String>
+        let offStageSummary: String?
         let renderedEvents: String
         let matchedEventIDs: Set<String>
         let worldbooks: [PromptAssembly.Worldbook]
@@ -57,6 +58,7 @@ enum DynamicContextSelector {
             return SelectionResult(
                 characters: allActive,
                 matchedCharacterIDs: Set(allActive.map(\.id)),
+                offStageSummary: nil,
                 renderedEvents: PromptComposer.renderEvents(world.events),
                 matchedEventIDs: Set(world.events.map(\.id)),
                 worldbooks: assemblyWorldbooks,
@@ -75,6 +77,15 @@ enum DynamicContextSelector {
             stickyIDs: stickyCharacterIDs,
             recentEvents: Array(world.events.suffix(2))
         )
+        let selectedCharIDs = Set(selectedChars.map(\.id))
+        let offStageCards = allActive.filter { !selectedCharIDs.contains($0.id) }
+        let offStageSummary: String? = offStageCards.isEmpty ? nil : offStageCards.prefix(12).map { card in
+            let brief = PromptLibrary.singleLine(card.identity).trimmingCharacters(in: .whitespacesAndNewlines)
+            if brief.isEmpty { return card.name }
+            let clipped = brief.count > 16 ? String(brief.prefix(16)) + "…" : brief
+            return "\(card.name)（\(clipped)）"
+        }.joined(separator: "、")
+
         let (renderedEvents, matchedEvtIDs) = selectAndRenderEvents(
             world.events,
             activeCharacters: selectedChars,
@@ -93,6 +104,7 @@ enum DynamicContextSelector {
         return SelectionResult(
             characters: selectedChars,
             matchedCharacterIDs: matchedCharIDs,
+            offStageSummary: offStageSummary,
             renderedEvents: renderedEvents,
             matchedEventIDs: matchedEvtIDs,
             worldbooks: selectedBooks,

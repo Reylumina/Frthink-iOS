@@ -2466,6 +2466,7 @@ enum SelfCheck {
                 status: .resolved
             )
             var world = WorldBook(characters: [onStage] + offStage, openThreads: [thread, resolvedThread])
+            world.activeEpistemicGaps = ["林昭已知密信出自城主府，但店小二尚不知情"]
             world.styleTemplate = "短句冷峻"
             let settings = AppSettings()
             let prepared = WriterPromptBuilder.prepare(
@@ -2505,8 +2506,37 @@ enum SelfCheck {
             try expect(
                 sceneBlock.contains("客栈二楼")
                     && sceneBlock.contains("半枚印章")
+                    && sceneBlock.contains("远方配角0（闲人）")
+                    && sceneBlock.contains("店小二尚不知情")
                     && !sceneBlock.contains("已完结"),
-                "场景工作记忆块应包含在场快照与 open 伏笔，过滤已解决伏笔"
+                "场景工作记忆块应包含在场快照、L1 未出场名录、认知信息差与 open 伏笔"
+            )
+
+            // 场景动态匹配 Few-Shot：根据当前指令技法意图挑出最贴合的 1-2 条样本
+            let combatSample = PromptAssembly.Corpus(
+                libraryID: "lib",
+                libraryName: "节选",
+                entryID: "s_combat",
+                entryName: "短句动作交锋与节奏压迫",
+                category: "仿写样本",
+                text: "刀光一闪。他侧身避开，反手扣住对方手腕。"
+            )
+            let dialogueSample = PromptAssembly.Corpus(
+                libraryID: "lib",
+                libraryName: "节选",
+                entryID: "s_dlg",
+                entryName: "人物对白试探与言外之意留白",
+                category: "仿写样本",
+                text: "“茶凉了。”他没有抬头。“凉了正好醒神。”"
+            )
+            let routed = StyleDistiller.fewShotDialoguePairs(
+                from: [combatSample, dialogueSample],
+                maxPairs: 1,
+                queryText: "写一段两人喝茶试探的克制对白"
+            )
+            try expect(
+                routed.injectedEntryIDs == ["s_dlg"],
+                "动态 Few-Shot 应优先匹配契合当前场景技法的样本"
             )
 
             // 因果截断（Causal Cutoff）：锚点之后的未来文本不得被 BM25 召回

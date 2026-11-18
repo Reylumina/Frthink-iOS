@@ -127,15 +127,21 @@ enum WriterPromptBuilder {
             snapshot: snapshot,
             effectiveBodyText: effective.text,
             activeCharacters: dynamicSelection.characters,
+            offStageSummary: dynamicSelection.offStageSummary,
             activatedWorldbookKeys: dynamicSelection.activatedWorldbookKeys,
             currentInstruction: currentInstruction
         ) {
             assembly.appendedBlocks.append(sceneMemory)
         }
+        let fewShotQuery = [currentInstruction, PromptComposer.codePointTail(effective.text, limit: 300)]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
         let fewShot = StyleDistiller.fewShotDialoguePairs(
             from: assembly.corpus,
-            maxPairs: 5,
-            tokenBudget: max(1, snapshot.inputBudget / 4)
+            maxPairs: 2,
+            tokenBudget: max(1, snapshot.inputBudget / 4),
+            queryText: fewShotQuery
         )
         if !fewShot.injectedEntryIDs.isEmpty {
             assembly.corpus.removeAll { fewShot.injectedEntryIDs.contains($0.entryID) }
@@ -361,6 +367,7 @@ enum WriterPromptBuilder {
         snapshot: WriterPromptSnapshot,
         effectiveBodyText: String,
         activeCharacters: [CharacterCard],
+        offStageSummary: String?,
         activatedWorldbookKeys: [String],
         currentInstruction: String?
     ) -> PromptBlock? {
@@ -373,15 +380,34 @@ enum WriterPromptBuilder {
             parts.append("【在场角色状态与认知边界】\n" + snapshotLines.joined(separator: "\n"))
         }
 
+        if let offStageSummary, !offStageSummary.isEmpty {
+            parts.append("【在档未出场人物（可按需切入打破局面）】\n" + offStageSummary)
+        }
+
+        if !snapshot.world.activeEpistemicGaps.isEmpty {
+            let gaps = snapshot.world.activeEpistemicGaps.prefix(4).map { "• \($0)" }
+            parts.append("【当前认知信息差】\n" + gaps.joined(separator: "\n"))
+        }
+
+        // 3+2 伏笔配额：最多 3 条在场关联伏笔 + 最多 2 条最久未推进的跨线远期伏笔，避免陷入局部舒适区。
         let openThreads = snapshot.world.openThreads.filter { $0.status == .open }
         let activeNames = Set(activeCharacters.flatMap { [$0.name] + $0.aliases })
-        let prioritizedThreads = openThreads.sorted { lhs, rhs in
-            let lHit = lhs.relatedCharacters.contains(where: { activeNames.contains($0) })
-            let rHit = rhs.relatedCharacters.contains(where: { activeNames.contains($0) })
-            if lHit != rHit { return lHit && !rHit }
-            return lhs.updatedAt > rhs.updatedAt
+        let localThreads = openThreads
+            .filter { $0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let crossLineThreads = openThreads
+            .filter { !$0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
+            .sorted { $0.updatedAt < $1.updatedAt }
+
+        var selectedThreads = Array(localThreads.prefix(3))
+        let crossLimit = max(2, 5 - selectedThreads.count)
+        selectedThreads.append(contentsOf: crossLineThreads.prefix(crossLimit))
+        if selectedThreads.count < 5 {
+            let pickedIDs = Set(selectedThreads.map(\.id))
+            let remaining = localThreads.filter { !pickedIDs.contains($0.id) }
+            selectedThreads.append(contentsOf: remaining.prefix(5 - selectedThreads.count))
         }
-        let threadLines = prioritizedThreads.prefix(5).map(\.renderedLine)
+        let threadLines = selectedThreads.prefix(5).map(\.renderedLine)
         if !threadLines.isEmpty {
             parts.append("【待兑现叙事承诺/伏笔】\n" + threadLines.joined(separator: "\n"))
         }

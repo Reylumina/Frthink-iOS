@@ -100,7 +100,12 @@ enum StateSyncWorkflow {
         )
         session.payload.world.openThreads = threadResult.threads
 
-        if snapResult.updatedCount > 0 || threadResult.addedCount > 0 || threadResult.resolvedCount > 0 {
+        if !payload.epistemicGaps.isEmpty {
+            let combined = WorldMerge.uniqueStrings(payload.epistemicGaps + session.payload.world.activeEpistemicGaps)
+            session.payload.world.activeEpistemicGaps = Array(combined.prefix(4))
+        }
+
+        if snapResult.updatedCount > 0 || threadResult.addedCount > 0 || threadResult.resolvedCount > 0 || !payload.epistemicGaps.isEmpty {
             session.scheduleSave()
         }
 
@@ -162,7 +167,8 @@ enum StateSyncWorkflow {
               "related_characters": ["相关角色名"]
             }
           ],
-          "resolved_threads": ["本段已经明确兑现或收束的已有伏笔标题"]
+          "resolved_threads": ["本段已经明确兑现或收束的已有伏笔标题"],
+          "epistemic_gaps": ["读者或甲已知、但乙尚不知情的关键信息差，没有则空数组"]
         }
 
         要求：

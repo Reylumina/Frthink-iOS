@@ -22,6 +22,8 @@ struct WorldBook: Codable {
     var events: [EventCard]
     /// 未决伏笔与叙事承诺清单（WorldBook v2：支持 open / resolved 流转）。
     var openThreads: [PlotThread]
+    /// 当前生效的叙事认知信息差（谁已知而谁未知，用于制造戏剧张力）。
+    var activeEpistemicGaps: [String]
     /// 语料收集库。
     var corpus: [CorpusEntry]
     /// 本书自带的世界书词条（P10），只属于当前书项目。
@@ -85,6 +87,7 @@ struct WorldBook: Codable {
         characterGroups: [CharacterGroup] = [],
         events: [EventCard] = [],
         openThreads: [PlotThread] = [],
+        activeEpistemicGaps: [String] = [],
         corpus: [CorpusEntry] = [],
         worldbookEntries: [WorldbookEntry] = [],
         plotOutline: String = "",
@@ -121,6 +124,7 @@ struct WorldBook: Codable {
         self.characterGroups = characterGroups
         self.events = events
         self.openThreads = openThreads
+        self.activeEpistemicGaps = activeEpistemicGaps
         self.corpus = corpus
         self.lastRefreshedAt = lastRefreshedAt
         self.refreshedUpTo = refreshedUpTo
@@ -170,6 +174,7 @@ struct WorldBook: Codable {
             events = objectEvents
         }
         openThreads = (try? c.decode([PlotThread].self, forKey: .openThreads)) ?? []
+        activeEpistemicGaps = (try? c.decode([String].self, forKey: .activeEpistemicGaps)) ?? []
         corpus = (try? c.decode([CorpusEntry].self, forKey: .corpus)) ?? []
         worldbookEntries =
             (try? c.decode([WorldbookEntry].self, forKey: .worldbookEntries)) ?? []
