@@ -359,17 +359,25 @@ private struct WriterCompletedReasoningBlock: View {
     let lineHeight: Double
 
     var body: some View {
+        let lineSpacing = WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight)
         WriterReasoningDisclosure(
             characterCount: reasoning.count,
             expanded: expanded,
             onToggle: onToggle
         ) {
-            Text(reasoning)
-                .font(Theme.numeric)
-                .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+            JustifiedText(
+                attributed: WriterTypography.attributedDocument(
+                    reasoning,
+                    fontSize: fontSize,
+                    lineHeight: lineHeight,
+                    alignsLastLine: true,
+                    foregroundColor: .secondaryLabel
+                ),
+                lineSpacing: lineSpacing,
+                paragraphSpacing: WriterTypography.paragraphSpacing(size: fontSize, lineHeight: lineHeight),
+                preservesParagraphStyles: true
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -388,12 +396,16 @@ private struct WriterStreamingReasoningBlock: View {
             onToggle: { expanded.toggle() }
         ) {
             if let reasoning = controller.streamingReasoning, !reasoning.isEmpty {
-                Text(reasoning)
-                    .font(Theme.numeric)
-                    .lineSpacing(WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                StreamingTextView(
+                    text: reasoning,
+                    characterCount: controller.streamingReasoningCharacterCount,
+                    fontSize: fontSize,
+                    lineHeight: lineHeight,
+                    lineSpacing: WriterTypography.lineSpacing(size: fontSize, lineHeight: lineHeight),
+                    foregroundColor: .secondaryLabel
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

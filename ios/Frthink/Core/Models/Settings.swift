@@ -8,6 +8,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
     case deepseek = "DEEPSEEK"
     case openRouter = "OPENROUTER"
     case anthropic = "ANTHROPIC"
+    case gemini = "GEMINI"
     case openAICompatible = "OPENAI_COMPATIBLE"
     case openCodeGo = "OPENCODE_GO"
 
@@ -15,7 +16,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 
     /// 新建供应方时可选类型；OpenCode 已并入 OpenAI 兼容预设。
     static var selectableCases: [ProviderKind] {
-        [.deepseek, .openRouter, .anthropic, .openAICompatible]
+        [.deepseek, .openRouter, .anthropic, .gemini, .openAICompatible]
     }
 
     var displayName: String {
@@ -23,6 +24,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         case .deepseek: return "DeepSeek"
         case .openRouter: return "OpenRouter"
         case .anthropic: return "Claude"
+        case .gemini: return "Gemini"
         case .openAICompatible: return "OpenAI 兼容"
         case .openCodeGo: return "OpenAI 兼容"
         }
@@ -34,6 +36,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         case .deepseek: return "sparkles"
         case .openRouter: return "arrow.triangle.branch"
         case .anthropic: return "sparkle"
+        case .gemini: return "wand.and.stars.inverse"
         case .openAICompatible: return "server.rack"
         case .openCodeGo: return "chevron.left.forwardslash.chevron.right"
         }
@@ -50,6 +53,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         case .deepseek: return "ProviderDeepSeek"
         case .openRouter: return "ProviderOpenRouter"
         case .anthropic: return "ProviderAnthropic"
+        case .gemini: return "ProviderGemini"
         case .openCodeGo: return "ProviderOpenCode"
         case .openAICompatible:
             return Self.matchedBrandAsset(for: baseURL) ?? "ProviderOpenAI"
@@ -93,6 +97,7 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         case .deepseek: return "https://api.deepseek.com"
         case .openRouter: return "https://openrouter.ai/api/v1"
         case .anthropic: return "https://api.anthropic.com"
+        case .gemini: return "https://generativelanguage.googleapis.com"
         case .openAICompatible: return ""
         case .openCodeGo: return "https://opencode.ai/zen/go/v1"
         }
@@ -108,7 +113,6 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
 enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashable {
     case custom
     case openAI
-    case gemini
     case kimi
     case zai
     case qwen
@@ -126,7 +130,6 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         switch self {
         case .custom: return "自定义"
         case .openAI: return "OpenAI"
-        case .gemini: return "Gemini（OpenAI 兼容）"
         case .kimi: return "Kimi（Moonshot）"
         case .zai: return "智谱 Z.ai"
         case .qwen: return "通义千问（DashScope）"
@@ -144,7 +147,6 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         switch self {
         case .custom: return ""
         case .openAI: return "https://api.openai.com/v1"
-        case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai"
         case .kimi: return "https://api.moonshot.cn/v1"
         case .zai: return "https://open.bigmodel.cn/api/paas/v4"
         case .qwen: return "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -162,7 +164,7 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
         switch self {
         case .openCodeGo:
             return ProviderKind.openCodeGo.defaultModel
-        case .custom, .openAI, .gemini, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollamaCloud,
+        case .custom, .openAI, .kimi, .zai, .qwen, .miniMax, .hunyuan, .grok, .ollamaCloud,
              .commandCode, .openDesign:
             return ""
         }
@@ -172,7 +174,6 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
     var logoAssetName: String {
         switch self {
         case .custom, .openAI: return "ProviderOpenAI"
-        case .gemini: return "ProviderGemini"
         case .kimi: return "ProviderKimi"
         case .zai: return "ProviderZai"
         case .qwen: return "ProviderQwen"
@@ -198,6 +199,19 @@ enum OpenAICompatiblePreset: String, Codable, CaseIterable, Identifiable, Hashab
             }
         }
         return .custom
+    }
+
+    var defaultReasoningOffStyle: ReasoningOffStyle {
+        switch self {
+        case .zai, .kimi:
+            return .thinkingDisabled
+        case .qwen:
+            return .enableThinkingFalse
+        case .openAI, .grok, .openCodeGo:
+            return .reasoningEffortNone
+        case .custom, .miniMax, .hunyuan, .ollamaCloud, .commandCode, .openDesign:
+            return .none
+        }
     }
 }
 
@@ -346,10 +360,24 @@ struct ProviderSetting: Identifiable, Codable, Hashable {
         kind == .openCodeGo || baseURLForDisplay.lowercased().contains("opencode.ai")
     }
 
-    /// 关闭思考时实际要发的字段形态；OpenCode 默认发 `reasoning_effort = none`。
+    private static let modelOffStyleRules: [(keywords: [String], style: ReasoningOffStyle)] = [
+        (["deepseek", "glm", "kimi", "moonshot"], .thinkingDisabled),
+        (["qwen"], .enableThinkingFalse),
+        (["gpt-", "grok"], .reasoningEffortNone),
+    ]
+
+    /// 关闭思考时按服务商、模型关键字与预设表自动匹配禁用推理字段。
     var effectiveReasoningOffStyle: ReasoningOffStyle {
         if let reasoningOffStyle { return reasoningOffStyle }
-        return isOpenCode ? .reasoningEffortNone : .none
+        if isDeepSeek { return .thinkingDisabled }
+        if isOpenCode || kind == .openRouter { return .reasoningEffortNone }
+        let lowerModel = resolvedModel.lowercased()
+        if let matched = Self.modelOffStyleRules.first(where: { rule in
+            rule.keywords.contains(where: { lowerModel.contains($0) })
+        }) {
+            return matched.style
+        }
+        return resolvedPreset?.defaultReasoningOffStyle ?? .none
     }
 
     var baseURLForDisplay: String {

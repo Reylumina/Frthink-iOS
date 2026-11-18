@@ -178,6 +178,7 @@ final class OpenAICompatibleClient: LLMClient {
         var rawLog: [String] = []
         // 单条数据流复用同一个解码器实例，避免为每个 chunk 重复创建 JSONDecoder。
         let chunkDecoder = JSONDecoder()
+        var splitter = ThinkTagStreamSplitter(startsInsideThink: false)
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -209,10 +210,16 @@ final class OpenAICompatibleClient: LLMClient {
             }
             try handleChunk(
                 chunk,
+                splitter: &splitter,
                 continuation: continuation,
                 finishReason: &finishReason,
                 emittedAnything: &emittedAnything
             )
+        }
+
+        for event in splitter.finish() {
+            emittedAnything = true
+            continuation.yield(event)
         }
 
         if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
@@ -236,6 +243,7 @@ final class OpenAICompatibleClient: LLMClient {
 
     private func handleChunk(
         _ chunk: StreamChunk,
+        splitter: inout ThinkTagStreamSplitter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
         finishReason: inout String?,
         emittedAnything: inout Bool
@@ -262,7 +270,9 @@ final class OpenAICompatibleClient: LLMClient {
             }
             if let content, !content.isEmpty {
                 emittedAnything = true
-                continuation.yield(.delta(content))
+                for event in splitter.push(content) {
+                    continuation.yield(event)
+                }
             }
             return
         }
@@ -270,7 +280,9 @@ final class OpenAICompatibleClient: LLMClient {
         if finishReason == nil { finishReason = chunk.stop_reason }
         if let content = chunk.contentText, !content.isEmpty {
             emittedAnything = true
-            continuation.yield(.delta(content))
+            for event in splitter.push(content) {
+                continuation.yield(event)
+            }
         } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
             emittedAnything = true
             continuation.yield(.reasoning(reasoning))

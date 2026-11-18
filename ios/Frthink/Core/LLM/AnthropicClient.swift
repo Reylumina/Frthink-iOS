@@ -215,6 +215,7 @@ final class AnthropicClient: LLMClient {
         var undecodableLines = 0
         var rawLog: [String] = []
         let decoder = JSONDecoder()
+        var splitter = ThinkTagStreamSplitter(startsInsideThink: false)
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -244,7 +245,9 @@ final class AnthropicClient: LLMClient {
                 }
                 if let text = event.delta?.text, !text.isEmpty {
                     emittedAnything = true
-                    continuation.yield(.delta(text))
+                    for splitEvent in splitter.push(text) {
+                        continuation.yield(splitEvent)
+                    }
                 }
             case "message_delta":
                 if let reason = event.delta?.stop_reason, !reason.isEmpty {
@@ -255,6 +258,11 @@ final class AnthropicClient: LLMClient {
             default:
                 break
             }
+        }
+
+        for splitEvent in splitter.finish() {
+            emittedAnything = true
+            continuation.yield(splitEvent)
         }
 
         if emittedAnything, undecodableLines > 0, stopReason == nil, !sawStop {
@@ -284,11 +292,18 @@ final class AnthropicClient: LLMClient {
         if request.failOnLength, response.stop_reason == "max_tokens" {
             throw LLMError.truncated(detail: "finish_reason=max_tokens")
         }
-        let text = response.content?
+        let rawText = response.content?
             .filter { $0.type == "text" }
             .compactMap(\.text)
             .joined() ?? ""
+        let split = ThinkTagStreamSplitter.stripThinkTags(from: rawText, startsInsideThink: false)
+        let text = split.prose
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !split.reasoning.isEmpty {
+                throw LLMError.emptyResponse(
+                    detail: "仅返回思考内容（\(split.reasoning.count) 字），正文为空。"
+                )
+            }
             throw LLMError.emptyResponse(detail: "Anthropic 未返回任何文本块")
         }
         return text

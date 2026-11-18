@@ -40,9 +40,14 @@ final class AppStore {
     init(fileStore: FileStore = FileStore()) {
         self.fileStore = fileStore
         var loadedSettings = fileStore.loadSettings()
-        if !loadedSettings.providers.contains(where: { $0.kind == .anthropic }) {
-            let insertAt = min(2, loadedSettings.providers.count)
-            loadedSettings.providers.insert(ProviderSetting(kind: .anthropic), at: insertAt)
+        var settingsChanged = false
+        for (kind, preferredIndex) in [(ProviderKind.anthropic, 2), (ProviderKind.gemini, 3)]
+        where !loadedSettings.providers.contains(where: { $0.kind == kind }) {
+            let insertAt = min(preferredIndex, loadedSettings.providers.count)
+            loadedSettings.providers.insert(ProviderSetting(kind: kind), at: insertAt)
+            settingsChanged = true
+        }
+        if settingsChanged {
             try? fileStore.saveSettings(loadedSettings)
         }
         self.settings = loadedSettings
@@ -533,18 +538,26 @@ final class AppStore {
         guard !key.isEmpty else {
             throw LLMError.missingAPIKey(provider.displayTitle)
         }
-        if provider.kind == .anthropic {
+        switch provider.kind {
+        case .anthropic:
             return AnthropicClient(
                 baseURL: provider.baseURLForDisplay,
                 apiKey: key,
                 provider: provider
             )
+        case .gemini:
+            return GeminiClient(
+                baseURL: provider.baseURLForDisplay,
+                apiKey: key,
+                provider: provider
+            )
+        case .deepseek, .openRouter, .openAICompatible, .openCodeGo:
+            return OpenAICompatibleClient(
+                baseURL: provider.baseURLForDisplay,
+                apiKey: key,
+                provider: provider
+            )
         }
-        return OpenAICompatibleClient(
-            baseURL: provider.baseURLForDisplay,
-            apiKey: key,
-            provider: provider
-        )
     }
 
     private func client(for provider: ProviderSetting?) throws -> any LLMClient {
