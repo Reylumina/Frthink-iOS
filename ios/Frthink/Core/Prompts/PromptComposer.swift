@@ -191,7 +191,11 @@ enum PromptComposer {
         // 13 · 调用方追加的块
         blocks.append(contentsOf: assembly.appendedBlocks)
 
-        let userBlockKeys: Set<String> = ["body:authoritative", "task:continuation-anchor"]
+        let userBlockKeys: Set<String> = [
+            "body:authoritative",
+            "task:continuation-anchor",
+            "world:imitation-template",
+        ]
         let isUserSideBlock: (PromptBlock) -> Bool = { block in
             block.category == .chatHistory
                 || block.category == .authoritativeBody
@@ -201,6 +205,9 @@ enum PromptComposer {
 
         let systemBlocks = blocks.filter { !isUserSideBlock($0) }
         let contextUserBlocks = blocks.filter(isUserSideBlock)
+        // P07（仿写模板）置于权威正文与续写锚点之后、对话历史之前，避免在长上下文中被中段稀释。
+        let orderedUserBlocks = contextUserBlocks.filter { $0.key != "world:imitation-template" }
+            + contextUserBlocks.filter { $0.key == "world:imitation-template" }
 
         var prefix: [LLMMessage] = []
         let system = systemPrompt(from: systemBlocks)
@@ -208,7 +215,7 @@ enum PromptComposer {
         if !fewShotMessages.isEmpty {
             prefix.append(contentsOf: fewShotMessages)
         }
-        for block in contextUserBlocks {
+        for block in orderedUserBlocks {
             let rendered = block.rendered
             if !rendered.isEmpty { prefix.append(.user(rendered)) }
         }

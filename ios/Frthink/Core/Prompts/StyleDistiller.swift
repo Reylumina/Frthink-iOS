@@ -333,13 +333,12 @@ enum StyleDistiller {
 
     /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
     /// 当传入 `queryText` 时，按技法标签重合度与当前场景对白密度动态精选最契合的样本，避免静态盲投；
-    /// 当传入 `styleTemplate` / `recentDraftText` 时，在首条范例前附带模板硬规则与近端文风差值纠偏（MUSE Appendix E/F + 2609.24532）。
+    /// 当传入 `recentDraftText` 时，在首条范例前附带近端文风差值纠偏（2609.24532 + MUSE Appendix F）。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
         maxPairs: Int = 5,
         tokenBudget: Int? = nil,
         queryText: String? = nil,
-        styleTemplate: String? = nil,
         recentDraftText: String? = nil
     ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
         guard maxPairs > 0 else { return ([], []) }
@@ -374,7 +373,6 @@ enum StyleDistiller {
             orderedSamples = samples
         }
 
-        let compactRules = compactStyleRules(from: styleTemplate, limit: 220)
         let driftHint = driftCorrectionHint(samples: samples, recentText: recentDraftText)
 
         var messages: [LLMMessage] = []
@@ -392,13 +390,8 @@ enum StyleDistiller {
                 "【文风示范（当前场景设定与人称优先，仅效仿笔法与语感，剥离范例专有名词与剧情）】",
                 "技法要求：\(technique)",
             ]
-            if messages.isEmpty {
-                if !compactRules.isEmpty {
-                    lines.append("本书仿写硬规则：\(compactRules)")
-                }
-                if !driftHint.isEmpty {
-                    lines.append("本段纠偏：\(driftHint)")
-                }
+            if messages.isEmpty, !driftHint.isEmpty {
+                lines.append("本段纠偏：\(driftHint)")
             }
             let prompt = lines.joined(separator: "\n")
             let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
@@ -414,19 +407,6 @@ enum StyleDistiller {
             usedTokens += pairCost
         }
         return (messages, ids)
-    }
-
-    /// 提取仿写模板中的紧凑规则摘要，控制长度以便在近端生成边界生效。
-    private static func compactStyleRules(from template: String?, limit: Int) -> String {
-        guard let template else { return "" }
-        let collapsed = template
-            .split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "；")
-        guard !collapsed.isEmpty else { return "" }
-        guard collapsed.count > limit else { return collapsed }
-        return String(collapsed.prefix(limit)) + "…"
     }
 
     /// 对比目标样本基线与当前书末正文的客观语言指标及 AI 套路模式，生成 1 至 2 句行为级纠偏。
