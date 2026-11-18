@@ -6,11 +6,16 @@ struct LLMMessage: Codable, Hashable {
     var role: String
     var content: String
     var reasoningContent: String? = nil
+    var isPrefix: Bool = false
 
     static func system(_ s: String) -> LLMMessage { .init(role: "system", content: s) }
     static func user(_ s: String) -> LLMMessage { .init(role: "user", content: s) }
-    static func assistant(_ s: String, reasoningContent: String? = nil) -> LLMMessage {
-        .init(role: "assistant", content: s, reasoningContent: reasoningContent)
+    static func assistant(
+        _ s: String,
+        reasoningContent: String? = nil,
+        isPrefix: Bool = false
+    ) -> LLMMessage {
+        .init(role: "assistant", content: s, reasoningContent: reasoningContent, isPrefix: isPrefix)
     }
 }
 
@@ -97,15 +102,29 @@ struct LLMRequest {
         providerLevel: ThinkingLevel,
         offStyle: ReasoningOffStyle = .none
     ) -> Data {
+        let lowerModel = model.lowercased()
+        let isKimiModel = lowerModel.contains("kimi") || lowerModel.contains("moonshot")
+        let supportsReasoningField = isDeepSeek
+            || lowerModel.contains("deepseek")
+            || isKimiModel
+            || lowerModel.contains("glm")
+
         let serializedMessages: [[String: Any]] = messages.map { msg in
             var dict: [String: Any] = ["role": msg.role, "content": msg.content]
-            // DeepSeek 协议原生支持在 assistant 消息上携带结构化 reasoning_content，
-            // 服务端会自动处理跨轮 KV Cache，不拼进 content 以免破坏缓存前缀命中。
-            if isDeepSeek,
+            // DeepSeek / Kimi / GLM 支持在 assistant 消息上携带结构化 reasoning_content，
+            // 避免拼进 content 破坏前缀缓存或格式解析。
+            if supportsReasoningField,
                msg.role == "assistant",
                let reasoning = msg.reasoningContent,
                !reasoning.isEmpty {
                 dict["reasoning_content"] = reasoning
+            }
+            if msg.role == "assistant", msg.isPrefix {
+                if isKimiModel && !isDeepSeek {
+                    dict["partial"] = true
+                } else if supportsReasoningField {
+                    dict["prefix"] = true
+                }
             }
             return dict
         }
@@ -209,6 +228,142 @@ enum LLMStreamEvent: Equatable {
     case delta(String)
     case reasoning(String)
     case finished(reason: String?)
+}
+
+/// 流式 `<think>...</think>` 标签剥离状态机。
+///
+/// 支持两种场景：
+/// 1. 末尾挂了未闭合 `<think>` 预填充（`startsInsideThink = true`），模型首段输出直接作为 `.reasoning`，直到 `</think>` 后切回 `.delta`；
+/// 2. 模型在普通文本流中自行输出 `<think>...</think>`，按标签边界自动拆分为 `.reasoning` 与 `.delta`，支持标签被 SSE 分片截断。
+struct ThinkTagStreamSplitter {
+    private static let openTag = "<think>"
+    private static let closeTag = "</think>"
+
+    private var insideThink: Bool
+    private var buffer: String = ""
+    private var trimLeadingNewlineAfterClose: Bool = false
+    private var checkDuplicateOpenTag: Bool
+
+    init(startsInsideThink: Bool = false) {
+        self.insideThink = startsInsideThink
+        self.checkDuplicateOpenTag = startsInsideThink
+    }
+
+    static func startsInsideThink(for messages: [LLMMessage]) -> Bool {
+        guard let last = messages.last, last.role == "assistant" else { return false }
+        return last.content.contains(openTag) && !last.content.contains(closeTag)
+    }
+
+    mutating func push(_ chunk: String) -> [LLMStreamEvent] {
+        guard !chunk.isEmpty else { return [] }
+        buffer += chunk
+        var events: [LLMStreamEvent] = []
+
+        while !buffer.isEmpty {
+            if trimLeadingNewlineAfterClose {
+                if buffer == "\r" { break }
+                if buffer.hasPrefix("\r\n") {
+                    buffer.removeFirst(2)
+                } else if buffer.hasPrefix("\n") {
+                    buffer.removeFirst(1)
+                }
+                trimLeadingNewlineAfterClose = false
+                if buffer.isEmpty { break }
+            }
+
+            if insideThink {
+                if checkDuplicateOpenTag {
+                    if buffer.count < Self.openTag.count && Self.openTag.hasPrefix(buffer) {
+                        break
+                    }
+                    if buffer.hasPrefix(Self.openTag) {
+                        buffer.removeFirst(Self.openTag.count)
+                        if buffer.hasPrefix("\r\n") {
+                            buffer.removeFirst(2)
+                        } else if buffer.hasPrefix("\n") {
+                            buffer.removeFirst(1)
+                        }
+                    }
+                    checkDuplicateOpenTag = false
+                    if buffer.isEmpty { break }
+                }
+                if let range = buffer.range(of: Self.closeTag) {
+                    let thought = String(buffer[..<range.lowerBound])
+                    if !thought.isEmpty { events.append(.reasoning(thought)) }
+                    buffer.removeSubrange(..<range.upperBound)
+                    insideThink = false
+                    trimLeadingNewlineAfterClose = true
+                } else {
+                    let keep = Self.trailingPartialPrefixLength(of: Self.closeTag, in: buffer)
+                    let emitCount = buffer.count - keep
+                    if emitCount > 0 {
+                        let cut = buffer.index(buffer.startIndex, offsetBy: emitCount)
+                        events.append(.reasoning(String(buffer[..<cut])))
+                        buffer.removeSubrange(..<cut)
+                    }
+                    break
+                }
+            } else {
+                if let range = buffer.range(of: Self.openTag) {
+                    let prose = String(buffer[..<range.lowerBound])
+                    if !prose.isEmpty { events.append(.delta(prose)) }
+                    buffer.removeSubrange(..<range.upperBound)
+                    insideThink = true
+                } else {
+                    let keep = Self.trailingPartialPrefixLength(of: Self.openTag, in: buffer)
+                    let emitCount = buffer.count - keep
+                    if emitCount > 0 {
+                        let cut = buffer.index(buffer.startIndex, offsetBy: emitCount)
+                        events.append(.delta(String(buffer[..<cut])))
+                        buffer.removeSubrange(..<cut)
+                    }
+                    break
+                }
+            }
+        }
+        return events
+    }
+
+    mutating func finish() -> [LLMStreamEvent] {
+        guard !buffer.isEmpty else { return [] }
+        let tail = buffer
+        buffer = ""
+        trimLeadingNewlineAfterClose = false
+        return [insideThink ? .reasoning(tail) : .delta(tail)]
+    }
+
+    /// 一次性文本（非流式 `complete`）剥离 `<think>...</think>`。
+    static func stripThinkTags(
+        from text: String,
+        startsInsideThink: Bool = false
+    ) -> (prose: String, reasoning: String) {
+        var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
+        let events = splitter.push(text) + splitter.finish()
+        var prose = ""
+        var reasoning = ""
+        for event in events {
+            switch event {
+            case .delta(let chunk):
+                prose += chunk
+            case .reasoning(let chunk):
+                reasoning += chunk
+            case .finished:
+                break
+            }
+        }
+        return (prose, reasoning)
+    }
+
+    private static func trailingPartialPrefixLength(of tag: String, in text: String) -> Int {
+        let maxLen = min(tag.count - 1, text.count)
+        guard maxLen > 0 else { return 0 }
+        for len in stride(from: maxLen, through: 1, by: -1) {
+            if text.hasSuffix(tag.prefix(len)) {
+                return len
+            }
+        }
+        return 0
+    }
 }
 
 enum LLMError: LocalizedError, Equatable {

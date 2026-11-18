@@ -44,9 +44,17 @@ final class OpenAICompatibleClient: LLMClient {
         return b
     }
 
-    private func endpoint(_ path: String) throws -> URL {
-        guard let url = URL(string: trimmedBase + path) else {
-            throw LLMError.badURL(trimmedBase + path)
+    private func endpoint(_ path: String, useDeepSeekBeta: Bool = false) throws -> URL {
+        var base = trimmedBase
+        if useDeepSeekBeta, provider.isDeepSeek {
+            if base.hasSuffix("/v1") {
+                base = String(base.dropLast(3)) + "/beta"
+            } else if !base.hasSuffix("/beta") {
+                base += "/beta"
+            }
+        }
+        guard let url = URL(string: base + path) else {
+            throw LLMError.badURL(base + path)
         }
         return url
     }
@@ -55,9 +63,10 @@ final class OpenAICompatibleClient: LLMClient {
         path: String,
         body: Data?,
         accept: String = "application/json",
-        attemptId: String? = nil
+        attemptId: String? = nil,
+        useDeepSeekBeta: Bool = false
     ) throws -> URLRequest {
-        var request = URLRequest(url: try endpoint(path))
+        var request = URLRequest(url: try endpoint(path, useDeepSeekBeta: useDeepSeekBeta))
         request.httpMethod = body == nil ? "GET" : "POST"
         // 生成请求永不命中缓存；共享 session 里也不保留响应体。
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -106,28 +115,36 @@ final class OpenAICompatibleClient: LLMClient {
         do {
             var req = request
             req.stream = true
-            let (bytes, http) = try await openStream(for: req)
-            if (400..<500).contains(http.statusCode) {
+            var (bytes, http) = try await openStream(for: req)
+
+            // 最多按顺序回退两次：先剥离不支持的 stream_options，再剥离不支持的末尾 prefill。
+            for _ in 0..<2 where (400..<500).contains(http.statusCode) {
                 let body = try await Self.drain(bytes)
                 if !provider.isDeepSeek,
                    req.sendStreamOptions,
                    Self.isUnsupportedStreamOptions(status: http.statusCode, body: body) {
                     req.sendStreamOptions = false
-                    let (retryBytes, retryHTTP) = try await openStream(for: req)
-                    guard (200..<300).contains(retryHTTP.statusCode) else {
-                        let retryBody = try await Self.drain(retryBytes)
-                        throw LLMError.http(status: retryHTTP.statusCode, body: retryBody)
-                    }
-                    try await consumeStream(retryBytes, continuation: continuation)
-                    return
+                    (bytes, http) = try await openStream(for: req)
+                    continue
+                }
+                if Self.isUnsupportedPrefill(status: http.statusCode, body: body),
+                   let stripped = Self.strippingTrailingPrefill(from: req.messages) {
+                    req.messages = stripped
+                    (bytes, http) = try await openStream(for: req)
+                    continue
                 }
                 throw LLMError.http(status: http.statusCode, body: body)
             }
+
             guard (200..<300).contains(http.statusCode) else {
                 let body = try await Self.drain(bytes)
                 throw LLMError.http(status: http.statusCode, body: body)
             }
-            try await consumeStream(bytes, continuation: continuation)
+            try await consumeStream(
+                bytes,
+                startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: req.messages),
+                continuation: continuation
+            )
         } catch is CancellationError {
             continuation.finish(throwing: LLMError.cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -138,6 +155,7 @@ final class OpenAICompatibleClient: LLMClient {
     }
 
     private func openStream(for req: LLMRequest) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let usesPrefixBeta = provider.isDeepSeek && req.messages.last?.isPrefix == true
         let urlRequest = try makeRequest(
             path: "/chat/completions",
             body: req.jsonBody(
@@ -147,7 +165,8 @@ final class OpenAICompatibleClient: LLMClient {
                 offStyle: provider.effectiveReasoningOffStyle
             ),
             accept: "text/event-stream",
-            attemptId: req.attemptId
+            attemptId: req.attemptId,
+            useDeepSeekBeta: usesPrefixBeta
         )
         let (bytes, response) = try await session.bytes(for: urlRequest)
         guard let http = response as? HTTPURLResponse else {
@@ -168,8 +187,28 @@ final class OpenAICompatibleClient: LLMClient {
         return markers.contains { lower.contains($0) }
     }
 
+    static func isUnsupportedPrefill(status: Int, body: String) -> Bool {
+        guard status == 400 || status == 422 else { return false }
+        let lower = body.lowercased()
+        let keys = [
+            "prefix", "partial", "prefill", "reasoning_content",
+            "last message", "role must be user", "end with a user",
+            "assistant message",
+        ]
+        return keys.contains { lower.contains($0) }
+    }
+
+    static func strippingTrailingPrefill(from messages: [LLMMessage]) -> [LLMMessage]? {
+        guard let last = messages.last, last.role == "assistant" else { return nil }
+        guard last.isPrefix || ThinkTagStreamSplitter.startsInsideThink(for: messages) else {
+            return nil
+        }
+        return Array(messages.dropLast())
+    }
+
     private func consumeStream(
         _ bytes: URLSession.AsyncBytes,
+        startsInsideThink: Bool,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
         var finishReason: String?
@@ -181,6 +220,7 @@ final class OpenAICompatibleClient: LLMClient {
         var rawLog: [String] = []
         // 单条数据流复用同一个解码器实例，避免为每个 chunk 重复创建 JSONDecoder。
         let chunkDecoder = JSONDecoder()
+        var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -212,10 +252,16 @@ final class OpenAICompatibleClient: LLMClient {
             }
             try handleChunk(
                 chunk,
+                splitter: &splitter,
                 continuation: continuation,
                 finishReason: &finishReason,
                 emittedAnything: &emittedAnything
             )
+        }
+
+        for event in splitter.finish() {
+            emittedAnything = true
+            continuation.yield(event)
         }
 
         if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
@@ -239,6 +285,7 @@ final class OpenAICompatibleClient: LLMClient {
 
     private func handleChunk(
         _ chunk: StreamChunk,
+        splitter: inout ThinkTagStreamSplitter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
         finishReason: inout String?,
         emittedAnything: inout Bool
@@ -265,7 +312,9 @@ final class OpenAICompatibleClient: LLMClient {
             }
             if let content, !content.isEmpty {
                 emittedAnything = true
-                continuation.yield(.delta(content))
+                for event in splitter.push(content) {
+                    continuation.yield(event)
+                }
             }
             return
         }
@@ -273,7 +322,9 @@ final class OpenAICompatibleClient: LLMClient {
         if finishReason == nil { finishReason = chunk.stop_reason }
         if let content = chunk.contentText, !content.isEmpty {
             emittedAnything = true
-            continuation.yield(.delta(content))
+            for event in splitter.push(content) {
+                continuation.yield(event)
+            }
         } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
             emittedAnything = true
             continuation.yield(.reasoning(reasoning))
@@ -318,6 +369,7 @@ final class OpenAICompatibleClient: LLMClient {
     private func completionPayload(_ request: LLMRequest) async throws -> (CompletionResponse, String) {
         var req = request
         req.stream = false
+        let usesPrefixBeta = provider.isDeepSeek && req.messages.last?.isPrefix == true
         let urlRequest = try makeRequest(
             path: "/chat/completions",
             body: req.jsonBody(
@@ -325,9 +377,28 @@ final class OpenAICompatibleClient: LLMClient {
                 kind: provider.kind,
                 providerLevel: provider.effectiveThinkingLevel,
                 offStyle: provider.effectiveReasoningOffStyle
-            )
+            ),
+            useDeepSeekBeta: usesPrefixBeta
         )
-        let (data, _) = try await send(urlRequest)
+        let data: Data
+        do {
+            (data, _) = try await send(urlRequest)
+        } catch let LLMError.http(status, body) where Self.isUnsupportedPrefill(status: status, body: body) {
+            guard let stripped = Self.strippingTrailingPrefill(from: req.messages) else {
+                throw LLMError.http(status: status, body: body)
+            }
+            req.messages = stripped
+            let retryRequest = try makeRequest(
+                path: "/chat/completions",
+                body: req.jsonBody(
+                    isDeepSeek: provider.isDeepSeek,
+                    kind: provider.kind,
+                    providerLevel: provider.effectiveThinkingLevel,
+                    offStyle: provider.effectiveReasoningOffStyle
+                )
+            )
+            (data, _) = try await send(retryRequest)
+        }
         let raw = String(data: data, encoding: .utf8) ?? ""
         guard let decoded = try? JSONDecoder().decode(CompletionResponse.self, from: data) else {
             throw LLMError.emptyResponse(detail: Self.clip(raw))
@@ -346,16 +417,20 @@ final class OpenAICompatibleClient: LLMClient {
             throw LLMError.truncated(detail: "finish_reason=length")
         }
         let message = choice?.message
-        let text = message?.content ?? message?.text ?? message?.output_text ?? ""
+        let rawText = message?.content ?? message?.text ?? message?.output_text ?? ""
+        let split = ThinkTagStreamSplitter.stripThinkTags(
+            from: rawText,
+            startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: request.messages)
+        )
+        let text = split.prose
         if text.isEmpty {
-            // 推理型模型可能仅返回 reasoning_content。此情况属于正文通道未输出内容而非响应异常，
-            // 需在提示信息中明确说明。
+            // 推理型模型可能仅返回 reasoning_content 或未闭合的 <think>。
             let reasoning = message?.reasoning_content
                 ?? message?.reasoning
                 ?? message?.analysis
                 ?? message?.thinking
                 ?? message?.thought
-                ?? ""
+                ?? split.reasoning
             if !reasoning.isEmpty {
                 throw LLMError.emptyResponse(
                     detail: "仅返回思考内容（\(reasoning.count) 字），正文为空；通常由 thinking / max_tokens 配置所致。"

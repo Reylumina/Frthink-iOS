@@ -347,24 +347,26 @@ enum StyleDistiller {
         guard !samples.isEmpty else { return ([], []) }
 
         let orderedSamples: [PromptAssembly.Corpus]
-        if let queryText, !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           samples.count > maxPairs {
+        if let queryText, !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let queryTokens = Set(ManuscriptIndex.tokenize(queryText))
-            let queryDialogueRatio = analyzeFingerprint(queryText).dialogueRatio
-            orderedSamples = samples.enumerated().sorted { lhs, rhs in
-                let lScore = exemplarMatchScore(
-                    lhs.element,
-                    queryTokens: queryTokens,
-                    queryDialogueRatio: queryDialogueRatio
-                )
-                let rScore = exemplarMatchScore(
-                    rhs.element,
-                    queryTokens: queryTokens,
-                    queryDialogueRatio: queryDialogueRatio
-                )
-                if abs(lScore - rScore) > 0.001 { return lScore > rScore }
-                return lhs.offset < rhs.offset
-            }.map(\.element)
+            let queryFP = analyzeFingerprint(queryText)
+            orderedSamples = samples.enumerated()
+                .compactMap { idx, entry -> (offset: Int, element: PromptAssembly.Corpus, score: Double)? in
+                    guard let score = exemplarMatchScore(
+                        entry,
+                        queryTokens: queryTokens,
+                        queryFingerprint: queryFP
+                    ) else {
+                        // MUSE (2609.15188): 语域严重错配的范例会拉低全维度表现，宁缺毋滥。
+                        return nil
+                    }
+                    return (idx, entry, score)
+                }
+                .sorted { lhs, rhs in
+                    if abs(lhs.score - rhs.score) > 0.001 { return lhs.score > rhs.score }
+                    return lhs.offset < rhs.offset
+                }
+                .map(\.element)
         } else {
             orderedSamples = samples
         }
@@ -398,12 +400,42 @@ enum StyleDistiller {
     private static func exemplarMatchScore(
         _ entry: PromptAssembly.Corpus,
         queryTokens: Set<String>,
-        queryDialogueRatio: Double
-    ) -> Double {
+        queryFingerprint: LinguisticFingerprint
+    ) -> Double? {
         let entryTokens = Set(ManuscriptIndex.tokenize(entry.entryName))
         let overlapCount = queryTokens.intersection(entryTokens).count
-        let textDialogueRatio = analyzeFingerprint(entry.text).dialogueRatio
-        let dialogueSim = 1.0 - min(1.0, abs(queryDialogueRatio - textDialogueRatio) * 2.0)
-        return Double(overlapCount) * 1.5 + dialogueSim
+        let textFP = analyzeFingerprint(entry.text)
+        let dialogueSim = 1.0 - min(1.0, abs(queryFingerprint.dialogueRatio - textFP.dialogueRatio) * 2.0)
+        if overlapCount == 0 && dialogueSim < 0.35 {
+            return nil
+        }
+        let shortRatioSim = 1.0 - min(
+            1.0,
+            abs(queryFingerprint.shortSentenceRatio - textFP.shortSentenceRatio) * 2.0
+        )
+        let sentenceSim = 1.0 - min(
+            1.0,
+            abs(queryFingerprint.averageSentenceLength - textFP.averageSentenceLength) / 25.0
+        )
+        let paragraphSim = 1.0 - min(
+            1.0,
+            abs(queryFingerprint.averageParagraphLength - textFP.averageParagraphLength) / 120.0
+        )
+
+        var registerBonus = 0.0
+        let label = entry.entryName
+        if queryFingerprint.dialogueRatio >= 0.35 && (label.contains("对白") || label.contains("对话")) {
+            registerBonus += 0.4
+        }
+        if queryFingerprint.shortSentenceRatio >= 0.45
+            && (label.contains("短句") || label.contains("节奏") || label.contains("动作")) {
+            registerBonus += 0.4
+        }
+        return Double(overlapCount) * 1.5
+            + dialogueSim * 0.6
+            + shortRatioSim * 0.3
+            + sentenceSim * 0.25
+            + paragraphSim * 0.15
+            + registerBonus
     }
 }

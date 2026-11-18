@@ -221,7 +221,11 @@ final class AnthropicClient: LLMClient {
                 let body = try await OpenAICompatibleClient.drain(bytes)
                 throw LLMError.http(status: http.statusCode, body: body)
             }
-            try await consumeStream(bytes, continuation: continuation)
+            try await consumeStream(
+                bytes,
+                startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: req.messages),
+                continuation: continuation
+            )
         } catch is CancellationError {
             continuation.finish(throwing: LLMError.cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -233,6 +237,7 @@ final class AnthropicClient: LLMClient {
 
     private func consumeStream(
         _ bytes: URLSession.AsyncBytes,
+        startsInsideThink: Bool,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
         var stopReason: String?
@@ -241,6 +246,7 @@ final class AnthropicClient: LLMClient {
         var undecodableLines = 0
         var rawLog: [String] = []
         let decoder = JSONDecoder()
+        var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -270,7 +276,9 @@ final class AnthropicClient: LLMClient {
                 }
                 if let text = event.delta?.text, !text.isEmpty {
                     emittedAnything = true
-                    continuation.yield(.delta(text))
+                    for splitEvent in splitter.push(text) {
+                        continuation.yield(splitEvent)
+                    }
                 }
             case "message_delta":
                 if let reason = event.delta?.stop_reason, !reason.isEmpty {
@@ -281,6 +289,11 @@ final class AnthropicClient: LLMClient {
             default:
                 break
             }
+        }
+
+        for splitEvent in splitter.finish() {
+            emittedAnything = true
+            continuation.yield(splitEvent)
         }
 
         if emittedAnything, undecodableLines > 0, stopReason == nil, !sawStop {
@@ -310,11 +323,21 @@ final class AnthropicClient: LLMClient {
         if request.failOnLength, response.stop_reason == "max_tokens" {
             throw LLMError.truncated(detail: "finish_reason=max_tokens")
         }
-        let text = response.content?
+        let rawText = response.content?
             .filter { $0.type == "text" }
             .compactMap(\.text)
             .joined() ?? ""
+        let split = ThinkTagStreamSplitter.stripThinkTags(
+            from: rawText,
+            startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: request.messages)
+        )
+        let text = split.prose
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !split.reasoning.isEmpty {
+                throw LLMError.emptyResponse(
+                    detail: "仅返回思考内容（\(split.reasoning.count) 字），正文为空。"
+                )
+            }
             throw LLMError.emptyResponse(detail: "Anthropic 未返回任何文本块")
         }
         return text

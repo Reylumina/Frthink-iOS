@@ -232,15 +232,75 @@ enum WriterPromptBuilder {
             checkpoint: checkpoint
         )
         try checkpoint()
+        var finalMessages = trimmed.messages
+        if let prefillMessage = makePrefillCoTMessage(
+            snapshot: snapshot,
+            activeCharacters: dynamicSelection.characters,
+            messages: finalMessages
+        ) {
+            finalMessages.append(prefillMessage)
+        }
         return WriterPreparedPrompt(
-            messages: trimmed.messages,
+            messages: finalMessages,
             sourceIds: assembly.sourceIds,
             omittedHistoryMessages: trimmed.omitted,
-            estimatedInputTokens: TokenEstimator.estimate(messages: trimmed.messages),
+            estimatedInputTokens: TokenEstimator.estimate(messages: finalMessages),
             matchedCharacterIDs: dynamicSelection.matchedCharacterIDs,
             matchedEventIDs: dynamicSelection.matchedEventIDs,
             matchedWorldbookIDs: dynamicSelection.matchedWorldbookIDs
         )
+    }
+
+    private static func makePrefillCoTMessage(
+        snapshot: WriterPromptSnapshot,
+        activeCharacters: [CharacterCard],
+        messages: [LLMMessage]
+    ) -> LLMMessage? {
+        guard snapshot.settings.prefillCoT else { return nil }
+        // 末尾已是助手续写片段时（如续写/从半句重生成），不覆盖正文续接位置。
+        guard messages.last?.role != "assistant" else { return nil }
+
+        var anchors: [String] = []
+        let names = activeCharacters.prefix(3).map(\.name).filter { !$0.isEmpty }
+        if !names.isEmpty {
+            anchors.append("在场：\(names.joined(separator: "、"))")
+        }
+        if let gap = snapshot.world.activeEpistemicGaps.first?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !gap.isEmpty {
+            anchors.append("认知差：\(String(gap.prefix(32)))")
+        }
+        if let thread = snapshot.world.openThreads.first(where: { $0.status == .open })?
+            .title.trimmingCharacters(in: .whitespacesAndNewlines),
+           !thread.isEmpty {
+            anchors.append("未收伏笔：\(String(thread.prefix(24)))")
+        }
+        let anchorText = anchors.isEmpty ? "" : "（\(anchors.joined(separator: "；"))）"
+        let steeringSeed = "先定本段推演\(anchorText)：明确谁受动机或认知差推动、冲突如何转折、如何照应伏笔：\n1."
+        if let provider = snapshot.settings.activeProvider {
+            if supportsReasoningContentPrefill(provider) {
+                if provider.effectiveThinkingLevel != .off {
+                    // DeepSeek / Kimi / GLM 思考模式通过末尾 assistant 的 reasoning_content + prefix/partial 续写思维链。
+                    return .assistant("", reasoningContent: steeringSeed, isPrefix: true)
+                }
+                return .assistant("<think>\n\(steeringSeed)", isPrefix: true)
+            }
+            if provider.kind == .anthropic && provider.effectiveThinkingLevel != .off {
+                // Anthropic 开启思考或 Claude 4.6+ 均禁止末尾 assistant prefill。
+                return nil
+            }
+        }
+        return .assistant("<think>\n\(steeringSeed)")
+    }
+
+    private static func supportsReasoningContentPrefill(_ provider: ProviderSetting) -> Bool {
+        if provider.isDeepSeek { return true }
+        guard provider.isOpenCode || provider.kind == .openAICompatible else { return false }
+        let model = provider.resolvedModel.lowercased()
+        return model.contains("deepseek")
+            || model.contains("kimi")
+            || model.contains("moonshot")
+            || model.contains("glm")
     }
 
     /// 预算超限时裁剪正文尾部并重新组装，支持异步取消。
