@@ -430,8 +430,7 @@ enum WorldWorkflow {
         }
         guard let target = calls.first(where: { $0.functionName == "create_character_card" }) ?? calls.first,
               let data = target.arguments.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let card = WorldJSON.character(from: object) else {
+              let card = WorldJSON.parseCharacter(from: data) else {
             throw WorldRunError(message: "未能从气泡中识别出有效的人物卡内容。")
         }
 

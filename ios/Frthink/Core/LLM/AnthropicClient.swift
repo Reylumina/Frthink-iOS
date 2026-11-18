@@ -467,21 +467,13 @@ private enum AnyCodableValue: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if container.decodeNil() {
-            self = .null
-        } else if let b = try? container.decode(Bool.self) {
-            self = .bool(b)
-        } else if let d = try? container.decode(Double.self) {
-            self = .number(d)
-        } else if let s = try? container.decode(String.self) {
-            self = .string(s)
-        } else if let arr = try? container.decode([AnyCodableValue].self) {
-            self = .array(arr)
-        } else if let obj = try? container.decode([String: AnyCodableValue].self) {
-            self = .object(obj)
-        } else {
-            self = .null
-        }
+        if container.decodeNil() { self = .null; return }
+        if let b = try? container.decode(Bool.self) { self = .bool(b); return }
+        if let d = try? container.decode(Double.self) { self = .number(d); return }
+        if let s = try? container.decode(String.self) { self = .string(s); return }
+        if let arr = try? container.decode([AnyCodableValue].self) { self = .array(arr); return }
+        if let obj = try? container.decode([String: AnyCodableValue].self) { self = .object(obj); return }
+        self = .null
     }
 
     var jsonValue: Any {

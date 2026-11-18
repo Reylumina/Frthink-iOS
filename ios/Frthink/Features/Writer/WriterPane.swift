@@ -8,25 +8,25 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct WriterPane: View {
-    @Environment(AppStore.self) private var store
+    @Environment(AppStore.self) var store
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// 减弱动态效果：位移/缩放退化成直接落位（§4.1、§5.6）。
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     let session: ProjectSession
     /// 页面撤销栈：优先采用窗口编辑撤销栈，回退至全局栈，确保插入与追加操作可逆。
-    private let undoManager: UndoManager
+    let undoManager: UndoManager
 
-    @State private var controller = WriterController()
+    @State var controller = WriterController()
     /// 输入框文本与焦点都在子视图里，打字不触发整页重算。
-    @State private var composer = WriterComposerModel()
+    @State var composer = WriterComposerModel()
     /// 应用级撤销动作（`UndoManager` 只保存 unowned target），由这里登记与清理。
-    @State private var undoActions: [WriterBodyUndoAction] = []
+    @State var undoActions: [WriterBodyUndoAction] = []
     /// 撤销栈的菜单状态：栈顶变了，⋯ 里的「撤销 / 重做」跟着变。
-    @State private var undoState: WriterUndoState
+    @State var undoState: WriterUndoState
     /// 针对正文插入与追加等可撤销操作展示的专用操作反馈条。
-    @State private var undoPrompt: WriterUndoPrompt?
+    @State var undoPrompt: WriterUndoPrompt?
     /// 底部控制条（输入栏或多选栏）的测量高度。
     @State private var bottomBarHeight: CGFloat = 0
     /// 对话列的实际宽度，用来算用户气泡 80% 的宽度上限（§5.3）。
@@ -35,30 +35,30 @@ struct WriterPane: View {
     @State private var contentOverflowsViewport = true
     @State private var scrollAnchorMetrics = ScrollAnchorMetrics()
     /// 光标的 UTF-16 偏移。负数表示还没拿到（初始状态），插入正文时按末尾处理。
-    @State private var cursorOffset = -1
+    @State var cursorOffset = -1
     /// 记录用户是否明确指定过正文插入位置。
-    @State private var cursorPlaced = false
+    @State var cursorPlaced = false
     /// 对话只渲染最近 N 条；更早的按原版「加载更早的对话」补。
     @State private var visibleMessageCount = 15
     @State private var expandedReasoningIDs: Set<String> = []
     @State private var budgetPresented = false
     @State private var activeSheet: WriterSheet?
     @State private var isImportingBody = false
-    @State private var isExportingBody = false
-    @State private var bodyExportDocument = PlainTextFileDocument()
-    @State private var bodyExportFilename = "正文.txt"
-    @State private var pendingBodyImport: PendingBodyImport?
+    @State var isExportingBody = false
+    @State var bodyExportDocument = PlainTextFileDocument()
+    @State var bodyExportFilename = "正文.txt"
+    @State var pendingBodyImport: PendingBodyImport?
     /// 消息气泡追加、清理与删除复用单一确认弹窗容器。
-    @State private var messageAction: MessageAction?
+    @State var messageAction: MessageAction?
     /// 视口是否处于列表底部；上滑查看历史时暂停自动跟随滚动。
     @State private var isAtBottom = true
     /// 生成完成后的布局稳定过渡窗口。
     @State private var isSettling = false
     /// 列表内容高度缩减时触发强制回滚到底部。
-    @State private var forceScrollToBottom = false
+    @State var forceScrollToBottom = false
     /// 多选删除：条目选择态、选中的消息 id。
-    @State private var selectionMode = false
-    @State private var selectedMessageIDs: Set<String> = []
+    @State var selectionMode = false
+    @State var selectedMessageIDs: Set<String> = []
     #if DEBUG
     @State private var didMockSend = false
     #endif
@@ -91,13 +91,13 @@ struct WriterPane: View {
     }
 
     /// 带「撤销」的轻提示。一次只显示一条，几秒后自动消失。
-    fileprivate struct WriterUndoPrompt: Identifiable {
+    struct WriterUndoPrompt: Identifiable {
         let id = UUID()
         let text: String
         let action: () -> Void
     }
 
-    private enum MessageAction: Identifiable {
+    enum MessageAction: Identifiable {
         case append(ChatMessage)
         case rollback(ChatMessage)
         case cleanup(ChatMessage)
@@ -616,7 +616,7 @@ struct WriterPane: View {
     }
 
     /// 插入/追加成功后显示带「撤销」的轻提示（§4.3）。
-    private func presentUndoPrompt(_ text: String, undo: @escaping () -> Void) {
+    func presentUndoPrompt(_ text: String, undo: @escaping () -> Void) {
         undoPrompt = WriterUndoPrompt(text: text, action: undo)
     }
 
@@ -812,120 +812,6 @@ struct WriterPane: View {
         }
     }
 
-    private func contextMenuSections(for message: ChatMessage) -> [[UIMenuElement]] {
-        let isBusy = controller.isBusy
-
-        if message.role == .user {
-            let primaryGroup: [UIMenuElement] = [
-                UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
-                    copyToClipboard(message.content)
-                }
-            ]
-            let withdraw = UIAction(
-                title: "撤回",
-                image: UIImage(systemName: "arrow.uturn.backward"),
-                attributes: .destructive
-            ) { _ in
-                if controller.isBusy {
-                    controller.stop()
-                }
-                let previousDraft = composer.text
-                let withdrawnText = message.content
-                composer.text = withdrawnText
-                session.payload.composerDraft = withdrawnText
-                let index = session.payload.messages.firstIndex { $0.id == message.id }
-                let removed = session.withdraw(from: message.id)
-                presentUndoPrompt("已撤销指令") {
-                    session.restore(removed, at: index)
-                    if composer.text == withdrawnText {
-                        composer.text = previousDraft
-                        session.payload.composerDraft = previousDraft
-                    }
-                }
-            }
-            let delete = UIAction(
-                title: "删除消息",
-                image: UIImage(systemName: "trash"),
-                attributes: isBusy ? [.destructive, .disabled] : .destructive
-            ) { _ in
-                messageAction = .deleteMessage(message)
-            }
-            return [primaryGroup, [withdraw, delete]]
-        }
-
-        var group1: [UIMenuElement] = [
-            UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
-                copyToClipboard(message.content)
-            },
-            UIAction(title: "插入到光标处", image: UIImage(systemName: "text.insert")) { _ in
-                insertIntoManuscript(message.content)
-            },
-            UIAction(title: "追加到正文末尾", image: UIImage(systemName: "text.append")) { _ in
-                messageAction = .append(message)
-            },
-        ]
-        if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            group1.append(
-                UIAction(
-                    title: "提取为人物卡",
-                    image: UIImage(systemName: "person.crop.rectangle.badge.plus"),
-                    attributes: isBusy ? .disabled : []
-                ) { _ in
-                    let text = message.content
-                    Task { @MainActor in
-                        do {
-                            let result = try await WorldWorkflow.ingestCharacterFromBubble(
-                                text,
-                                session: session,
-                                store: store
-                            )
-                            store.toast = result.isNew
-                                ? "已新建人物卡：\(result.cardName)"
-                                : "已更新人物卡：\(result.cardName)"
-                        } catch {
-                            if !error.isLLMCancellation {
-                                store.errorMessage = error.localizedDescription
-                            }
-                        }
-                    }
-                }
-            )
-        }
-
-        var group2: [UIMenuElement] = [
-            UIAction(
-                title: "重新生成",
-                image: UIImage(systemName: "arrow.clockwise"),
-                attributes: isBusy ? .disabled : []
-            ) { _ in
-                controller.regenerate(messageID: message.id, session: session, store: store)
-            },
-            UIAction(
-                title: "回退到此",
-                image: UIImage(systemName: "arrow.uturn.backward"),
-                attributes: isBusy ? .disabled : []
-            ) { _ in
-                messageAction = .rollback(message)
-            },
-        ]
-        if message.variants.count > 1 {
-            group2.append(
-                UIAction(title: "清理历史版本", image: UIImage(systemName: "archivebox")) { _ in
-                    messageAction = .cleanup(message)
-                }
-            )
-        }
-
-        let deleteAction = UIAction(
-            title: message.variants.count > 1 ? "删除当前版本" : "删除气泡",
-            image: UIImage(systemName: "trash"),
-            attributes: isBusy ? [.destructive, .disabled] : .destructive
-        ) { _ in
-            messageAction = .delete(message)
-        }
-        return [group1, group2, [deleteAction]]
-    }
-
     // MARK: - 输入区
 
     /// 顶栏标题：书名 + 当前模型；点开在已配置 API Key 的启用服务商之间切换。
@@ -1048,90 +934,7 @@ struct WriterPane: View {
         }
     }
 
-    // MARK: - 操作
-
-    private func startContinuation() {
-        dismissKeyboard()
-        controller.continueWriting(session: session, store: store)
-    }
-
-    private func copyToClipboard(_ text: String) {
-        guard !text.isEmpty else { return }
-        WriterClipboard.copy(text)
-        store.toast = "已复制"
-    }
-
-    private func insertIntoManuscript(_ text: String) {
-        guard !text.isEmpty else { return }
-        dismissKeyboard()
-        let length = session.manuscriptLength
-        let base = cursorPlaced ? min(max(cursorOffset, 0), length) : length
-        let block = paragraphSeparated(text, at: base)
-        guard !block.isEmpty else { return }
-        let receipt = session.insertIntoManuscript(block, at: base)
-        cursorOffset = base + (block as NSString).length
-        cursorPlaced = true
-        let action = registerBodyUndo(receipt, actionName: "插入正文")
-        presentUndoPrompt("已插入正文") {
-            action.undoViaButton()
-        }
-    }
-
-    /// 应用级动作登记进窗口的 UndoManager（§5.8）。
-    ///
-    /// 撤销/重做是两个独立方法：撤销用插入回执删掉原文，重做按「位置 + 原文」
-    /// 插回去。撤销走系统栈：⌘Z / ⇧⌘Z、摇一摇和编辑菜单都能用上。
-    /// 窗口拿不到 `UndoManager` 时动作照样保留，页面的「撤销」提示直接调它。
-    private func registerBodyUndo(
-        _ receipt: BodyAppendReceipt,
-        actionName: String
-    ) -> WriterBodyUndoAction {
-        let action = WriterBodyUndoAction(
-            receipt: receipt,
-            actionName: actionName,
-            undoManager: undoManager,
-            session: session,
-            store: store
-        )
-        // 持有撤销动作强引用，防止 UndoManager 的 unowned 引用失效。
-        undoActions.append(action)
-        action.registerInitialUndo()
-        undoState.refresh()
-        return action
-    }
-
-    /// 页面离开时注销所有撤销动作，避免跨项目误触发与悬挂引用。
-    private func discardUndoActions() {
-        for action in undoActions {
-            undoManager.removeAllActions(withTarget: action)
-        }
-        undoActions.removeAll()
-    }
-
-    /// 为插入文本补充段落分隔换行符。
-    private func paragraphSeparated(_ text: String, at offset: Int) -> String {
-        let ns = session.manuscript as NSString
-        var block = text.trimmingCharacters(in: .newlines)
-        if offset > 0 {
-            let start = max(0, offset - 2)
-            let before = ns.substring(with: NSRange(
-                location: start,
-                length: offset - start
-            ))
-            if !before.hasSuffix("\n\n") {
-                block = (before.hasSuffix("\n") ? "\n" : "\n\n") + block
-            }
-        }
-        let afterLength = min(2, ns.length - offset)
-        if afterLength > 0 {
-            let after = ns.substring(with: NSRange(location: offset, length: afterLength))
-            if !after.hasPrefix("\n\n") {
-                block += after.hasPrefix("\n") ? "\n" : "\n\n"
-            }
-        }
-        // 末尾插入仅前置补齐换行。
-        return block
-    }
+    // MARK: - 浮层与锚点
 
     private func openSheet(_ sheet: WriterSheet) {
         dismissKeyboard()
@@ -1189,177 +992,10 @@ struct WriterPane: View {
         store.toast = "已恢复从正文末尾续写"
     }
 
-    private func dismissKeyboard() {
-        composer.dismissRequest += 1
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-    }
-
-    /// 回退操作：回滚当前助手回复及其前置用户指令，并将指令文本恢复至输入框。
-    private func performRollback(to target: ChatMessage) {
-        let messages = session.payload.messages
-        guard let index = messages.firstIndex(where: { $0.id == target.id }) else { return }
-
-        var cutIndex = index
-        var restoredInstruction = false
-        if let userIndex = messages[..<index].lastIndex(where: { $0.role == .user }) {
-            let instruction = messages[userIndex].content
-            composer.text = instruction
-            session.payload.composerDraft = instruction
-            cutIndex = userIndex
-            restoredInstruction = true
-        }
-        session.rollbackToMessage(messages[cutIndex].id)
-        store.toast = restoredInstruction
-            ? "已回退指令，指令已放回输入框"
-            : "已删除此气泡及后续对话"
-    }
-
-    // MARK: - 追加 / 清理 / 删除
-
     private var messageActionBinding: Binding<Bool> {
         Binding(
             get: { messageAction != nil },
             set: { if !$0 { messageAction = nil } }
         )
-    }
-
-    private func beginSelection(_ messageID: String) {
-        guard !controller.isBusy else { return }
-        dismissKeyboard()
-        selectionMode = true
-        selectedMessageIDs.insert(messageID)
-    }
-
-    private func toggleSelection(_ messageID: String) {
-        if selectedMessageIDs.contains(messageID) {
-            selectedMessageIDs.remove(messageID)
-        } else {
-            selectedMessageIDs.insert(messageID)
-        }
-    }
-
-    private func exitSelection() {
-        selectionMode = false
-        selectedMessageIDs.removeAll()
-    }
-
-    private func performMessageAction(_ action: MessageAction) {
-        messageAction = nil
-        switch action {
-        case .append(let message):
-            dismissKeyboard()
-            let receipt = session.appendToManuscript(message.content)
-            cursorOffset = session.manuscriptLength
-            cursorPlaced = true
-            let action = registerBodyUndo(receipt, actionName: "追加到正文")
-            presentUndoPrompt("已追加到正文") {
-                action.undoViaButton()
-            }
-        case .rollback(let message):
-            performRollback(to: message)
-        case .cleanup(let message):
-            session.keepOnlySelectedVariant(for: message.id)
-            store.toast = "已清理历史版本"
-        case .delete(let message):
-            forceScrollToBottom = message.variants.count <= 1
-            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
-                session.deleteSelectedVariant(for: message.id)
-            }
-            store.toast = "已删除当前版本"
-        case .deleteMessage(let message):
-            forceScrollToBottom = true
-            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
-                session.deleteMessage(message.id)
-            }
-            store.toast = "已删除消息"
-        case .deleteSelected:
-            let ids = selectedMessageIDs
-            guard !ids.isEmpty else { return }
-            forceScrollToBottom = true
-            exitSelection()
-            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
-                session.deleteMessages(ids)
-            }
-            store.toast = "已删除 \(ids.count) 条消息"
-        case .clearAll:
-            forceScrollToBottom = true
-            withAnimation(Theme.motion(Theme.motionLayout, reduceMotion: reduceMotion)) {
-                session.clearConversation()
-            }
-            store.toast = "已清空聊天记录"
-        }
-    }
-
-    // MARK: - 导入正文
-
-    private func handleBodyImport(_ result: Result<[URL], Error>) {
-        switch result {
-        case .failure(let error):
-            guard !settingsIsUserCancelled(error) else { return }
-            store.errorMessage = "读取正文失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            Task { @MainActor in
-                do {
-                    let text = try await Task.detached(priority: .userInitiated) {
-                        let accessed = url.startAccessingSecurityScopedResource()
-                        defer {
-                            if accessed { url.stopAccessingSecurityScopedResource() }
-                        }
-                        try TextFileCodec.validateExtension(url)
-                        let data = try SecurityScopedFileReader.read(
-                            url,
-                            maxBytes: TextFileCodec.maxImportBytes
-                        ) { _ in
-                            NSError(
-                                domain: "Frthink.BodyImport",
-                                code: 1,
-                                userInfo: [NSLocalizedDescriptionKey: "正文文件过大（超过 12 MB），无法导入。"]
-                            )
-                        }
-                        return try TextFileCodec.decode(data)
-                    }.value
-                    guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        store.errorMessage = "这个文件没有正文内容。"
-                        return
-                    }
-                    pendingBodyImport = PendingBodyImport(
-                        filename: url.lastPathComponent,
-                        text: text
-                    )
-                } catch {
-                    store.errorMessage = "读取正文失败：\(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func performBodyImport(_ pending: PendingBodyImport) {
-        dismissKeyboard()
-        session.replaceManuscript(pending.text)
-        cursorOffset = 0
-        cursorPlaced = false
-        store.toast = "已导入正文，共 \(pending.text.count.formatted()) 字"
-    }
-
-    @MainActor
-    private func prepareBodyExport() {
-        let title = session.project.title
-        let files = store.fileStore
-        Task { @MainActor in
-            let plain = await TextFileCodec.loadPlainExport(session: session, files: files)
-            guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                store.errorMessage = "当前作品暂无可导出的正文。"
-                return
-            }
-            bodyExportDocument = PlainTextFileDocument(text: plain)
-            bodyExportFilename = TextFileCodec.exportFilename(title: title)
-            isExportingBody = true
-        }
     }
 }
