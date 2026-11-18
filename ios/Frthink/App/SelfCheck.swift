@@ -2667,7 +2667,7 @@ enum SelfCheck {
             settings.providers = [
                 ProviderSetting(
                     kind: .openCodeGo,
-                    customModel: "kimi-k2.5",
+                    model: "kimi-k2.5",
                     thinkingLevel: .high
                 )
             ]
