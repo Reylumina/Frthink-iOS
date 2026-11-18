@@ -24,6 +24,8 @@ struct WorldBook: Codable {
     var openThreads: [PlotThread]
     /// 当前生效的叙事认知信息差（谁已知而谁未知，用于制造戏剧张力）。
     var activeEpistemicGaps: [String]
+    /// 状态与伏笔增量同步已扫描到的正文偏移（Unicode 标量数）；nil 表示尚未做过全书扫描。
+    var lastStateSyncOffset: Int?
     /// 语料收集库。
     var corpus: [CorpusEntry]
     /// 本书自带的世界书词条（P10），只属于当前书项目。
@@ -88,6 +90,7 @@ struct WorldBook: Codable {
         events: [EventCard] = [],
         openThreads: [PlotThread] = [],
         activeEpistemicGaps: [String] = [],
+        lastStateSyncOffset: Int? = nil,
         corpus: [CorpusEntry] = [],
         worldbookEntries: [WorldbookEntry] = [],
         plotOutline: String = "",
@@ -125,6 +128,7 @@ struct WorldBook: Codable {
         self.events = events
         self.openThreads = openThreads
         self.activeEpistemicGaps = activeEpistemicGaps
+        self.lastStateSyncOffset = lastStateSyncOffset
         self.corpus = corpus
         self.lastRefreshedAt = lastRefreshedAt
         self.refreshedUpTo = refreshedUpTo
@@ -175,6 +179,7 @@ struct WorldBook: Codable {
         }
         openThreads = (try? c.decode([PlotThread].self, forKey: .openThreads)) ?? []
         activeEpistemicGaps = (try? c.decode([String].self, forKey: .activeEpistemicGaps)) ?? []
+        lastStateSyncOffset = try? c.decodeIfPresent(Int.self, forKey: .lastStateSyncOffset)
         corpus = (try? c.decode([CorpusEntry].self, forKey: .corpus)) ?? []
         worldbookEntries =
             (try? c.decode([WorldbookEntry].self, forKey: .worldbookEntries)) ?? []

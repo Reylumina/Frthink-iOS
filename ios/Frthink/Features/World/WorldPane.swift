@@ -37,7 +37,7 @@ enum WorldBusy: Equatable {
         switch self {
         case .refreshingWorld: return "正在刷新人物卡…"
         case .extractingEvents: return "正在抽取事件卡…"
-        case .syncingState: return "正在同步末尾状态与伏笔…"
+        case .syncingState: return "正在同步状态与伏笔…"
         case .checkingConsistency: return "正在检查设定与情节一致性…"
         case .extractingStyleNotes: return "正在提炼文风笔记…"
         case .distillingStyle: return "正在深度蒸馏…"
@@ -138,7 +138,6 @@ struct WorldPane: View {
                     isActionDisabled: busy != nil,
                     onExtract: startEventExtraction,
                     onSyncState: startStateSync,
-                    onScanFullThreads: startFullStateSync,
                     onCheckConsistency: startConsistencyCheck
                 )
             case .rules:
@@ -352,22 +351,7 @@ struct WorldPane: View {
             kind: .syncingState,
             cancelled: "已停止状态同步。"
         ) {
-            let excerpt = PromptComposer.codePointTail(self.session.manuscript, limit: 3_000)
-            let outcome = try await StateSyncWorkflow.syncExcerpt(
-                excerpt,
-                session: self.session,
-                store: self.store
-            )
-            return outcome.summary
-        }
-    }
-
-    private func startFullStateSync() {
-        startWorldTask(
-            kind: .syncingState,
-            cancelled: "已停止全书伏笔扫描。"
-        ) {
-            let outcome = try await StateSyncWorkflow.syncFullManuscript(
+            let outcome = try await StateSyncWorkflow.syncSmart(
                 session: self.session,
                 store: self.store
             )

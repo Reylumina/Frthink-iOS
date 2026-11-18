@@ -105,6 +105,7 @@ enum StateSyncWorkflow {
             session.payload.world.activeEpistemicGaps = Array(combined.prefix(4))
         }
 
+        session.payload.world.lastStateSyncOffset = session.manuscript.unicodeScalars.count
         if snapResult.updatedCount > 0 || threadResult.addedCount > 0 || threadResult.resolvedCount > 0 || !payload.epistemicGaps.isEmpty {
             session.scheduleSave()
         }
@@ -115,6 +116,70 @@ enum StateSyncWorkflow {
             addedThreads: threadResult.addedCount,
             resolvedThreads: threadResult.resolvedCount
         )
+    }
+
+    /// 智能同步状态与伏笔：首次或正文大幅改写时自动分段扫描全书建档，已有游标时仅扫描新增或末尾片段。
+    static func syncSmart(
+        session: ProjectSession,
+        store: AppStore,
+        onProgress: ((Int, Int) -> Void)? = nil
+    ) async throws -> SyncOutcome {
+        let fullText = session.manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fullText.isEmpty else {
+            throw WorldRunError(message: "当前书稿为空，无法同步状态与伏笔。")
+        }
+        let totalScalars = session.manuscript.unicodeScalars.count
+        let cursor = session.payload.world.lastStateSyncOffset ?? 0
+
+        if cursor <= 0 || cursor > totalScalars {
+            let outcome = try await syncFullManuscript(
+                session: session,
+                store: store,
+                onProgress: onProgress
+            )
+            session.payload.world.lastStateSyncOffset = totalScalars
+            session.scheduleSave()
+            return outcome
+        }
+
+        let delta = totalScalars - cursor
+        if delta > 3_500 {
+            let startOffset = max(0, cursor - 200)
+            let scalars = session.manuscript.unicodeScalars
+            let startIdx = scalars.index(scalars.startIndex, offsetBy: min(startOffset, scalars.count))
+            let tailSlice = String(scalars[startIdx...])
+            let chunkBudget = max(1_500, min(4_000, store.settings.promptBudgetTokens / 3))
+            let chunks = WorldDigest.chunks(of: tailSlice, tokenBudget: chunkBudget, overlapTokens: 120)
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            var totalUpdated = 0
+            var totalConflicts = 0
+            var totalAdded = 0
+            var totalResolved = 0
+            for (idx, chunk) in chunks.enumerated() {
+                try Task.checkCancellation()
+                onProgress?(idx + 1, chunks.count)
+                let step = try await syncExcerpt(chunk, session: session, store: store)
+                totalUpdated += step.updatedCharacters
+                totalConflicts = max(totalConflicts, step.conflictCharacters)
+                totalAdded += step.addedThreads
+                totalResolved += step.resolvedThreads
+            }
+            session.payload.world.lastStateSyncOffset = totalScalars
+            session.scheduleSave()
+            return SyncOutcome(
+                updatedCharacters: totalUpdated,
+                conflictCharacters: totalConflicts,
+                addedThreads: totalAdded,
+                resolvedThreads: totalResolved
+            )
+        }
+
+        let excerpt = PromptComposer.codePointTail(session.manuscript, limit: 3_000)
+        let outcome = try await syncExcerpt(excerpt, session: session, store: store)
+        session.payload.world.lastStateSyncOffset = totalScalars
+        session.scheduleSave()
+        return outcome
     }
 
     /// 按时间顺序分段扫描全书正文，补全早期章节埋下的未决伏笔与人物演进状态。
