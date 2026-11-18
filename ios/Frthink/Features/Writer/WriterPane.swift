@@ -1078,8 +1078,14 @@ struct WriterPane: View {
         let receipt = session.insertIntoManuscript(block, at: base)
         cursorOffset = base + (block as NSString).length
         cursorPlaced = true
+        StateSyncWorkflow.scheduleSleepTimeSync(
+            excerpt: block,
+            session: session,
+            store: store
+        )
         let action = registerBodyUndo(receipt, actionName: "插入正文")
         presentUndoPrompt("已插入正文") {
+            StateSyncWorkflow.cancelSleepTimeSync(projectID: session.project.id)
             action.undoViaButton()
         }
     }
@@ -1263,8 +1269,14 @@ struct WriterPane: View {
             let receipt = session.appendToManuscript(message.content)
             cursorOffset = session.manuscriptLength
             cursorPlaced = true
+            StateSyncWorkflow.scheduleSleepTimeSync(
+                excerpt: message.content,
+                session: session,
+                store: store
+            )
             let action = registerBodyUndo(receipt, actionName: "追加到正文")
             presentUndoPrompt("已追加到正文") {
+                StateSyncWorkflow.cancelSleepTimeSync(projectID: session.project.id)
                 action.undoViaButton()
             }
         case .rollback(let message):

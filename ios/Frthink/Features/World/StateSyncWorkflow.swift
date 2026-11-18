@@ -6,6 +6,40 @@ import Foundation
 @MainActor
 enum StateSyncWorkflow {
 
+    private static var sleepTasks: [String: Task<Void, Never>] = [:]
+
+    /// 采纳正文后在后台静默调度 Sleep-Time 状态与伏笔同步（防抖 1.5s，不阻塞写作、不弹错误打扰）。
+    static func scheduleSleepTimeSync(
+        excerpt: String,
+        session: ProjectSession,
+        store: AppStore
+    ) {
+        guard store.settings.sleepTimeStateSync else { return }
+        let trimmed = excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 40 else { return }
+        guard !session.payload.world.characters.isEmpty
+                || !session.payload.world.openThreads.isEmpty else {
+            return
+        }
+
+        let projectID = session.project.id
+        sleepTasks[projectID]?.cancel()
+        sleepTasks[projectID] = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            _ = try? await syncExcerpt(trimmed, session: session, store: store)
+            if !Task.isCancelled {
+                sleepTasks[projectID] = nil
+            }
+        }
+    }
+
+    /// 取消挂起的后台 Sleep-Time 同步（例如用户刚点插入又立即撤销）。
+    static func cancelSleepTimeSync(projectID: String) {
+        sleepTasks[projectID]?.cancel()
+        sleepTasks[projectID] = nil
+    }
+
     struct SyncOutcome {
         let updatedCharacters: Int
         let conflictCharacters: Int

@@ -456,8 +456,10 @@ struct AppSettings: Codable {
     var globalPreset: String
     /// 去 AI 味规则（P05）。渲染成「用户确认的写作偏好：\n<内容>」。
     var aiFlavorRules: String
-    /// 是否在末尾注入「尾段风格锚定」（Depth-0 提醒仿写/审查规则，解决长上下文注意力衰减）。
+    /// 是否在末尾注入「尾段风格锚定」（保留该字段以兼容既有配置解码）。
     var reinforceStyleAtTail: Bool
+    /// 采纳正文后是否在后台静默运行 Sleep-Time 状态与伏笔同步子 Agent。
+    var sleepTimeStateSync: Bool
     /// 历史思维链回灌策略。
     var reasoningContextPolicy: ReasoningContextPolicy
     /// 是否按注意力/关键词动态激活人物卡与事件卡（含 3 轮 Sticky 黏性）。
@@ -550,6 +552,7 @@ struct AppSettings: Codable {
         skills: [Skill]? = nil,
         corpusLibraries: [CorpusLibrary] = [],
         reinforceStyleAtTail: Bool = true,
+        sleepTimeStateSync: Bool = true,
         reasoningContextPolicy: ReasoningContextPolicy = .recentTwo,
         dynamicContextActivation: Bool = true
     ) {
@@ -586,6 +589,7 @@ struct AppSettings: Codable {
         self.skills = skills ?? Skill.defaults
         self.corpusLibraries = corpusLibraries
         self.reinforceStyleAtTail = reinforceStyleAtTail
+        self.sleepTimeStateSync = sleepTimeStateSync
         self.reasoningContextPolicy = reasoningContextPolicy
         self.dynamicContextActivation = dynamicContextActivation
     }
@@ -663,6 +667,8 @@ struct AppSettings: Codable {
             (try? c.decode([CorpusLibrary].self, forKey: .corpusLibraries)) ?? []
         reinforceStyleAtTail =
             (try? c.decode(Bool.self, forKey: .reinforceStyleAtTail)) ?? true
+        sleepTimeStateSync =
+            (try? c.decode(Bool.self, forKey: .sleepTimeStateSync)) ?? true
         reasoningContextPolicy =
             (try? c.decode(ReasoningContextPolicy.self, forKey: .reasoningContextPolicy))
             ?? .recentTwo

@@ -123,25 +123,14 @@ enum WriterPromptBuilder {
         assembly.plotOutline = dynamicSelection.renderedEvents
         assembly.worldbooks = dynamicSelection.worldbooks
 
-        if snapshot.settings.dynamicContextActivation,
-           effective.text.count < snapshot.manuscript.count {
-            let queryTerms = dynamicSelection.characters.flatMap { [$0.name] + $0.aliases }
-                + dynamicSelection.activatedWorldbookKeys
-            let recalled = ManuscriptIndex.recallHistoricalExcerpts(
-                fullManuscript: snapshot.manuscript,
-                activeWindowText: effective.text,
-                queryTerms: queryTerms,
-                instructionText: currentInstruction ?? ""
-            )
-            if !recalled.isEmpty {
-                let body = recalled.map(\.text).joined(separator: "\n---\n")
-                assembly.appendedBlocks.append(PromptBlock(
-                    key: "history:bm25-recall",
-                    category: .authoritativeBody,
-                    title: "前文相关事实回查",
-                    body: "【前文相关事实回查（仅供参考，勿与当前正文冲突）】\n" + body
-                ))
-            }
+        if let sceneMemory = composeSceneMemoryBlock(
+            snapshot: snapshot,
+            effectiveBodyText: effective.text,
+            activeCharacters: dynamicSelection.characters,
+            activatedWorldbookKeys: dynamicSelection.activatedWorldbookKeys,
+            currentInstruction: currentInstruction
+        ) {
+            assembly.appendedBlocks.append(sceneMemory)
         }
         let fewShot = StyleDistiller.fewShotDialoguePairs(
             from: assembly.corpus,
@@ -165,20 +154,15 @@ enum WriterPromptBuilder {
             fewShotMessages: fewShot.messages
         )
         let reasoningPolicy = snapshot.settings.reasoningContextPolicy
-        let tailAnchor = styleTailAnchor(
-            snapshot: snapshot,
-            activeCharacters: dynamicSelection.characters
-        )
         let history: [LLMMessage]
         let built: [LLMMessage]
         switch snapshot.action {
         case .send(let instruction):
             history = PromptComposer.llmMessages(from: snapshot.messages, reasoningPolicy: reasoningPolicy)
-            let effectiveInstruction = tailAnchor.map { "\($0)\n\n\(instruction)" } ?? instruction
             built = PromptComposer.writingMessages(
                 assembly: assembly,
                 history: history,
-                userInstruction: effectiveInstruction,
+                userInstruction: instruction,
                 fewShotMessages: fewShot.messages
             )
         case .continueWriting:
@@ -370,33 +354,25 @@ enum WriterPromptBuilder {
         return (result, omitted)
     }
 
-    /// 尾段锚定（Depth-0 注入）：
-    /// 放在最后一条 `user` 指令之前，不改动 `system` 与 `history` 前缀，
-    /// 在 100% 保留前缀 KV Cache 命中的同时锚定局部文风、在场角色实时状态与未决伏笔。
-    private static func styleTailAnchor(
+    /// 统一场景工作记忆块（Context Engineering: Single Compact Scene Memory Block）：
+    /// 合并在场角色状态/认知边界、待兑现伏笔与端侧 BM25 早期硬事实回查为单一高信噪比只读块，
+    /// 与 `body:authoritative` 同处用户上下文侧，既保留 `system` 前缀 KV Cache，又避免对末尾用户指令做 Depth-0 污染。
+    private static func composeSceneMemoryBlock(
         snapshot: WriterPromptSnapshot,
-        activeCharacters: [CharacterCard]
-    ) -> String? {
-        var sections: [String] = []
-
-        if snapshot.settings.reinforceStyleAtTail {
-            let style = snapshot.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-            let flavor = snapshot.settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
-            var styleParts: [String] = []
-            if !style.isEmpty {
-                styleParts.append("文风仿写要求：" + style)
-            }
-            if !flavor.isEmpty {
-                styleParts.append("审查禁忌：" + flavor)
-            }
-            if !styleParts.isEmpty {
-                sections.append("[写作风格与禁忌提醒]\n" + styleParts.joined(separator: "\n"))
-            }
-        }
+        effectiveBodyText: String,
+        activeCharacters: [CharacterCard],
+        activatedWorldbookKeys: [String],
+        currentInstruction: String?
+    ) -> PromptBlock? {
+        var parts: [String] = []
 
         let snapshotLines = activeCharacters.compactMap { card in
             card.dynamicSnapshot?.renderedSummary(characterName: card.name)
         }
+        if !snapshotLines.isEmpty {
+            parts.append("【在场角色状态与认知边界】\n" + snapshotLines.joined(separator: "\n"))
+        }
+
         let openThreads = snapshot.world.openThreads.filter { $0.status == .open }
         let activeNames = Set(activeCharacters.flatMap { [$0.name] + $0.aliases })
         let prioritizedThreads = openThreads.sorted { lhs, rhs in
@@ -406,20 +382,35 @@ enum WriterPromptBuilder {
             return lhs.updatedAt > rhs.updatedAt
         }
         let threadLines = prioritizedThreads.prefix(5).map(\.renderedLine)
-
-        if !snapshotLines.isEmpty || !threadLines.isEmpty {
-            var stateParts: [String] = []
-            if !snapshotLines.isEmpty {
-                stateParts.append("在场角色实时状态：\n" + snapshotLines.joined(separator: "\n"))
-            }
-            if !threadLines.isEmpty {
-                stateParts.append("待兑现伏笔：\n" + threadLines.joined(separator: "\n"))
-            }
-            sections.append("[当前场景状态与未决伏笔]\n" + stateParts.joined(separator: "\n"))
+        if !threadLines.isEmpty {
+            parts.append("【待兑现叙事承诺/伏笔】\n" + threadLines.joined(separator: "\n"))
         }
 
-        guard !sections.isEmpty else { return nil }
-        return sections.joined(separator: "\n\n")
+        if snapshot.settings.dynamicContextActivation,
+           effectiveBodyText.count < snapshot.manuscript.count {
+            let queryTerms = activeCharacters.flatMap { [$0.name] + $0.aliases }
+                + activatedWorldbookKeys
+            let recalled = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: snapshot.manuscript,
+                activeWindowText: effectiveBodyText,
+                queryTerms: queryTerms,
+                instructionText: currentInstruction ?? "",
+                maxResults: 3,
+                maxTokens: 500
+            )
+            if !recalled.isEmpty {
+                let recallText = recalled.map(\.text).joined(separator: "\n---\n")
+                parts.append("【前文相关事实回查】\n" + recallText)
+            }
+        }
+
+        guard !parts.isEmpty else { return nil }
+        return PromptBlock(
+            key: "memory:scene-block",
+            category: .authoritativeBody,
+            title: "场景工作记忆",
+            body: parts.joined(separator: "\n\n")
+        )
     }
 }
 

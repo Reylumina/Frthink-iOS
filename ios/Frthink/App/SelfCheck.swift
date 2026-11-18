@@ -2439,8 +2439,8 @@ enum SelfCheck {
             return "快照覆盖 / 伏笔流转 ok"
         }
 
-        // WorldBook v2 Phase 1：在场快照与未决伏笔挂载到末尾 user 指令锚点，不改动 system 前缀
-        check("writer.tailStateAnchor") {
+        // WorldBook v2：单一场景工作记忆块与纯净末尾指令（移除 Depth-0 提示词拼接，保留 system KV 前缀）
+        check("writer.sceneMemoryBlock") {
             let snap = CharacterDynamicSnapshot(location: "客栈二楼", currentGoal: "等待接头人")
             let card = CharacterCard(name: "林昭", dynamicSnapshot: snap)
             let thread = PlotThread(
@@ -2456,8 +2456,7 @@ enum SelfCheck {
             )
             var world = WorldBook(characters: [card], openThreads: [thread, resolvedThread])
             world.styleTemplate = "短句冷峻"
-            var settings = AppSettings()
-            settings.reinforceStyleAtTail = true
+            let settings = AppSettings()
             let prepared = WriterPromptBuilder.prepare(
                 WriterPromptSnapshot(
                     action: .send(instruction: "林昭推开窗观察街面"),
@@ -2477,10 +2476,24 @@ enum SelfCheck {
             )
             let systemText = prepared.messages.first(where: { $0.role == "system" })?.content ?? ""
             let lastUser = prepared.messages.last?.content ?? ""
-            try expect(!systemText.contains("半枚印章"), "未决伏笔不应写死进 system 前缀破坏缓存")
-            try expect(lastUser.contains("客栈二楼"), "末尾锚点应包含在场角色动态快照")
-            try expect(lastUser.contains("半枚印章") && !lastUser.contains("已完结"), "末尾锚点应仅包含 open 伏笔")
-            return "Depth-0 场景状态与伏笔锚定 ok"
+            let sceneBlock = prepared.messages.dropLast().first(where: {
+                $0.role == "user" && $0.content.contains("【在场角色状态与认知边界】")
+            })?.content ?? ""
+            try expect(
+                !systemText.contains("半枚印章") && !systemText.contains("客栈二楼"),
+                "动态场景工作记忆不应写入 system 前缀破坏缓存"
+            )
+            try expect(
+                lastUser == "林昭推开窗观察街面",
+                "末尾用户指令应保持纯净，不再注入 Depth-0 模板提醒：\(lastUser)"
+            )
+            try expect(
+                sceneBlock.contains("客栈二楼")
+                    && sceneBlock.contains("半枚印章")
+                    && !sceneBlock.contains("已完结"),
+                "场景工作记忆块应包含在场快照与 open 伏笔，过滤已解决伏笔"
+            )
+            return "SceneMemoryBlock 与纯净指令 ok"
         }
 
         // WorldBook v2 Phase 2：世界书常驻/关键词/1 层递归触发与原序输出
