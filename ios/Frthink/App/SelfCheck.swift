@@ -2526,6 +2526,28 @@ enum SelfCheck {
             return "BM25 早期历史召回 \(recalled.count) 段 ok"
         }
 
+        // WorldBook v2 Phase 3：一致性审校五维证据链 JSON 解析
+        check("world.consistencyCheckParse") {
+            let raw = """
+            {
+              "issues": [
+                {
+                  "category": "人物认知与记忆",
+                  "severity": "高",
+                  "fact_quote": "林昭尚未拆开密信",
+                  "contradiction_quote": "林昭脱口说出城主与南疆勾结",
+                  "reason": "人物在不知情时提前说出了秘密情报"
+                }
+              ]
+            }
+            """
+            let issues = try WorldJSON.parseConsistencyIssues(raw)
+            try expect(issues.count == 1, "应解析出 1 条一致性矛盾")
+            try expect(issues.first?.category == "人物认知与记忆", "类别字段解析错误")
+            try expect(issues.first?.severity == "高", "严重度字段解析错误")
+            return "一致性审校解析 \(issues.count) 条 ok"
+        }
+
         // 世界刷新协议：原版 APK 刷新入口传递增量参数 true（C0592r0.java:35），
         // 世界创建入口传递 false（M1/D1.java:60）；两个调用分支不可混用。
         check("world.refreshContract") {

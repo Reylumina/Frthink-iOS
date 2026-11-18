@@ -7,10 +7,12 @@ struct WorldEventsSection: View {
     @Bindable var session: ProjectSession
     var isBusy: Bool
     var isSyncingState: Bool = false
+    var isCheckingConsistency: Bool = false
     /// 存在进行中的世界任务时禁用抽取操作。
     var isActionDisabled: Bool = false
     var onExtract: () -> Void
     var onSyncState: () -> Void = {}
+    var onCheckConsistency: () -> Void = {}
 
     @State private var searchText = ""
     @State private var route: Route? = nil
@@ -125,6 +127,17 @@ struct WorldEventsSection: View {
                     }
                     .buttonStyle(.borderless)
                 }
+
+                Button {
+                    onCheckConsistency()
+                } label: {
+                    Label(
+                        isCheckingConsistency ? "正在审校一致性…" : "检查设定与情节一致性",
+                        systemImage: "checkmark.shield"
+                    )
+                    .font(Font.footnote.weight(.medium))
+                }
+                .disabled(isActionDisabled)
             } header: {
                 let openCount = session.payload.world.openThreads.filter { $0.status == .open }.count
                 AppSectionHeader(title: "未决伏笔（\(openCount) 条待兑现）")

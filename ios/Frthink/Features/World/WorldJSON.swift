@@ -330,6 +330,50 @@ enum WorldJSON {
         return payload
     }
 
+    // MARK: - 一致性审校（ConStory-Checker 五维证据链）
+
+    struct ConsistencyIssue: Identifiable, Equatable {
+        let id: String
+        let category: String
+        let severity: String
+        let factQuote: String
+        let contradictionQuote: String
+        let reason: String
+    }
+
+    static func parseConsistencyIssues(_ raw: String) throws -> [ConsistencyIssue] {
+        let root = try decodeRoot(raw)
+        let items: [Any]
+        if let array = root as? [Any] {
+            items = array
+        } else if let obj = dictionary(root),
+                  let array = field(obj, ["issues", "contradictions", "results"]) as? [Any] {
+            items = array
+        } else {
+            throw WorldJSONError.invalidJSON("一致性审校结果缺少 issues 数组")
+        }
+
+        var issues: [ConsistencyIssue] = []
+        for (index, item) in items.enumerated() {
+            guard let obj = dictionary(item) else { continue }
+            let category = string(field(obj, ["category", "type"]))
+            let severity = string(field(obj, ["severity", "level"]))
+            let factQuote = prose(field(obj, ["fact_quote", "factQuote", "fact"]))
+            let contradictionQuote = prose(field(obj, ["contradiction_quote", "contradictionQuote", "quote"]))
+            let reason = prose(field(obj, ["reason", "explanation", "suggestion"]))
+            guard !reason.isEmpty || !contradictionQuote.isEmpty else { continue }
+            issues.append(ConsistencyIssue(
+                id: "issue-\(index)",
+                category: category.isEmpty ? "事实与细节" : category,
+                severity: severity.isEmpty ? "中" : severity,
+                factQuote: factQuote,
+                contradictionQuote: contradictionQuote,
+                reason: reason
+            ))
+        }
+        return issues
+    }
+
     // MARK: - 人物卡
 
     /// 事件卡 `characters` 的合法形态：字符串（按分隔符切）或字符串数组。

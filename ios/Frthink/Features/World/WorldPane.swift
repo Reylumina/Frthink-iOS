@@ -28,6 +28,7 @@ enum WorldBusy: Equatable {
     case refreshingWorld
     case extractingEvents
     case syncingState
+    case checkingConsistency
     case extractingStyleNotes
     case distillingStyle
     case updatingRules
@@ -37,6 +38,7 @@ enum WorldBusy: Equatable {
         case .refreshingWorld: return "正在刷新人物卡…"
         case .extractingEvents: return "正在抽取事件卡…"
         case .syncingState: return "正在同步末尾状态与伏笔…"
+        case .checkingConsistency: return "正在检查设定与情节一致性…"
         case .extractingStyleNotes: return "正在提炼文风笔记…"
         case .distillingStyle: return "正在深度蒸馏…"
         case .updatingRules: return "正在整理长期规则…"
@@ -61,6 +63,8 @@ struct WorldPane: View {
     @State private var statusMessage: String? = nil
     @State private var lastRawResponse: String? = nil
     @State private var showingRawResponse = false
+    @State private var consistencyIssues: [WorldJSON.ConsistencyIssue]? = nil
+    @State private var showingConsistencyReport = false
     @State private var worldTask: Task<Void, Never>?
 
     /// 各分栏只感知自己的任务；全局状态条仍显示当前运行的任务。
@@ -130,9 +134,11 @@ struct WorldPane: View {
                     session: session,
                     isBusy: isExtractingEvents,
                     isSyncingState: busy == .syncingState,
+                    isCheckingConsistency: busy == .checkingConsistency,
                     isActionDisabled: busy != nil,
                     onExtract: startEventExtraction,
-                    onSyncState: startStateSync
+                    onSyncState: startStateSync,
+                    onCheckConsistency: startConsistencyCheck
                 )
             case .rules:
                 WorldRulesSection(
@@ -151,6 +157,9 @@ struct WorldPane: View {
         }
         .sheet(isPresented: $showingRawResponse) {
             WorldRawResponseSheet(text: lastRawResponse ?? "")
+        }
+        .sheet(isPresented: $showingConsistencyReport) {
+            ConsistencyReportSheet(issues: consistencyIssues ?? [])
         }
     }
 
@@ -352,6 +361,21 @@ struct WorldPane: View {
         }
     }
 
+    private func startConsistencyCheck() {
+        startWorldTask(
+            kind: .checkingConsistency,
+            cancelled: "已停止一致性审校。"
+        ) {
+            let outcome = try await ConsistencyCheckWorkflow.checkTail(
+                session: self.session,
+                store: self.store
+            )
+            self.consistencyIssues = outcome.issues
+            self.showingConsistencyReport = true
+            return outcome.summary
+        }
+    }
+
     private func startStyleNoteExtraction() {
         startWorldTask(
             kind: .extractingStyleNotes,
@@ -424,6 +448,63 @@ struct WorldRawResponseSheet: View {
             }
             .pageBackground()
             .navigationTitle("原始响应")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// 一致性审校结果展示页：按证据链呈现矛盾前文与建议。
+struct ConsistencyReportSheet: View {
+    let issues: [WorldJSON.ConsistencyIssue]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if issues.isEmpty {
+                    EmptyStateView(
+                        symbol: "checkmark.seal",
+                        title: "未发现明显矛盾",
+                        message: "末尾正文与当前人物快照、未决伏笔及早期召回片段保持一致。"
+                    )
+                } else {
+                    List(issues) { issue in
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                            HStack(spacing: Theme.Spacing.s) {
+                                Text(issue.category)
+                                    .font(Font.subheadline.weight(.semibold))
+                                Spacer(minLength: 0)
+                                Text(issue.severity)
+                                    .font(Font.caption.weight(.medium))
+                                    .foregroundStyle(issue.severity == "高" ? AppTone.danger.color : AppTone.warning.color)
+                            }
+                            if !issue.factQuote.isEmpty {
+                                Text("既有依据：\(issue.factQuote)")
+                                    .font(Font.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !issue.contradictionQuote.isEmpty {
+                                Text("本段冲突：\(issue.contradictionQuote)")
+                                    .font(Font.caption)
+                                    .foregroundStyle(.primary)
+                            }
+                            Text(issue.reason)
+                                .font(Font.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, Theme.Spacing.xs)
+                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                }
+            }
+            .groupedPageBackground()
+            .navigationTitle("一致性审校")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
