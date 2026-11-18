@@ -40,9 +40,10 @@ final class WriterController {
 
     /// 自动摘要进行中，避免并发重复请求。
     private var autoSummarizing = false
-    /// 动态上下文 Sticky 黏性计数：记录各人物卡/事件卡剩余保持激活的轮数。
+    /// 动态上下文 Sticky 黏性计数：记录各人物卡/事件卡/世界书词条剩余保持激活的轮数。
     private var stickyCharacterTurns: [String: Int] = [:]
     private var stickyEventTurns: [String: Int] = [:]
+    private var stickyWorldbookTurns: [String: Int] = [:]
 
     /// 正在后台组装提示词。此时还没有开始生成，界面显示「整理提示词…」。
     private(set) var isPreparing = false
@@ -464,7 +465,8 @@ final class WriterController {
             explicitBodyRange: bodyRange,
             inputBudget: plan.effectiveInputBudget,
             stickyCharacterIDs: Set(stickyCharacterTurns.keys),
-            stickyEventIDs: Set(stickyEventTurns.keys)
+            stickyEventIDs: Set(stickyEventTurns.keys),
+            stickyWorldbookIDs: Set(stickyWorldbookTurns.keys)
         )
     }
 
@@ -546,7 +548,8 @@ final class WriterController {
     ) {
         updateStickyCaches(
             matchedCharacters: prepared.matchedCharacterIDs,
-            matchedEvents: prepared.matchedEventIDs
+            matchedEvents: prepared.matchedEventIDs,
+            matchedWorldbooks: prepared.matchedWorldbookIDs
         )
         switch preparation.action {
         case .send:
@@ -1115,7 +1118,8 @@ final class WriterController {
 
     private func updateStickyCaches(
         matchedCharacters: Set<String>,
-        matchedEvents: Set<String>
+        matchedEvents: Set<String>,
+        matchedWorldbooks: Set<String>
     ) {
         stickyCharacterTurns = decayAndRefreshSticky(
             stickyCharacterTurns,
@@ -1124,6 +1128,10 @@ final class WriterController {
         stickyEventTurns = decayAndRefreshSticky(
             stickyEventTurns,
             matched: matchedEvents
+        )
+        stickyWorldbookTurns = decayAndRefreshSticky(
+            stickyWorldbookTurns,
+            matched: matchedWorldbooks
         )
     }
 

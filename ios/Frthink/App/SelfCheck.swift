@@ -2483,6 +2483,49 @@ enum SelfCheck {
             return "Depth-0 场景状态与伏笔锚定 ok"
         }
 
+        // WorldBook v2 Phase 2：世界书常驻/关键词/1 层递归触发与原序输出
+        check("world.worldbookRecursiveTrigger") {
+            let entries = [
+                WorldbookEntry(id: "w1", title: "世界基调", body: "低魔江湖世界。", activationMode: .constant),
+                WorldbookEntry(id: "w2", title: "青云剑", body: "青云剑乃太虚宗镇派神兵。", activationMode: .keyword, keys: ["断剑", "青云剑"]),
+                WorldbookEntry(id: "w3", title: "太虚宗", body: "太虚宗位于雪山之巅。", activationMode: .keyword, keys: ["太虚宗"]),
+                WorldbookEntry(id: "w4", title: "无关暗器", body: "暴雨梨花针。", activationMode: .keyword, keys: ["梨花针"]),
+            ]
+            let assemblyBooks = entries.map {
+                PromptAssembly.Worldbook(id: $0.id, name: $0.title, content: $0.body)
+            }
+            let result = DynamicContextSelector.selectWorldbooks(
+                assemblyBooks,
+                entries: entries,
+                activeCharacters: [],
+                scanText: "他从怀里摸出那半截断剑。",
+                budget: 8_000,
+                stickyIDs: []
+            )
+            let ids = result.books.map(\.id)
+            try expect(ids == ["w1", "w2", "w3"], "应保留常驻+直接命中+递归触发并保持原序，实际：\(ids)")
+            return "世界书递归触发 \(ids.count) 条 ok"
+        }
+
+        // WorldBook v2 Phase 2：端侧 BM25 仅检索未被末尾窗口覆盖的早期历史片段
+        check("store.manuscriptBM25Recall") {
+            let early = "第一章：林昭在雾港城老码头买下一艘黑木船，船舱暗格里藏着一张泛黄海图。\n"
+            let filler = String(repeating: "夜风吹过长街，众人各自沉默赶路。\n", count: 30)
+            let recent = "第十章：林昭站在客栈二楼，望着远处海面。"
+            let full = early + filler + recent
+            let recalled = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: full,
+                activeWindowText: recent,
+                queryTerms: ["林昭", "海图"],
+                instructionText: "林昭取出早年买船时藏起来的东西"
+            )
+            try expect(!recalled.isEmpty, "应召回早期黑木船与海图设定")
+            let combined = recalled.map(\.text).joined(separator: "\n")
+            try expect(combined.contains("泛黄海图"), "召回内容应包含早期硬事实")
+            try expect(!combined.contains("站在客栈二楼"), "不应重复召回当前末尾窗口已有的片段")
+            return "BM25 早期历史召回 \(recalled.count) 段 ok"
+        }
+
         // 世界刷新协议：原版 APK 刷新入口传递增量参数 true（C0592r0.java:35），
         // 世界创建入口传递 false（M1/D1.java:60）；两个调用分支不可混用。
         check("world.refreshContract") {

@@ -15,6 +15,9 @@ enum DynamicContextSelector {
         let matchedCharacterIDs: Set<String>
         let renderedEvents: String
         let matchedEventIDs: Set<String>
+        let worldbooks: [PromptAssembly.Worldbook]
+        let matchedWorldbookIDs: Set<String>
+        let activatedWorldbookKeys: [String]
     }
 
     /// 构造扫描文本：本轮指令 + 历史消息 + 当前实际发送的正文窗口。
@@ -41,10 +44,12 @@ enum DynamicContextSelector {
 
     static func select(
         world: WorldBook,
+        assemblyWorldbooks: [PromptAssembly.Worldbook] = [],
         scanText: String,
         inputBudget: Int,
         stickyCharacterIDs: Set<String>,
         stickyEventIDs: Set<String>,
+        stickyWorldbookIDs: Set<String> = [],
         enabled: Bool
     ) -> SelectionResult {
         let allActive = PromptComposer.activeCharacters(in: world)
@@ -53,7 +58,10 @@ enum DynamicContextSelector {
                 characters: allActive,
                 matchedCharacterIDs: Set(allActive.map(\.id)),
                 renderedEvents: PromptComposer.renderEvents(world.events),
-                matchedEventIDs: Set(world.events.map(\.id))
+                matchedEventIDs: Set(world.events.map(\.id)),
+                worldbooks: assemblyWorldbooks,
+                matchedWorldbookIDs: Set(assemblyWorldbooks.map(\.id)),
+                activatedWorldbookKeys: []
             )
         }
 
@@ -74,11 +82,22 @@ enum DynamicContextSelector {
             budget: sectionBudget,
             stickyIDs: stickyEventIDs
         )
+        let (selectedBooks, matchedBookIDs, activeKeys) = selectWorldbooks(
+            assemblyWorldbooks,
+            entries: world.worldbookEntries,
+            activeCharacters: selectedChars,
+            scanText: scanText,
+            budget: sectionBudget,
+            stickyIDs: stickyWorldbookIDs
+        )
         return SelectionResult(
             characters: selectedChars,
             matchedCharacterIDs: matchedCharIDs,
             renderedEvents: renderedEvents,
-            matchedEventIDs: matchedEvtIDs
+            matchedEventIDs: matchedEvtIDs,
+            worldbooks: selectedBooks,
+            matchedWorldbookIDs: matchedBookIDs,
+            activatedWorldbookKeys: activeKeys
         )
     }
 
@@ -226,6 +245,106 @@ enum DynamicContextSelector {
         return entries.enumerated()
             .filter { keptIndices.contains($0.offset) }
             .map(\.element)
+    }
+
+    /// 世界书词条动态触发与预算裁剪（支持常驻、关键词触发、1 层递归扫描与 Sticky 粘滞，保持原序）。
+    static func selectWorldbooks(
+        _ worldbooks: [PromptAssembly.Worldbook],
+        entries: [WorldbookEntry],
+        activeCharacters: [CharacterCard],
+        scanText: String,
+        budget: Int,
+        stickyIDs: Set<String>
+    ) -> (books: [PromptAssembly.Worldbook], matchedIDs: Set<String>, activeKeys: [String]) {
+        guard !worldbooks.isEmpty else { return ([], [], []) }
+        let entryByID = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        let activeNamesText = activeCharacters
+            .flatMap { [$0.name] + $0.aliases }
+            .joined(separator: " ")
+        let primaryScan = scanText + "\n" + activeNamesText
+
+        var matchedIDs: Set<String> = []
+        var candidateIDs: Set<String> = []
+        var firstPassBodies: [String] = []
+
+        // 第一轮：常驻词条直接保留；关键词词条扫描正文/指令/在场角色名。
+        for book in worldbooks {
+            let meta = entryByID[book.id]
+            let mode = meta?.resolvedActivationMode ?? .constant
+            if mode == .constant {
+                candidateIDs.insert(book.id)
+                continue
+            }
+            if matchesWorldbook(book: book, meta: meta, in: primaryScan) {
+                matchedIDs.insert(book.id)
+                candidateIDs.insert(book.id)
+                firstPassBodies.append(book.content)
+            } else if stickyIDs.contains(book.id) {
+                candidateIDs.insert(book.id)
+            }
+        }
+
+        // 第二轮（1 层递归扫描）：已命中词条正文里提到的设定也会激活对应关键词词条。
+        if !firstPassBodies.isEmpty {
+            let recursiveScan = firstPassBodies.joined(separator: "\n")
+            for book in worldbooks where !candidateIDs.contains(book.id) {
+                let meta = entryByID[book.id]
+                if matchesWorldbook(book: book, meta: meta, in: recursiveScan) {
+                    matchedIDs.insert(book.id)
+                    candidateIDs.insert(book.id)
+                }
+            }
+        }
+
+        let candidates = worldbooks.filter { candidateIDs.contains($0.id) }
+        let totalTokens = candidates.reduce(0) { $0 + TokenEstimator.estimate($1.content) }
+        let kept: [PromptAssembly.Worldbook]
+        if totalTokens <= budget {
+            kept = candidates
+        } else {
+            // 超预算时优先保留常驻/直接命中与高 order 词条，最终仍按原始数组顺序输出以保 KV Cache。
+            let prioritized = candidates.enumerated().sorted { lhs, rhs in
+                let lMeta = entryByID[lhs.element.id]
+                let rMeta = entryByID[rhs.element.id]
+                let lConst = (lMeta?.resolvedActivationMode ?? .constant) == .constant ? 1 : 0
+                let rConst = (rMeta?.resolvedActivationMode ?? .constant) == .constant ? 1 : 0
+                if lConst != rConst { return lConst > rConst }
+                let lHit = matchedIDs.contains(lhs.element.id) ? 1 : 0
+                let rHit = matchedIDs.contains(rhs.element.id) ? 1 : 0
+                if lHit != rHit { return lHit > rHit }
+                let lOrder = lMeta?.order ?? 0
+                let rOrder = rMeta?.order ?? 0
+                if lOrder != rOrder { return lOrder > rOrder }
+                return lhs.offset < rhs.offset
+            }
+            var keptSet: Set<String> = []
+            var used = 0
+            for item in prioritized {
+                let cost = TokenEstimator.estimate(item.element.content)
+                if !keptSet.isEmpty && used + cost > budget { continue }
+                used += cost
+                keptSet.insert(item.element.id)
+            }
+            kept = candidates.filter { keptSet.contains($0.id) }
+        }
+
+        let activeKeys = kept.flatMap { book -> [String] in
+            let meta = entryByID[book.id]
+            return [book.name] + (meta?.resolvedKeys ?? [])
+        }
+        return (kept, matchedIDs, activeKeys)
+    }
+
+    private static func matchesWorldbook(
+        book: PromptAssembly.Worldbook,
+        meta: WorldbookEntry?,
+        in text: String
+    ) -> Bool {
+        let keys = (meta?.resolvedKeys ?? []) + [book.name]
+        return keys
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 2 }
+            .contains { text.localizedCaseInsensitiveContains($0) }
     }
 
     private static func matchesCharacter(_ card: CharacterCard, in text: String) -> Bool {

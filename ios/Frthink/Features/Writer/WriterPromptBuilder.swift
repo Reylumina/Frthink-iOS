@@ -28,9 +28,10 @@ struct WriterPromptSnapshot {
     var explicitBodyRange: PromptLibrary.BodyRange
     /// 历史裁剪与预算检查共用的有效输入预算。
     var inputBudget: Int
-    /// 上几轮激活、仍处于 Sticky 黏性窗口内的人物卡/事件卡 id。
+    /// 上几轮激活、仍处于 Sticky 黏性窗口内的人物卡/事件卡/世界书词条 id。
     var stickyCharacterIDs: Set<String> = []
     var stickyEventIDs: Set<String> = []
+    var stickyWorldbookIDs: Set<String> = []
 }
 
 struct WriterPreparedPrompt {
@@ -40,6 +41,7 @@ struct WriterPreparedPrompt {
     var estimatedInputTokens: Int
     var matchedCharacterIDs: Set<String> = []
     var matchedEventIDs: Set<String> = []
+    var matchedWorldbookIDs: Set<String> = []
 }
 
 /// 预算重试的三种结果。
@@ -109,14 +111,38 @@ enum WriterPromptBuilder {
         )
         let dynamicSelection = DynamicContextSelector.select(
             world: snapshot.world,
+            assemblyWorldbooks: assembly.worldbooks,
             scanText: scanText,
             inputBudget: snapshot.inputBudget,
             stickyCharacterIDs: snapshot.stickyCharacterIDs,
             stickyEventIDs: snapshot.stickyEventIDs,
+            stickyWorldbookIDs: snapshot.stickyWorldbookIDs,
             enabled: snapshot.settings.dynamicContextActivation
         )
         assembly.characters = dynamicSelection.characters
         assembly.plotOutline = dynamicSelection.renderedEvents
+        assembly.worldbooks = dynamicSelection.worldbooks
+
+        if snapshot.settings.dynamicContextActivation,
+           effective.text.count < snapshot.manuscript.count {
+            let queryTerms = dynamicSelection.characters.flatMap { [$0.name] + $0.aliases }
+                + dynamicSelection.activatedWorldbookKeys
+            let recalled = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: snapshot.manuscript,
+                activeWindowText: effective.text,
+                queryTerms: queryTerms,
+                instructionText: currentInstruction ?? ""
+            )
+            if !recalled.isEmpty {
+                let body = recalled.map(\.text).joined(separator: "\n---\n")
+                assembly.appendedBlocks.append(PromptBlock(
+                    key: "history:bm25-recall",
+                    category: .authoritativeBody,
+                    title: "前文相关事实回查",
+                    body: "【前文相关事实回查（仅供参考，勿与当前正文冲突）】\n" + body
+                ))
+            }
+        }
         let fewShot = StyleDistiller.fewShotDialoguePairs(
             from: assembly.corpus,
             maxPairs: 5,
@@ -222,7 +248,8 @@ enum WriterPromptBuilder {
             omittedHistoryMessages: trimmed.omitted,
             estimatedInputTokens: TokenEstimator.estimate(messages: trimmed.messages),
             matchedCharacterIDs: dynamicSelection.matchedCharacterIDs,
-            matchedEventIDs: dynamicSelection.matchedEventIDs
+            matchedEventIDs: dynamicSelection.matchedEventIDs,
+            matchedWorldbookIDs: dynamicSelection.matchedWorldbookIDs
         )
     }
 
