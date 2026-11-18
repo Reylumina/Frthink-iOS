@@ -193,10 +193,10 @@ enum StyleDistiller {
         inputBudget: Int
     ) -> [LLMMessage] {
         let system = """
-        请细读给定的全书代表性样章，参考篇幅与句长统计，整合一份可直接指导续写的中文仿写模板，使后续行文自然凝练、贴合原著神韵且远离模板化套路。
-        只写可迁移的写法，不复述人物与事件，不照搬原句；用精炼、克制的书面语撰写，不要解释分析过程，不要写空泛赞美或学术腔。
+        请细读给定的全书代表性样章，结合篇幅与句长统计，提炼一份原子化、可直接执行的中文仿写模板，使后续行文贴合原著神韵且远离模板化套路。
+        只写可检验的句法动作与明确禁令，禁止复述人物剧情，禁止照搬原句，禁止使用空泛赞美或学术腔。
 
-        请用清晰的中文小标题覆盖以下六个方面，每个小标题单独成行，下面用简洁凝练的短句分条说明（不要使用 > 引用块、+ 号、--- 分割线、代码块或多余的 ** 加粗）：
+        请严格按以下六项输出，每项小标题单独成行，下面用简短直白的单条规则说明（不要使用 > 引用块、+ 号、--- 分割线、代码块或 ** 加粗）：
 
         叙事视角与结构
         明确人称、限知边界与视角切换节点，以及单段内部的起承转合与行气贯通。
@@ -205,18 +205,18 @@ enum StyleDistiller {
         概括事件因果的隐显脉络、信息铺垫与延迟揭晓，以及长短句错落与段落疏密对张力的调节。
 
         句式用词与意象
-        结合篇幅统计概括句长分布与断句节律、动词与名词质感、意象取材方向，以及动作、感官、心理描写的分寸与情绪外化手法。
+        对照参考统计写明句长分布与断句节律、动词与名词质感、意象取材方向，要求具象物理动作优先于空泛氛围与心理旁白。
 
         对白与人物推进
-        概括对话标签取舍与省笔、人物语气留白与言外之意，以及借对白推进关系与暗流的手法。
+        概括对话标签取舍与省笔、动作与对白穿插方式、语气留白与言外之意，以及借对白推进关系与暗流的手法。
 
         场景转场与段落收束
-        概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，避免强行议论升华。
+        概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，禁止强行议论升华。
 
         应避免的写法
-        只依据原著笔触指出与之相悖的模板化表达，证据不足的特征不猜测。
+        依据原著笔触列出具体负向禁令（如破折号滥用、虚指与指示词冗余、“不是……而是……”对比否定、模板化情绪总结等），证据不足的特征不猜测。
 
-        若已有仿写模板非空，在其基础上融合补充新的有效特征，保留原有可用规则。
+        若已有仿写模板非空，在其基础上融合补充新的有效规则并去重精简。
         """
 
         let existingNote = existingTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -332,12 +332,15 @@ enum StyleDistiller {
     }
 
     /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
-    /// 当传入 `queryText` 时，按技法标签重合度与当前场景对白密度动态精选最契合的样本，避免静态盲投。
+    /// 当传入 `queryText` 时，按技法标签重合度与当前场景对白密度动态精选最契合的样本，避免静态盲投；
+    /// 当传入 `styleTemplate` / `recentDraftText` 时，在首条范例前附带模板硬规则与近端文风差值纠偏（MUSE Appendix E/F + 2609.24532）。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
         maxPairs: Int = 5,
         tokenBudget: Int? = nil,
-        queryText: String? = nil
+        queryText: String? = nil,
+        styleTemplate: String? = nil,
+        recentDraftText: String? = nil
     ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
         guard maxPairs > 0 else { return ([], []) }
         let samples = corpus.filter {
@@ -371,6 +374,9 @@ enum StyleDistiller {
             orderedSamples = samples
         }
 
+        let compactRules = compactStyleRules(from: styleTemplate, limit: 220)
+        let driftHint = driftCorrectionHint(samples: samples, recentText: recentDraftText)
+
         var messages: [LLMMessage] = []
         var ids: Set<String> = []
         var usedTokens = 0
@@ -381,7 +387,20 @@ enum StyleDistiller {
             let technique = isPlaceholder
                 ? "保持本书的句式节奏、描写分寸与对白留白。"
                 : rawTitle
-            let prompt = "【文风示范（仅效仿笔法与语感，勿沿用其中人物与剧情）】\n技法要求：\(technique)"
+
+            var lines = [
+                "【文风示范（当前场景设定与人称优先，仅效仿笔法与语感，剥离范例专有名词与剧情）】",
+                "技法要求：\(technique)",
+            ]
+            if messages.isEmpty {
+                if !compactRules.isEmpty {
+                    lines.append("本书仿写硬规则：\(compactRules)")
+                }
+                if !driftHint.isEmpty {
+                    lines.append("本段纠偏：\(driftHint)")
+                }
+            }
+            let prompt = lines.joined(separator: "\n")
             let pairCost = TokenEstimator.estimate(prompt) + TokenEstimator.estimate(entry.text)
             if let tokenBudget, !messages.isEmpty, usedTokens + pairCost > tokenBudget {
                 break
@@ -395,6 +414,51 @@ enum StyleDistiller {
             usedTokens += pairCost
         }
         return (messages, ids)
+    }
+
+    /// 提取仿写模板中的紧凑规则摘要，控制长度以便在近端生成边界生效。
+    private static func compactStyleRules(from template: String?, limit: Int) -> String {
+        guard let template else { return "" }
+        let collapsed = template
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "；")
+        guard !collapsed.isEmpty else { return "" }
+        guard collapsed.count > limit else { return collapsed }
+        return String(collapsed.prefix(limit)) + "…"
+    }
+
+    /// 对比目标样本基线与当前书末正文的客观语言指标及 AI 套路模式，生成 1 至 2 句行为级纠偏。
+    private static func driftCorrectionHint(
+        samples: [PromptAssembly.Corpus],
+        recentText: String?
+    ) -> String {
+        guard let recentText else { return "" }
+        let trimmed = recentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 200 else { return "" }
+
+        let targetCorpus = samples.map(\.text).joined(separator: "\n")
+        let targetFP = analyzeFingerprint(targetCorpus)
+        let recentFP = analyzeFingerprint(trimmed)
+
+        var hints: [String] = []
+        let sentDiff = recentFP.averageSentenceLength - targetFP.averageSentenceLength
+        if sentDiff >= 6.0 {
+            hints.append("近期句均偏长（约 \(Int(recentFP.averageSentenceLength.rounded())) 字，目标约 \(Int(targetFP.averageSentenceLength.rounded())) 字），本段须刻意收短句式、切分长句。")
+        } else if sentDiff <= -6.0 {
+            hints.append("近期短句偏碎（句均约 \(Int(recentFP.averageSentenceLength.rounded())) 字），适当合并连贯动作句。")
+        }
+        if targetFP.dialogueRatio >= 0.15, recentFP.dialogueRatio < targetFP.dialogueRatio * 0.45 {
+            hints.append("近期对白偏少，注意用人物交锋与潜台词推进。")
+        }
+
+        let dashCount = trimmed.components(separatedBy: "——").count - 1
+        let notButCount = trimmed.components(separatedBy: "不是").count - 1
+        if dashCount >= 3 || (notButCount >= 2 && trimmed.contains("而是")) {
+            hints.append("近期破折号或对比否定句式偏多，本段改用具体动作与白描承接。")
+        }
+        return hints.prefix(2).joined(separator: "")
     }
 
     private static func exemplarMatchScore(
