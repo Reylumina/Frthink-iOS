@@ -141,8 +141,7 @@ enum WriterPromptBuilder {
             from: assembly.corpus,
             maxPairs: 2,
             tokenBudget: max(1, snapshot.inputBudget / 4),
-            queryText: fewShotQuery,
-            recentDraftText: PromptComposer.codePointTail(effective.text, limit: 800)
+            queryText: fewShotQuery
         )
         if !fewShot.injectedEntryIDs.isEmpty {
             assembly.corpus.removeAll { fewShot.injectedEntryIDs.contains($0.entryID) }
