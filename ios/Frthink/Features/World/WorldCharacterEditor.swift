@@ -69,6 +69,7 @@ struct WorldCharacterEditor: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                 basicSection
+                dynamicSnapshotSection
                 personalitySection
                 memorySection
                 customEntriesSection
@@ -171,6 +172,90 @@ struct WorldCharacterEditor: View {
                 minLines: 3
             )
         }
+    }
+
+    private var dynamicSnapshotSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            AppSectionHeader(title: "实时动态状态")
+            if let conflicts = draft.snapshotConflicts, !conflicts.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text("检测到设定冲突（请确认后清除）：")
+                        .font(Font.footnote.weight(.semibold))
+                        .foregroundStyle(AppTone.warning.color)
+                    ForEach(conflicts, id: \.self) { note in
+                        Text("• \(note)")
+                            .font(Font.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("清除冲突提醒") {
+                        draft.snapshotConflicts = nil
+                    }
+                    .font(Font.footnote)
+                    .buttonStyle(.borderless)
+                }
+                .padding(Theme.Spacing.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Theme.field,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
+                )
+            }
+            AppTextField(
+                title: "当前位置",
+                text: snapshotBinding(\.location),
+                placeholder: "角色目前所处地点"
+            )
+            AppTextField(
+                title: "当前目标",
+                text: snapshotBinding(\.currentGoal),
+                placeholder: "当下最迫切的行动意图"
+            )
+            AppTextField(
+                title: "身心状态",
+                text: snapshotBinding(\.condition),
+                placeholder: "伤势、体能、情绪或身份暴露情况"
+            )
+            AppTextField(
+                title: "持有关键物",
+                text: snapshotListBinding(\.possessions, separator: "、"),
+                placeholder: "用顿号分隔，例如：残剑、密信"
+            )
+            AppTextArea(
+                title: "已知关键信息（知情边界）",
+                text: snapshotListBinding(\.knownFacts, separator: "\n"),
+                placeholder: "每行一条，明确该角色当前知道什么秘密/情报",
+                minLines: 2
+            )
+        }
+    }
+
+    private func snapshotBinding(_ keyPath: WritableKeyPath<CharacterDynamicSnapshot, String>) -> Binding<String> {
+        Binding(
+            get: { draft.dynamicSnapshot?[keyPath: keyPath] ?? "" },
+            set: { newValue in
+                var snap = draft.dynamicSnapshot ?? CharacterDynamicSnapshot()
+                snap[keyPath: keyPath] = newValue
+                draft.dynamicSnapshot = snap.isEmpty ? nil : snap
+            }
+        )
+    }
+
+    private func snapshotListBinding(
+        _ keyPath: WritableKeyPath<CharacterDynamicSnapshot, [String]>,
+        separator: String
+    ) -> Binding<String> {
+        Binding(
+            get: { (draft.dynamicSnapshot?[keyPath: keyPath] ?? []).joined(separator: separator) },
+            set: { newValue in
+                let items = newValue
+                    .components(separatedBy: CharacterSet(charactersIn: "、,，\n"))
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                var snap = draft.dynamicSnapshot ?? CharacterDynamicSnapshot()
+                snap[keyPath: keyPath] = items
+                draft.dynamicSnapshot = snap.isEmpty ? nil : snap
+            }
+        )
     }
 
     private var memorySection: some View {
@@ -308,6 +393,12 @@ struct WorldCharacterEditor: View {
         if draft.customEntries != openedCard.customEntries {
             merged.customEntries = draft.customEntries
         }
+        if draft.dynamicSnapshot != openedCard.dynamicSnapshot {
+            merged.dynamicSnapshot = draft.dynamicSnapshot
+        }
+        if draft.snapshotConflicts != openedCard.snapshotConflicts {
+            merged.snapshotConflicts = draft.snapshotConflicts
+        }
         // 若新建卡片内容为空则移除该条目，保持列表数据有效。
         if Self.isBlank(merged) {
             session.payload.world.characters.remove(at: index)
@@ -334,6 +425,7 @@ struct WorldCharacterEditor: View {
                      card.relationshipAttitudes]
         return texts.allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             && card.aliases.isEmpty
+            && (card.dynamicSnapshot?.isEmpty ?? true)
             && card.customEntries.allSatisfy {
                 $0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     && $0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

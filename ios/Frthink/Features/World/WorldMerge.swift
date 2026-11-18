@@ -165,6 +165,11 @@ enum WorldMerge {
             existing: existing.customEntries,
             incoming: incoming.customEntries
         )
+        if let incomingSnap = incoming.dynamicSnapshot, !incomingSnap.isEmpty {
+            card.dynamicSnapshot = upsertSnapshot(existing: existing.dynamicSnapshot, incoming: incomingSnap)
+        }
+        let combinedConflicts = uniqueStrings((existing.snapshotConflicts ?? []) + (incoming.snapshotConflicts ?? []))
+        card.snapshotConflicts = combinedConflicts.isEmpty ? nil : combinedConflicts
         return card
     }
 
@@ -395,5 +400,149 @@ enum WorldMerge {
         let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { sentences.append(tail) }
         return sentences
+    }
+
+    // MARK: - 动态快照与未决伏笔（WorldBook v2）
+
+    struct SnapshotUpdateInput {
+        let characterName: String
+        let snapshot: CharacterDynamicSnapshot
+        let conflictNote: String?
+    }
+
+    struct SnapshotSyncResult {
+        var cards: [CharacterCard]
+        var updatedCount: Int
+        var conflictCount: Int
+    }
+
+    struct PlotThreadSyncResult {
+        var threads: [PlotThread]
+        var addedCount: Int
+        var resolvedCount: Int
+    }
+
+    /// 用新快照覆盖更新既有字段；空字段保留旧值，避免单次增量同步误删未提及状态。
+    static func upsertSnapshot(
+        existing: CharacterDynamicSnapshot?,
+        incoming: CharacterDynamicSnapshot
+    ) -> CharacterDynamicSnapshot {
+        guard var base = existing else { return incoming }
+        let loc = incoming.location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let goal = incoming.currentGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cond = incoming.condition.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rel = incoming.relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !loc.isEmpty { base.location = loc }
+        if !goal.isEmpty { base.currentGoal = goal }
+        if !cond.isEmpty { base.condition = cond }
+        if !incoming.possessions.isEmpty {
+            base.possessions = uniqueStrings(incoming.possessions)
+        }
+        if !incoming.knownFacts.isEmpty {
+            base.knownFacts = uniqueStrings(base.knownFacts + incoming.knownFacts)
+        }
+        if !rel.isEmpty { base.relationshipNotes = rel }
+        base.updatedAt = incoming.updatedAt
+        return base
+    }
+
+    /// 批量将状态同步输出覆盖写入对应人物卡。只更新已存在卡片，避免静默造出重名幽灵卡。
+    static func upsertCharacterSnapshots(
+        existing: [CharacterCard],
+        updates: [SnapshotUpdateInput]
+    ) -> SnapshotSyncResult {
+        var cards = existing
+        var updatedCount = 0
+        var conflictCount = 0
+
+        for item in updates {
+            let probe = CharacterCard(name: item.characterName)
+            guard let idx = matchIndex(for: probe, in: cards) else { continue }
+            var card = cards[idx]
+            var changed = false
+
+            if !item.snapshot.isEmpty {
+                let nextSnap = upsertSnapshot(existing: card.dynamicSnapshot, incoming: item.snapshot)
+                if nextSnap != card.dynamicSnapshot {
+                    card.dynamicSnapshot = nextSnap
+                    changed = true
+                }
+            }
+            if let note = item.conflictNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !note.isEmpty {
+                let mergedConflicts = uniqueStrings((card.snapshotConflicts ?? []) + [note])
+                if mergedConflicts != (card.snapshotConflicts ?? []) {
+                    card.snapshotConflicts = mergedConflicts
+                    conflictCount += 1
+                    changed = true
+                }
+            }
+            if changed {
+                card.updatedAt = Date()
+                cards[idx] = card
+                updatedCount += 1
+            }
+        }
+        return SnapshotSyncResult(
+            cards: cards,
+            updatedCount: updatedCount,
+            conflictCount: conflictCount
+        )
+    }
+
+    /// 合并新增未决伏笔与已兑现伏笔标记。
+    static func mergePlotThreads(
+        existing: [PlotThread],
+        additions: [PlotThread],
+        resolvedKeys: [String]
+    ) -> PlotThreadSyncResult {
+        var threads = existing
+        var addedCount = 0
+        var resolvedCount = 0
+
+        for raw in additions {
+            let title = raw.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }
+            let key = normalize(title)
+            if let idx = threads.firstIndex(where: { normalize($0.title) == key || $0.id == raw.id }) {
+                var current = threads[idx]
+                let ob = raw.obligation.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !ob.isEmpty && current.obligation != ob {
+                    current.obligation = ob
+                    current.updatedAt = Date()
+                }
+                if !raw.relatedCharacters.isEmpty {
+                    current.relatedCharacters = uniqueStrings(current.relatedCharacters + raw.relatedCharacters)
+                }
+                threads[idx] = current
+            } else {
+                var item = raw
+                item.title = title
+                item.relatedCharacters = uniqueStrings(raw.relatedCharacters)
+                item.status = .open
+                item.updatedAt = Date()
+                threads.append(item)
+                addedCount += 1
+            }
+        }
+
+        let normalizedResolved = Set(resolvedKeys.map(normalize).filter { !$0.isEmpty })
+        if !normalizedResolved.isEmpty {
+            for idx in threads.indices where threads[idx].status == .open {
+                let idMatch = normalizedResolved.contains(normalize(threads[idx].id))
+                let titleMatch = normalizedResolved.contains(normalize(threads[idx].title))
+                if idMatch || titleMatch {
+                    threads[idx].status = .resolved
+                    threads[idx].updatedAt = Date()
+                    resolvedCount += 1
+                }
+            }
+        }
+
+        return PlotThreadSyncResult(
+            threads: threads,
+            addedCount: addedCount,
+            resolvedCount: resolvedCount
+        )
     }
 }

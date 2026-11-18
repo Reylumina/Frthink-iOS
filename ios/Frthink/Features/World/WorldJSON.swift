@@ -265,6 +265,71 @@ enum WorldJSON {
         return events
     }
 
+    // MARK: - 增量状态同步（WorldBook v2）
+
+    struct StateSyncPayload {
+        var snapshotUpdates: [WorldMerge.SnapshotUpdateInput] = []
+        var newThreads: [PlotThread] = []
+        var resolvedThreads: [String] = []
+    }
+
+    /// 解析单段状态同步响应：支持 `character_snapshots` / `new_threads` / `resolved_threads`。
+    static func parseStateSync(_ raw: String) throws -> StateSyncPayload {
+        let root = try decodeRoot(raw)
+        guard let object = dictionary(root) else {
+            throw WorldJSONError.invalidJSON("状态同步结果顶层不是 JSON 对象")
+        }
+        var payload = StateSyncPayload()
+
+        if let rawSnapshots = field(object, ["character_snapshots", "characterSnapshots"]) as? [Any] {
+            for item in rawSnapshots {
+                guard let obj = dictionary(item) else { continue }
+                let name = string(field(obj, ["name", "character"]))
+                guard !name.isEmpty else { continue }
+                let snap = CharacterDynamicSnapshot(
+                    location: string(field(obj, ["location"])),
+                    currentGoal: string(field(obj, ["current_goal", "currentGoal", "goal"])),
+                    condition: string(field(obj, ["condition", "status"])),
+                    possessions: strings(field(obj, ["possessions", "items"])),
+                    knownFacts: strings(field(obj, ["known_facts", "knownFacts"])),
+                    relationshipNotes: string(field(obj, ["relationship_notes", "relationshipNotes", "relationships"]))
+                )
+                let conflictNote = string(field(obj, ["conflict_note", "conflictNote", "conflict"]))
+                if !snap.isEmpty || !conflictNote.isEmpty {
+                    payload.snapshotUpdates.append(WorldMerge.SnapshotUpdateInput(
+                        characterName: name,
+                        snapshot: snap,
+                        conflictNote: conflictNote.isEmpty ? nil : conflictNote
+                    ))
+                }
+            }
+        }
+
+        if let rawThreads = field(object, ["new_threads", "newThreads", "open_threads"]) as? [Any] {
+            for item in rawThreads {
+                guard let obj = dictionary(item) else { continue }
+                let title = string(field(obj, ["title", "name"]))
+                guard !title.isEmpty else { continue }
+                let obligation = prose(field(obj, ["obligation", "description", "detail"]))
+                let planted = string(field(obj, ["planted_context", "plantedContext"]))
+                let chars = strings(field(obj, ["related_characters", "relatedCharacters", "characters"]))
+                payload.newThreads.append(PlotThread(
+                    title: title,
+                    obligation: obligation,
+                    plantedContext: planted,
+                    relatedCharacters: chars,
+                    status: .open
+                ))
+            }
+        }
+
+        if let rawResolved = field(object, ["resolved_threads", "resolvedThreads"]) {
+            payload.resolvedThreads = strings(rawResolved)
+        }
+
+        return payload
+    }
+
     // MARK: - 人物卡
 
     /// 事件卡 `characters` 的合法形态：字符串（按分隔符切）或字符串数组。

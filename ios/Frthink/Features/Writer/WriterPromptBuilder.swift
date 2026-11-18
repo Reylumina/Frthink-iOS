@@ -139,7 +139,10 @@ enum WriterPromptBuilder {
             fewShotMessages: fewShot.messages
         )
         let reasoningPolicy = snapshot.settings.reasoningContextPolicy
-        let tailAnchor = styleTailAnchor(snapshot: snapshot)
+        let tailAnchor = styleTailAnchor(
+            snapshot: snapshot,
+            activeCharacters: dynamicSelection.characters
+        )
         let history: [LLMMessage]
         let built: [LLMMessage]
         switch snapshot.action {
@@ -340,22 +343,56 @@ enum WriterPromptBuilder {
         return (result, omitted)
     }
 
-    /// 尾段风格锚定（对齐 SillyTavern Author's Note Depth-0 注入）：
+    /// 尾段锚定（Depth-0 注入）：
     /// 放在最后一条 `user` 指令之前，不改动 `system` 与 `history` 前缀，
-    /// 在 100% 保留前缀 KV Cache 命中的同时避免长上下文下的风格衰减。
-    private static func styleTailAnchor(snapshot: WriterPromptSnapshot) -> String? {
-        guard snapshot.settings.reinforceStyleAtTail else { return nil }
-        let style = snapshot.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-        let flavor = snapshot.settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
-        var parts: [String] = []
-        if !style.isEmpty {
-            parts.append("文风仿写要求：" + style)
+    /// 在 100% 保留前缀 KV Cache 命中的同时锚定局部文风、在场角色实时状态与未决伏笔。
+    private static func styleTailAnchor(
+        snapshot: WriterPromptSnapshot,
+        activeCharacters: [CharacterCard]
+    ) -> String? {
+        var sections: [String] = []
+
+        if snapshot.settings.reinforceStyleAtTail {
+            let style = snapshot.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            let flavor = snapshot.settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
+            var styleParts: [String] = []
+            if !style.isEmpty {
+                styleParts.append("文风仿写要求：" + style)
+            }
+            if !flavor.isEmpty {
+                styleParts.append("审查禁忌：" + flavor)
+            }
+            if !styleParts.isEmpty {
+                sections.append("[写作风格与禁忌提醒]\n" + styleParts.joined(separator: "\n"))
+            }
         }
-        if !flavor.isEmpty {
-            parts.append("审查禁忌：" + flavor)
+
+        let snapshotLines = activeCharacters.compactMap { card in
+            card.dynamicSnapshot?.renderedSummary(characterName: card.name)
         }
-        guard !parts.isEmpty else { return nil }
-        return "[写作风格与禁忌提醒]\n" + parts.joined(separator: "\n")
+        let openThreads = snapshot.world.openThreads.filter { $0.status == .open }
+        let activeNames = Set(activeCharacters.flatMap { [$0.name] + $0.aliases })
+        let prioritizedThreads = openThreads.sorted { lhs, rhs in
+            let lHit = lhs.relatedCharacters.contains(where: { activeNames.contains($0) })
+            let rHit = rhs.relatedCharacters.contains(where: { activeNames.contains($0) })
+            if lHit != rHit { return lHit && !rHit }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        let threadLines = prioritizedThreads.prefix(5).map(\.renderedLine)
+
+        if !snapshotLines.isEmpty || !threadLines.isEmpty {
+            var stateParts: [String] = []
+            if !snapshotLines.isEmpty {
+                stateParts.append("在场角色实时状态：\n" + snapshotLines.joined(separator: "\n"))
+            }
+            if !threadLines.isEmpty {
+                stateParts.append("待兑现伏笔：\n" + threadLines.joined(separator: "\n"))
+            }
+            sections.append("[当前场景状态与未决伏笔]\n" + stateParts.joined(separator: "\n"))
+        }
+
+        guard !sections.isEmpty else { return nil }
+        return sections.joined(separator: "\n\n")
     }
 }
 

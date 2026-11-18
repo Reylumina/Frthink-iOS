@@ -2377,6 +2377,112 @@ enum SelfCheck {
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 
+        // WorldBook v2 Phase 1：动态快照覆盖更新、未决伏笔流转与解析兼容性
+        check("world.stateSyncUpsert") {
+            let initialSnap = CharacterDynamicSnapshot(
+                location: "青云山门",
+                currentGoal: "查明师父失踪原因",
+                condition: "左臂轻伤",
+                possessions: ["旧玉佩"],
+                knownFacts: ["黑衣人用的是南疆毒"]
+            )
+            let cards = [CharacterCard(name: "林昭", dynamicSnapshot: initialSnap)]
+            let rawSync = """
+            {
+              "character_snapshots": [
+                {
+                  "name": "林昭",
+                  "location": "洛阳城西客栈",
+                  "current_goal": "暗中盯住城主府",
+                  "condition": "",
+                  "possessions": ["旧玉佩", "密信"],
+                  "known_facts": ["城主与南疆有勾结"],
+                  "conflict_note": ""
+                }
+              ],
+              "new_threads": [
+                {
+                  "title": "密信落款之谜",
+                  "obligation": "查清密信末尾半枚印章的主人",
+                  "related_characters": ["林昭"]
+                }
+              ],
+              "resolved_threads": ["城门接头暗号"]
+            }
+            """
+            let parsed = try WorldJSON.parseStateSync(rawSync)
+            let snapResult = WorldMerge.upsertCharacterSnapshots(
+                existing: cards,
+                updates: parsed.snapshotUpdates
+            )
+            let updatedSnap = snapResult.cards.first?.dynamicSnapshot
+            try expect(updatedSnap?.location == "洛阳城西客栈", "位置应覆盖更新为新地点")
+            try expect(updatedSnap?.condition == "左臂轻伤", "未提及字段应保留旧快照")
+            try expect(
+                updatedSnap?.knownFacts.count == 2,
+                "已知信息应去重累计而非丢失"
+            )
+
+            let existingThreads = [
+                PlotThread(title: "城门接头暗号", obligation: "对上暗号进城", status: .open)
+            ]
+            let threadResult = WorldMerge.mergePlotThreads(
+                existing: existingThreads,
+                additions: parsed.newThreads,
+                resolvedKeys: parsed.resolvedThreads
+            )
+            try expect(threadResult.addedCount == 1 && threadResult.resolvedCount == 1, "伏笔增删计数异常")
+            try expect(
+                threadResult.threads.first(where: { $0.title == "城门接头暗号" })?.status == .resolved,
+                "已兑现伏笔应标记为 resolved"
+            )
+            return "快照覆盖 / 伏笔流转 ok"
+        }
+
+        // WorldBook v2 Phase 1：在场快照与未决伏笔挂载到末尾 user 指令锚点，不改动 system 前缀
+        check("writer.tailStateAnchor") {
+            let snap = CharacterDynamicSnapshot(location: "客栈二楼", currentGoal: "等待接头人")
+            let card = CharacterCard(name: "林昭", dynamicSnapshot: snap)
+            let thread = PlotThread(
+                title: "半枚印章",
+                obligation: "揭开印章所属势力",
+                relatedCharacters: ["林昭"],
+                status: .open
+            )
+            let resolvedThread = PlotThread(
+                title: "旧承诺",
+                obligation: "已完结",
+                status: .resolved
+            )
+            var world = WorldBook(characters: [card], openThreads: [thread, resolvedThread])
+            world.styleTemplate = "短句冷峻"
+            var settings = AppSettings()
+            settings.reinforceStyleAtTail = true
+            let prepared = WriterPromptBuilder.prepare(
+                WriterPromptSnapshot(
+                    action: .send(instruction: "林昭推开窗观察街面"),
+                    manuscript: "夜色已深，林昭坐在客栈里。",
+                    messages: [],
+                    world: world,
+                    assistantSupplement: "",
+                    settings: settings,
+                    projectID: "book-state",
+                    enabledUniverseEntryIDs: [],
+                    bodyPromptSendWhole: false,
+                    bodyPromptTailCodePoints: 1_000,
+                    continuationAnchor: nil,
+                    explicitBodyRange: .full,
+                    inputBudget: 16_000
+                )
+            )
+            let systemText = prepared.messages.first(where: { $0.role == "system" })?.content ?? ""
+            let lastUser = prepared.messages.last?.content ?? ""
+            try expect(!systemText.contains("半枚印章"), "未决伏笔不应写死进 system 前缀破坏缓存")
+            try expect(lastUser.contains("客栈二楼"), "末尾锚点应包含在场角色动态快照")
+            try expect(lastUser.contains("半枚印章") && !lastUser.contains("已完结"), "末尾锚点应仅包含 open 伏笔")
+            return "Depth-0 场景状态与伏笔锚定 ok"
+        }
+
         // 世界刷新协议：原版 APK 刷新入口传递增量参数 true（C0592r0.java:35），
         // 世界创建入口传递 false（M1/D1.java:60）；两个调用分支不可混用。
         check("world.refreshContract") {

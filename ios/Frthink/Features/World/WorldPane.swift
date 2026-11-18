@@ -27,6 +27,7 @@ enum WorldTab: String, CaseIterable, Identifiable, Hashable {
 enum WorldBusy: Equatable {
     case refreshingWorld
     case extractingEvents
+    case syncingState
     case extractingStyleNotes
     case distillingStyle
     case updatingRules
@@ -35,6 +36,7 @@ enum WorldBusy: Equatable {
         switch self {
         case .refreshingWorld: return "正在刷新人物卡…"
         case .extractingEvents: return "正在抽取事件卡…"
+        case .syncingState: return "正在同步末尾状态与伏笔…"
         case .extractingStyleNotes: return "正在提炼文风笔记…"
         case .distillingStyle: return "正在深度蒸馏…"
         case .updatingRules: return "正在整理长期规则…"
@@ -127,8 +129,10 @@ struct WorldPane: View {
                 WorldEventsSection(
                     session: session,
                     isBusy: isExtractingEvents,
+                    isSyncingState: busy == .syncingState,
                     isActionDisabled: busy != nil,
-                    onExtract: startEventExtraction
+                    onExtract: startEventExtraction,
+                    onSyncState: startStateSync
                 )
             case .rules:
                 WorldRulesSection(
@@ -326,6 +330,21 @@ struct WorldPane: View {
             cancelled: "已停止抽取；已完成的段已保留。"
         ) {
             let outcome = try await WorldMaterialWorkflow.extractEvents(
+                session: self.session,
+                store: self.store
+            )
+            return outcome.summary
+        }
+    }
+
+    private func startStateSync() {
+        startWorldTask(
+            kind: .syncingState,
+            cancelled: "已停止状态同步。"
+        ) {
+            let excerpt = PromptComposer.codePointTail(self.session.manuscript, limit: 3_000)
+            let outcome = try await StateSyncWorkflow.syncExcerpt(
+                excerpt,
                 session: self.session,
                 store: self.store
             )

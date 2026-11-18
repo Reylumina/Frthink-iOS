@@ -20,6 +20,8 @@ struct WorldBook: Codable {
     /// 人物分组。原版人物卡可编组，关掉一组就不把该组人物发进提示词。
     var characterGroups: [CharacterGroup]
     var events: [EventCard]
+    /// 未决伏笔与叙事承诺清单（WorldBook v2：支持 open / resolved 流转）。
+    var openThreads: [PlotThread]
     /// 语料收集库。
     var corpus: [CorpusEntry]
     /// 本书自带的世界书词条（P10），只属于当前书项目。
@@ -82,6 +84,7 @@ struct WorldBook: Codable {
         characters: [CharacterCard] = [],
         characterGroups: [CharacterGroup] = [],
         events: [EventCard] = [],
+        openThreads: [PlotThread] = [],
         corpus: [CorpusEntry] = [],
         worldbookEntries: [WorldbookEntry] = [],
         plotOutline: String = "",
@@ -117,6 +120,7 @@ struct WorldBook: Codable {
         self.characters = characters
         self.characterGroups = characterGroups
         self.events = events
+        self.openThreads = openThreads
         self.corpus = corpus
         self.lastRefreshedAt = lastRefreshedAt
         self.refreshedUpTo = refreshedUpTo
@@ -165,6 +169,7 @@ struct WorldBook: Codable {
         } else {
             events = objectEvents
         }
+        openThreads = (try? c.decode([PlotThread].self, forKey: .openThreads)) ?? []
         corpus = (try? c.decode([CorpusEntry].self, forKey: .corpus)) ?? []
         worldbookEntries =
             (try? c.decode([WorldbookEntry].self, forKey: .worldbookEntries)) ?? []
@@ -379,6 +384,106 @@ struct SummaryRevision: Codable, Hashable {
     }
 }
 
+/// 角色实时动态快照（覆盖式更新，不与静态档案拼接）。
+struct CharacterDynamicSnapshot: Codable, Hashable {
+    var location: String
+    var currentGoal: String
+    var condition: String
+    var possessions: [String]
+    var knownFacts: [String]
+    var relationshipNotes: String
+    var updatedAt: Date
+
+    init(
+        location: String = "",
+        currentGoal: String = "",
+        condition: String = "",
+        possessions: [String] = [],
+        knownFacts: [String] = [],
+        relationshipNotes: String = "",
+        updatedAt: Date = Date()
+    ) {
+        self.location = location
+        self.currentGoal = currentGoal
+        self.condition = condition
+        self.possessions = possessions
+        self.knownFacts = knownFacts
+        self.relationshipNotes = relationshipNotes
+        self.updatedAt = updatedAt
+    }
+
+    var isEmpty: Bool {
+        location.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && currentGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && possessions.isEmpty
+            && knownFacts.isEmpty
+            && relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 紧凑渲染为单行场景锚点摘要，用于末尾 `tailAnchor` 注入。
+    func renderedSummary(characterName: String) -> String? {
+        var segments: [String] = []
+        let loc = location.trimmingCharacters(in: .whitespacesAndNewlines)
+        let goal = currentGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cond = condition.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rel = relationshipNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !loc.isEmpty { segments.append("位置：\(loc)") }
+        if !cond.isEmpty { segments.append("状态：\(cond)") }
+        if !goal.isEmpty { segments.append("目标：\(goal)") }
+        if !possessions.isEmpty { segments.append("持有：\(possessions.joined(separator: "、"))") }
+        if !knownFacts.isEmpty { segments.append("已知：\(knownFacts.joined(separator: "；"))") }
+        if !rel.isEmpty { segments.append("关系：\(rel)") }
+        guard !segments.isEmpty else { return nil }
+        return "• \(characterName)：" + segments.joined(separator: "｜")
+    }
+}
+
+/// 未决伏笔状态。
+enum PlotThreadStatus: String, Codable, Hashable {
+    case open
+    case resolved
+}
+
+/// 未决伏笔 / 未来叙事承诺（Prospective State）。
+struct PlotThread: Identifiable, Codable, Hashable {
+    var id: String
+    var title: String
+    var obligation: String
+    var plantedContext: String
+    var relatedCharacters: [String]
+    var status: PlotThreadStatus
+    var updatedAt: Date
+
+    init(
+        id: String = UUID().uuidString,
+        title: String,
+        obligation: String = "",
+        plantedContext: String = "",
+        relatedCharacters: [String] = [],
+        status: PlotThreadStatus = .open,
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.obligation = obligation
+        self.plantedContext = plantedContext
+        self.relatedCharacters = relatedCharacters
+        self.status = status
+        self.updatedAt = updatedAt
+    }
+
+    var renderedLine: String {
+        let head = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = obligation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chars = relatedCharacters.isEmpty ? "" : "（\(relatedCharacters.joined(separator: "、"))）"
+        if body.isEmpty {
+            return "• [\(head)]\(chars)"
+        }
+        return "• [\(head)]\(chars) \(body)"
+    }
+}
+
 /// 人物卡。
 ///
 /// 字段名严格对齐 Android 端 LLM 输出 schema：`name` / `identity` /
@@ -401,6 +506,10 @@ struct CharacterCard: Identifiable, Codable, Hashable {
     var customEntries: [CustomEntry]
     /// 人物记忆条目。原版 `memories`；可能缺键，缺省按无记忆处理。
     var memories: [CharacterMemory]?
+    /// 实时动态快照（位置/目标/状态/持有物/知情边界），增量同步时覆盖更新。
+    var dynamicSnapshot: CharacterDynamicSnapshot?
+    /// 状态同步检测到与既有设定冲突时的待确认提示，防止错误被状态机锁死。
+    var snapshotConflicts: [String]?
     var updatedAt: Date
     /// 是否进入写作提示词。原版 `enabled`，历史数据缺失时按启用处理。
     var enabled: Bool?
@@ -420,6 +529,8 @@ struct CharacterCard: Identifiable, Codable, Hashable {
         relationshipAttitudes: String = "",
         customEntries: [CustomEntry] = [],
         memories: [CharacterMemory]? = nil,
+        dynamicSnapshot: CharacterDynamicSnapshot? = nil,
+        snapshotConflicts: [String]? = nil,
         updatedAt: Date = Date(),
         enabled: Bool? = nil,
         groupId: String? = nil
@@ -436,6 +547,8 @@ struct CharacterCard: Identifiable, Codable, Hashable {
         self.relationshipAttitudes = relationshipAttitudes
         self.customEntries = customEntries
         self.memories = memories
+        self.dynamicSnapshot = dynamicSnapshot
+        self.snapshotConflicts = snapshotConflicts
         self.updatedAt = updatedAt
         self.enabled = enabled
         self.groupId = groupId
