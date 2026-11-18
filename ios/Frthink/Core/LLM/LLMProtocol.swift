@@ -33,6 +33,41 @@ struct LLMToolCall: Equatable, Sendable {
     var arguments: String
 }
 
+/// 推理方言：统一封装不同服务商/模型对 `reasoning_content` 与末尾预填充键的差异。
+enum ReasoningDialect {
+    case deepseek
+    case kimi
+    case glm
+    case standard
+
+    init(isDeepSeek: Bool, model: String) {
+        if isDeepSeek {
+            self = .deepseek
+            return
+        }
+        let lower = model.lowercased()
+        if lower.contains("deepseek") {
+            self = .deepseek
+        } else if lower.contains("kimi") || lower.contains("moonshot") {
+            self = .kimi
+        } else if lower.contains("glm") {
+            self = .glm
+        } else {
+            self = .standard
+        }
+    }
+
+    var supportsReasoningContent: Bool { self != .standard }
+
+    var prefixKey: String? {
+        switch self {
+        case .deepseek, .glm: return "prefix"
+        case .kimi: return "partial"
+        case .standard: return nil
+        }
+    }
+}
+
 /// 一次请求。
 ///
 /// 默认请求体保持原版 7 个核心键；仅当用户将思考档位配置为非关闭状态时，
@@ -102,80 +137,25 @@ struct LLMRequest {
         providerLevel: ThinkingLevel,
         offStyle: ReasoningOffStyle = .none
     ) -> Data {
-        let lowerModel = model.lowercased()
-        let isKimiModel = lowerModel.contains("kimi") || lowerModel.contains("moonshot")
-        let supportsReasoningField = isDeepSeek
-            || lowerModel.contains("deepseek")
-            || isKimiModel
-            || lowerModel.contains("glm")
+        let dialect = ReasoningDialect(isDeepSeek: isDeepSeek, model: model)
+        let serializedMessages = messages.map { serializeMessage($0, dialect: dialect) }
 
-        let serializedMessages: [[String: Any]] = messages.map { msg in
-            var dict: [String: Any] = ["role": msg.role, "content": msg.content]
-            // DeepSeek / Kimi / GLM 支持在 assistant 消息上携带结构化 reasoning_content，
-            // 避免拼进 content 破坏前缀缓存或格式解析。
-            if supportsReasoningField,
-               msg.role == "assistant",
-               let reasoning = msg.reasoningContent,
-               !reasoning.isEmpty {
-                dict["reasoning_content"] = reasoning
-            }
-            if msg.role == "assistant", msg.isPrefix {
-                if isKimiModel && !isDeepSeek {
-                    dict["partial"] = true
-                } else if supportsReasoningField {
-                    dict["prefix"] = true
-                }
-            }
-            return dict
-        }
         var body: [String: Any] = [
             "model": model,
             "messages": serializedMessages,
             "stream": stream,
         ]
-
         if stream, !isDeepSeek, sendStreamOptions, kind != .openCodeGo {
             body["stream_options"] = ["include_usage": true]
         }
 
-        if forceThinkingDisabledLiteral {
-            body["thinking"] = ["type": "disabled"]
-            body["temperature"] = temperature
-        } else if omitThinking {
-            body["temperature"] = temperature
-        } else {
-            let level = effectiveLevel(providerLevel: providerLevel)
-            if level == .off {
-                if isDeepSeek {
-                    body["thinking"] = ["type": "disabled"]
-                } else {
-                    // 关闭思考模式下默认不传递额外字段（与原版行为一致）；仅当用户为特定供应方指定字段时才追加，
-                    // 防止服务端默认启用推理导致无法关闭。
-                    switch offStyle {
-                    case .none:
-                        break
-                    case .reasoningEffortNone:
-                        body["reasoning_effort"] = "none"
-                    case .thinkingDisabled:
-                        body["thinking"] = ["type": "disabled"]
-                    case .reasoningDisabled:
-                        body["reasoning"] = ["enabled": false]
-                    case .enableThinkingFalse:
-                        body["enable_thinking"] = false
-                    }
-                }
-                body["temperature"] = temperature
-            } else {
-                if isDeepSeek {
-                    body["thinking"] = ["type": "enabled"]
-                    body["reasoning_effort"] = level.rawValue
-                } else if kind == .openRouter {
-                    body["reasoning"] = ["effort": level.rawValue]
-                } else {
-                    body["reasoning_effort"] = level.rawValue
-                }
-            }
-        }
+        applyThinkingConfig(
+            to: &body,
+            isDeepSeek: isDeepSeek,
+            kind: kind,
+            providerLevel: providerLevel,
+            offStyle: offStyle
+        )
 
         let mappedTools: [[String: Any]] = (tools ?? []).compactMap { tool in
             guard let data = tool.parametersJSON.data(using: .utf8),
@@ -220,6 +200,59 @@ struct LLMRequest {
             return providerLevel
         }
     }
+
+    private func serializeMessage(_ msg: LLMMessage, dialect: ReasoningDialect) -> [String: Any] {
+        var dict: [String: Any] = ["role": msg.role, "content": msg.content]
+        guard msg.role == "assistant" else { return dict }
+        if dialect.supportsReasoningContent,
+           let reasoning = msg.reasoningContent,
+           !reasoning.isEmpty {
+            dict["reasoning_content"] = reasoning
+        }
+        if msg.isPrefix, let prefixKey = dialect.prefixKey {
+            dict[prefixKey] = true
+        }
+        return dict
+    }
+
+    private func applyThinkingConfig(
+        to body: inout [String: Any],
+        isDeepSeek: Bool,
+        kind: ProviderKind,
+        providerLevel: ThinkingLevel,
+        offStyle: ReasoningOffStyle
+    ) {
+        if forceThinkingDisabledLiteral {
+            body["thinking"] = ["type": "disabled"]
+            body["temperature"] = temperature
+            return
+        }
+        if omitThinking {
+            body["temperature"] = temperature
+            return
+        }
+        let level = effectiveLevel(providerLevel: providerLevel)
+        guard level != .off else {
+            let resolvedOffStyle: ReasoningOffStyle = isDeepSeek ? .thinkingDisabled : offStyle
+            switch resolvedOffStyle {
+            case .none: break
+            case .reasoningEffortNone: body["reasoning_effort"] = "none"
+            case .thinkingDisabled: body["thinking"] = ["type": "disabled"]
+            case .reasoningDisabled: body["reasoning"] = ["enabled": false]
+            case .enableThinkingFalse: body["enable_thinking"] = false
+            }
+            body["temperature"] = temperature
+            return
+        }
+        if isDeepSeek {
+            body["thinking"] = ["type": "enabled"]
+            body["reasoning_effort"] = level.rawValue
+        } else if kind == .openRouter {
+            body["reasoning"] = ["effort": level.rawValue]
+        } else {
+            body["reasoning_effort"] = level.rawValue
+        }
+    }
 }
 
 /// 流式事件枚举。除正文增量外，支持携带「思考过程」与「结束原因」：
@@ -228,142 +261,6 @@ enum LLMStreamEvent: Equatable {
     case delta(String)
     case reasoning(String)
     case finished(reason: String?)
-}
-
-/// 流式 `<think>...</think>` 标签剥离状态机。
-///
-/// 支持两种场景：
-/// 1. 末尾挂了未闭合 `<think>` 预填充（`startsInsideThink = true`），模型首段输出直接作为 `.reasoning`，直到 `</think>` 后切回 `.delta`；
-/// 2. 模型在普通文本流中自行输出 `<think>...</think>`，按标签边界自动拆分为 `.reasoning` 与 `.delta`，支持标签被 SSE 分片截断。
-struct ThinkTagStreamSplitter {
-    private static let openTag = "<think>"
-    private static let closeTag = "</think>"
-
-    private var insideThink: Bool
-    private var buffer: String = ""
-    private var trimLeadingNewlineAfterClose: Bool = false
-    private var checkDuplicateOpenTag: Bool
-
-    init(startsInsideThink: Bool = false) {
-        self.insideThink = startsInsideThink
-        self.checkDuplicateOpenTag = startsInsideThink
-    }
-
-    static func startsInsideThink(for messages: [LLMMessage]) -> Bool {
-        guard let last = messages.last, last.role == "assistant" else { return false }
-        return last.content.contains(openTag) && !last.content.contains(closeTag)
-    }
-
-    mutating func push(_ chunk: String) -> [LLMStreamEvent] {
-        guard !chunk.isEmpty else { return [] }
-        buffer += chunk
-        var events: [LLMStreamEvent] = []
-
-        while !buffer.isEmpty {
-            if trimLeadingNewlineAfterClose {
-                if buffer == "\r" { break }
-                if buffer.hasPrefix("\r\n") {
-                    buffer.removeFirst(2)
-                } else if buffer.hasPrefix("\n") {
-                    buffer.removeFirst(1)
-                }
-                trimLeadingNewlineAfterClose = false
-                if buffer.isEmpty { break }
-            }
-
-            if insideThink {
-                if checkDuplicateOpenTag {
-                    if buffer.count < Self.openTag.count && Self.openTag.hasPrefix(buffer) {
-                        break
-                    }
-                    if buffer.hasPrefix(Self.openTag) {
-                        buffer.removeFirst(Self.openTag.count)
-                        if buffer.hasPrefix("\r\n") {
-                            buffer.removeFirst(2)
-                        } else if buffer.hasPrefix("\n") {
-                            buffer.removeFirst(1)
-                        }
-                    }
-                    checkDuplicateOpenTag = false
-                    if buffer.isEmpty { break }
-                }
-                if let range = buffer.range(of: Self.closeTag) {
-                    let thought = String(buffer[..<range.lowerBound])
-                    if !thought.isEmpty { events.append(.reasoning(thought)) }
-                    buffer.removeSubrange(..<range.upperBound)
-                    insideThink = false
-                    trimLeadingNewlineAfterClose = true
-                } else {
-                    let keep = Self.trailingPartialPrefixLength(of: Self.closeTag, in: buffer)
-                    let emitCount = buffer.count - keep
-                    if emitCount > 0 {
-                        let cut = buffer.index(buffer.startIndex, offsetBy: emitCount)
-                        events.append(.reasoning(String(buffer[..<cut])))
-                        buffer.removeSubrange(..<cut)
-                    }
-                    break
-                }
-            } else {
-                if let range = buffer.range(of: Self.openTag) {
-                    let prose = String(buffer[..<range.lowerBound])
-                    if !prose.isEmpty { events.append(.delta(prose)) }
-                    buffer.removeSubrange(..<range.upperBound)
-                    insideThink = true
-                } else {
-                    let keep = Self.trailingPartialPrefixLength(of: Self.openTag, in: buffer)
-                    let emitCount = buffer.count - keep
-                    if emitCount > 0 {
-                        let cut = buffer.index(buffer.startIndex, offsetBy: emitCount)
-                        events.append(.delta(String(buffer[..<cut])))
-                        buffer.removeSubrange(..<cut)
-                    }
-                    break
-                }
-            }
-        }
-        return events
-    }
-
-    mutating func finish() -> [LLMStreamEvent] {
-        guard !buffer.isEmpty else { return [] }
-        let tail = buffer
-        buffer = ""
-        trimLeadingNewlineAfterClose = false
-        return [insideThink ? .reasoning(tail) : .delta(tail)]
-    }
-
-    /// 一次性文本（非流式 `complete`）剥离 `<think>...</think>`。
-    static func stripThinkTags(
-        from text: String,
-        startsInsideThink: Bool = false
-    ) -> (prose: String, reasoning: String) {
-        var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
-        let events = splitter.push(text) + splitter.finish()
-        var prose = ""
-        var reasoning = ""
-        for event in events {
-            switch event {
-            case .delta(let chunk):
-                prose += chunk
-            case .reasoning(let chunk):
-                reasoning += chunk
-            case .finished:
-                break
-            }
-        }
-        return (prose, reasoning)
-    }
-
-    private static func trailingPartialPrefixLength(of tag: String, in text: String) -> Int {
-        let maxLen = min(tag.count - 1, text.count)
-        guard maxLen > 0 else { return 0 }
-        for len in stride(from: maxLen, through: 1, by: -1) {
-            if text.hasSuffix(tag.prefix(len)) {
-                return len
-            }
-        }
-        return 0
-    }
 }
 
 enum LLMError: LocalizedError, Equatable {

@@ -26,8 +26,14 @@ struct WorldCharactersSection: View {
     @State private var sortMode: WorldCharacterSort = .name
     @State private var route: Route? = nil
     @State private var pendingDeleteIDs: Set<String> = []
-    @State private var groupFilter = "__all__"
+    @State private var groupFilter: GroupFilter = .all
     @State private var showGroupEditor = false
+
+    private enum GroupFilter: Hashable {
+        case all
+        case ungrouped
+        case group(String)
+    }
 
     private struct Route: Identifiable {
         let id: String
@@ -158,13 +164,13 @@ struct WorldCharactersSection: View {
     }
     private var groupMenu: some View {
         Menu {
-            Button("全部人物") { groupFilter = "__all__" }
-            Button("未分组") { groupFilter = "__ungrouped__" }
+            Button("全部人物") { groupFilter = .all }
+            Button("未分组") { groupFilter = .ungrouped }
             if !session.payload.world.characterGroups.isEmpty {
                 Divider()
                 ForEach(session.payload.world.characterGroups) { group in
                     Button {
-                        groupFilter = group.id
+                        groupFilter = .group(group.id)
                     } label: {
                         if group.enabled {
                             Text(group.name)
@@ -193,11 +199,11 @@ struct WorldCharactersSection: View {
 
     private var groupFilterLabel: String {
         switch groupFilter {
-        case "__all__": return "全部分组"
-        case "__ungrouped__": return "未分组"
-        default:
+        case .all: return "全部分组"
+        case .ungrouped: return "未分组"
+        case .group(let id):
             return session.payload.world.characterGroups
-                .first(where: { $0.id == groupFilter })?.name ?? "分组"
+                .first(where: { $0.id == id })?.name ?? "分组"
         }
     }
 
@@ -332,12 +338,12 @@ struct WorldCharactersSection: View {
         }
 
         switch groupFilter {
-        case "__all__":
+        case .all:
             break
-        case "__ungrouped__":
+        case .ungrouped:
             cards = cards.filter { ($0.groupId ?? "").isEmpty }
-        default:
-            cards = cards.filter { $0.groupId == groupFilter }
+        case .group(let id):
+            cards = cards.filter { $0.groupId == id }
         }
 
         return cards.sorted { lhs, rhs in

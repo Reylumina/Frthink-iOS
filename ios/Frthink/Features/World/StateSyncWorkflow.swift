@@ -147,32 +147,15 @@ enum StateSyncWorkflow {
             let startOffset = max(0, cursor - 200)
             let scalars = session.manuscript.unicodeScalars
             let startIdx = scalars.index(scalars.startIndex, offsetBy: min(startOffset, scalars.count))
-            let tailSlice = String(scalars[startIdx...])
-            let chunkBudget = max(1_500, min(4_000, store.settings.promptBudgetTokens / 3))
-            let chunks = WorldDigest.chunks(of: tailSlice, tokenBudget: chunkBudget, overlapTokens: 120)
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            var totalUpdated = 0
-            var totalConflicts = 0
-            var totalAdded = 0
-            var totalResolved = 0
-            for (idx, chunk) in chunks.enumerated() {
-                try Task.checkCancellation()
-                onProgress?(idx + 1, chunks.count)
-                let step = try await syncExcerpt(chunk, session: session, store: store)
-                totalUpdated += step.updatedCharacters
-                totalConflicts = max(totalConflicts, step.conflictCharacters)
-                totalAdded += step.addedThreads
-                totalResolved += step.resolvedThreads
-            }
+            let outcome = try await syncChunks(
+                in: String(scalars[startIdx...]),
+                session: session,
+                store: store,
+                onProgress: onProgress
+            )
             session.payload.world.lastStateSyncOffset = totalScalars
             session.scheduleSave()
-            return SyncOutcome(
-                updatedCharacters: totalUpdated,
-                conflictCharacters: totalConflicts,
-                addedThreads: totalAdded,
-                resolvedThreads: totalResolved
-            )
+            return outcome
         }
 
         let excerpt = PromptComposer.codePointTail(session.manuscript, limit: 3_000)
@@ -192,8 +175,22 @@ enum StateSyncWorkflow {
         guard !fullText.isEmpty else {
             throw WorldRunError(message: "当前书稿为空，无法扫描全书伏笔。")
         }
+        return try await syncChunks(
+            in: fullText,
+            session: session,
+            store: store,
+            onProgress: onProgress
+        )
+    }
+
+    private static func syncChunks(
+        in text: String,
+        session: ProjectSession,
+        store: AppStore,
+        onProgress: ((Int, Int) -> Void)?
+    ) async throws -> SyncOutcome {
         let chunkBudget = max(1_500, min(4_000, store.settings.promptBudgetTokens / 3))
-        let chunks = WorldDigest.chunks(of: fullText, tokenBudget: chunkBudget, overlapTokens: 120)
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: chunkBudget, overlapTokens: 120)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !chunks.isEmpty else {

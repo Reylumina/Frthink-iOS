@@ -30,6 +30,8 @@ enum ModelCatalog {
             return "deepseek/deepseek-v4.1-flash-1017"
         case .anthropic:
             return "claude-sonnet-5-5"
+        case .gemini:
+            return "gemini-4-argon"
         case .openAICompatible:
             return nil
         case .openCodeGo:
@@ -47,6 +49,7 @@ enum ModelCatalog {
     static func contextWindow(for model: String) -> Int? {
         let name = model.lowercased()
         if name.contains("deepseek") { return 1_000_000 }
+        if name.contains("gemini") { return 1_000_000 }
         if name.contains("claude") {
             if name.contains("-5-") || name.hasSuffix("-5") {
                 return 1_000_000

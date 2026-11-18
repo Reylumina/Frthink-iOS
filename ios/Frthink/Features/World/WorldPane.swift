@@ -463,42 +463,18 @@ struct ConsistencyReportSheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            List(issues) { issue in
+                ConsistencyIssueRow(issue: issue)
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .overlay {
                 if issues.isEmpty {
-                    EmptyStateView(
-                        symbol: "checkmark.seal",
-                        title: "未发现明显矛盾",
-                        message: "末尾正文与当前人物快照、未决伏笔及早期召回片段保持一致。"
+                    ContentUnavailableView(
+                        "未发现明显矛盾",
+                        systemImage: "checkmark.seal",
+                        description: Text("末尾正文与当前人物快照、未决伏笔及早期召回片段保持一致。")
                     )
-                } else {
-                    List(issues) { issue in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                            HStack(spacing: Theme.Spacing.s) {
-                                Text(issue.category)
-                                    .font(Font.subheadline.weight(.semibold))
-                                Spacer(minLength: 0)
-                                Text(issue.severity)
-                                    .font(Font.caption.weight(.medium))
-                                    .foregroundStyle(issue.severity == "高" ? AppTone.danger.color : AppTone.warning.color)
-                            }
-                            if !issue.factQuote.isEmpty {
-                                Text("既有依据：\(issue.factQuote)")
-                                    .font(Font.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if !issue.contradictionQuote.isEmpty {
-                                Text("本段冲突：\(issue.contradictionQuote)")
-                                    .font(Font.caption)
-                                    .foregroundStyle(.primary)
-                            }
-                            Text(issue.reason)
-                                .font(Font.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, Theme.Spacing.xs)
-                    }
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden)
                 }
             }
             .groupedPageBackground()
@@ -510,5 +486,36 @@ struct ConsistencyReportSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct ConsistencyIssueRow: View {
+    let issue: WorldJSON.ConsistencyIssue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.s) {
+                Text(issue.category)
+                    .font(Font.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                Text(issue.severity)
+                    .font(Font.caption.weight(.medium))
+                    .foregroundStyle(issue.severity == "高" ? AppTone.danger.color : AppTone.warning.color)
+            }
+            if !issue.factQuote.isEmpty {
+                Text("既有依据：\(issue.factQuote)")
+                    .font(Font.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !issue.contradictionQuote.isEmpty {
+                Text("本段冲突：\(issue.contradictionQuote)")
+                    .font(Font.caption)
+                    .foregroundStyle(.primary)
+            }
+            Text(issue.reason)
+                .font(Font.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, Theme.Spacing.xs)
     }
 }

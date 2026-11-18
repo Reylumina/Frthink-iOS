@@ -199,11 +199,8 @@ struct WorldEventsSection: View {
         let event: EventCard
 
         private var preview: String {
-            if !event.consequence.isEmpty { return event.consequence }
-            if !event.development.isEmpty { return event.development }
-            if !event.cause.isEmpty { return event.cause }
-            if !event.scene.isEmpty { return event.scene }
-            return ""
+            [event.consequence, event.development, event.cause, event.scene]
+                .first(where: { !$0.isEmpty }) ?? ""
         }
 
         var body: some View {

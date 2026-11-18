@@ -29,13 +29,13 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 ### 4.1 分层
 
 ```
-App/            入口、根导航、演示数据、运行时自检
-Features/       按业务域切的界面层：Writer、World、Translation（Reader）、Library、Universe、Settings
+App/            入口、根导航、演示数据、运行时自检（`SelfCheck` + `ContextEngineSelfCheck`）
+Features/       按业务域切的界面层：Writer（含 `SceneMemoryBuilder`）、World、Translation（Reader）、Library、Universe、Settings
 Core/
-  Models/       值类型：Project、World、Chat、Settings、Universe
+  Models/       值类型：Project、World、Chat、Settings（含 `ProviderKind.gemini` 与规则表）、Universe
   Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、ManuscriptIndex（端侧 BM25 因果回查，增强分支）、TextFileCodec（正文编解码与导出）、Keychain
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）、DynamicContextSelector / StyleDistiller（增强分支）
-  LLM/          协议抽象、ThinkTagStreamSplitter、OpenAI 兼容与 Anthropic 实现、token 估算
+  LLM/          协议抽象（`ReasoningDialect`）、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、token 估算
   Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
   Design/       Theme、AppComponents、AppFormComponents、JustifiedText 等
 ```
@@ -104,7 +104,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 自动摘要流水线在此基础上增加一个环节：当上下文占用达到阈值时，依据 P54 模板将尚未摘要的用户轮次合并至长期规则中，并记录 `sourceMessageKeys`。该步骤仅更新长期规则，不删除既有对话消息。
 
-**增强分支（`feat/dynamic-context-and-style-distiller`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词/1 层递归触发）、`SceneMemoryBlock`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3+2 伏笔配额与 `ManuscriptIndex` BM25 因果截断回查）、`StyleDistiller`（五维 MMR 选样 + 四维语域门控 Few-Shot），以及可选的 `prefillCoT` 分通道卡思维链预填充（DeepSeek `/beta` + `prefix: true` + `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）配合 `ThinkTagStreamSplitter` 流式/非流式 `<think>` 剥离。
+**增强分支（`feat/dynamic-context-and-style-distiller`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词/1 层递归触发）、`SceneMemoryBuilder`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3+2 伏笔配额与 `ManuscriptIndex` BM25 因果截断回查）、`StateSyncWorkflow.syncSmart`（基于 `WorldBook.lastStateSyncOffset` 游标自动切换全书分段建档与增量同步）、`StyleDistiller`（五维 MMR 选样 + 四维语域门控 Few-Shot），以及独立原生 `GeminiClient` 与白名单 `prefillCoT`（DeepSeek `/beta` + `prefix: true` + `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）配合 `ThinkTagStreamSplitter` 流式/非流式 `<think>` 剥离。
 
 ### 4.6 错误模型
 

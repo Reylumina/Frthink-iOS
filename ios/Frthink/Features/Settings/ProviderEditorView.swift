@@ -214,16 +214,6 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
 
-            // 关闭思考时是否附带显式禁用推理的参数字段；默认缺省，针对默认开启推理的服务端进行适配。
-            if draft.effectiveThinkingLevel == .off, !draft.isDeepSeek, draft.kind != .anthropic {
-                Picker("关闭思考时发送", selection: reasoningOffBinding) {
-                    ForEach(ReasoningOffStyle.allCases) { style in
-                        Text(style.displayName).tag(style)
-                    }
-                }
-                .pickerStyle(.menu)
-            }
-
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 HStack {
                     Text("温度")
@@ -247,13 +237,6 @@ struct ProviderEditorView: View {
                 draft.thinkingLevel = level
                 draft.thinking = level != .off
             }
-        )
-    }
-
-    private var reasoningOffBinding: Binding<ReasoningOffStyle> {
-        Binding(
-            get: { draft.effectiveReasoningOffStyle },
-            set: { draft.reasoningOffStyle = $0 }
         )
     }
 
