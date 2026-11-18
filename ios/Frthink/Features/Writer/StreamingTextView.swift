@@ -9,10 +9,12 @@ struct StreamingTextView: UIViewRepresentable {
     var characterCount: Int? = nil
     /// 与「外观 → 正文字号」换算后的实际字号（`WriterTypography.fontSize`）。
     var fontSize: CGFloat
-    /// 与阅读页共用的行高倍数，默认 `WriterTypography.lineHeight`（1.4）。
+    /// 与阅读页共用的行高倍数，默认 `WriterTypography.lineHeight`（1.3）。
     var lineHeight: Double = WriterTypography.lineHeight
     /// 与完成态气泡共用的行距（`WriterTypography.lineSpacing`）。
     var lineSpacing: CGFloat
+    /// 文本前景色；默认 `.label`，思考过程可传 `.secondaryLabel`。
+    var foregroundColor: UIColor = .label
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -68,7 +70,8 @@ struct StreamingTextView: UIViewRepresentable {
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 paragraphSpacing: 0,
-                justified: false
+                justified: false,
+                foregroundColor: foregroundColor
             )
             uiView.textStorage.beginEditing()
             uiView.textStorage.replaceCharacters(in: replaceRange, with: tailAttr)
@@ -101,7 +104,8 @@ struct StreamingTextView: UIViewRepresentable {
                         fontSize: fontSize,
                         lineSpacing: lineSpacing,
                         paragraphSpacing: spacing,
-                        justified: true
+                        justified: true,
+                        foregroundColor: foregroundColor
                     )
                     let sepAttr = WriterTypography.newlineSeparator(
                         fontSize: fontSize,
@@ -121,7 +125,8 @@ struct StreamingTextView: UIViewRepresentable {
                         fontSize: fontSize,
                         lineSpacing: lineSpacing,
                         paragraphSpacing: 0,
-                        justified: false
+                        justified: false,
+                        foregroundColor: foregroundColor
                     ))
                 }
 
@@ -169,7 +174,8 @@ struct StreamingTextView: UIViewRepresentable {
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 paragraphSpacing: spacing,
-                justified: true
+                justified: true,
+                foregroundColor: foregroundColor
             )
             let sepAttr = WriterTypography.newlineSeparator(
                 fontSize: fontSize,
@@ -189,7 +195,8 @@ struct StreamingTextView: UIViewRepresentable {
                 fontSize: fontSize,
                 lineSpacing: lineSpacing,
                 paragraphSpacing: 0,
-                justified: false
+                justified: false,
+                foregroundColor: foregroundColor
             ))
         }
 
