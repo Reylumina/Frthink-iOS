@@ -127,8 +127,7 @@ enum StateSyncWorkflow {
         guard !fullText.isEmpty else {
             throw WorldRunError(message: "当前书稿为空，无法扫描全书伏笔。")
         }
-        let context = try WorldRequestContext.make(store: store)
-        let chunkBudget = max(1_500, min(4_000, context.inputBudget / 3))
+        let chunkBudget = max(1_500, min(4_000, store.settings.promptBudgetTokens / 3))
         let chunks = WorldDigest.chunks(of: fullText, tokenBudget: chunkBudget, overlapTokens: 120)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
