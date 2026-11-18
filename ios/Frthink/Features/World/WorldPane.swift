@@ -138,6 +138,7 @@ struct WorldPane: View {
                     isActionDisabled: busy != nil,
                     onExtract: startEventExtraction,
                     onSyncState: startStateSync,
+                    onScanFullThreads: startFullStateSync,
                     onCheckConsistency: startConsistencyCheck
                 )
             case .rules:
@@ -354,6 +355,19 @@ struct WorldPane: View {
             let excerpt = PromptComposer.codePointTail(self.session.manuscript, limit: 3_000)
             let outcome = try await StateSyncWorkflow.syncExcerpt(
                 excerpt,
+                session: self.session,
+                store: self.store
+            )
+            return outcome.summary
+        }
+    }
+
+    private func startFullStateSync() {
+        startWorldTask(
+            kind: .syncingState,
+            cancelled: "已停止全书伏笔扫描。"
+        ) {
+            let outcome = try await StateSyncWorkflow.syncFullManuscript(
                 session: self.session,
                 store: self.store
             )

@@ -424,18 +424,20 @@ enum StyleDistiller {
 
         var registerBonus = 0.0
         let label = entry.entryName
-        if queryFingerprint.dialogueRatio >= 0.35 && (label.contains("对白") || label.contains("对话")) {
+        if queryFingerprint.dialogueRatio >= 0.55 && (label.contains("对白") || label.contains("对话")) {
             registerBonus += 0.4
         }
         if queryFingerprint.shortSentenceRatio >= 0.45
             && (label.contains("短句") || label.contains("节奏") || label.contains("动作")) {
             registerBonus += 0.4
         }
+        let dialogueExcessPenalty = textFP.dialogueRatio > queryFingerprint.dialogueRatio + 0.25 ? -0.5 : 0.0
         return Double(overlapCount) * 1.5
             + dialogueSim * 0.6
             + shortRatioSim * 0.3
             + sentenceSim * 0.25
             + paragraphSim * 0.15
             + registerBonus
+            + dialogueExcessPenalty
     }
 }

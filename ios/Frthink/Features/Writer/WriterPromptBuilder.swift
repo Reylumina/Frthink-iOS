@@ -133,7 +133,7 @@ enum WriterPromptBuilder {
         ) {
             assembly.appendedBlocks.append(sceneMemory)
         }
-        let fewShotQuery = [currentInstruction, PromptComposer.codePointTail(effective.text, limit: 300)]
+        let fewShotQuery = [currentInstruction, PromptComposer.codePointTail(effective.text, limit: 1_200)]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
@@ -270,8 +270,10 @@ enum WriterPromptBuilder {
            !gap.isEmpty {
             anchors.append("认知差：\(String(gap.prefix(32)))")
         }
-        if let thread = snapshot.world.openThreads.first(where: { $0.status == .open })?
-            .title.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let thread = prioritizedThreads(
+            from: snapshot.world.openThreads,
+            activeCharacters: activeCharacters
+        ).first?.title.trimmingCharacters(in: .whitespacesAndNewlines),
            !thread.isEmpty {
             anchors.append("未收伏笔：\(String(thread.prefix(24)))")
         }
@@ -449,25 +451,11 @@ enum WriterPromptBuilder {
             parts.append("【当前认知信息差】\n" + gaps.joined(separator: "\n"))
         }
 
-        // 3+2 伏笔配额：最多 3 条在场关联伏笔 + 最多 2 条最久未推进的跨线远期伏笔，避免陷入局部舒适区。
-        let openThreads = snapshot.world.openThreads.filter { $0.status == .open }
-        let activeNames = Set(activeCharacters.flatMap { [$0.name] + $0.aliases })
-        let localThreads = openThreads
-            .filter { $0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
-            .sorted { $0.updatedAt > $1.updatedAt }
-        let crossLineThreads = openThreads
-            .filter { !$0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
-            .sorted { $0.updatedAt < $1.updatedAt }
-
-        var selectedThreads = Array(localThreads.prefix(3))
-        let crossLimit = max(2, 5 - selectedThreads.count)
-        selectedThreads.append(contentsOf: crossLineThreads.prefix(crossLimit))
-        if selectedThreads.count < 5 {
-            let pickedIDs = Set(selectedThreads.map(\.id))
-            let remaining = localThreads.filter { !pickedIDs.contains($0.id) }
-            selectedThreads.append(contentsOf: remaining.prefix(5 - selectedThreads.count))
-        }
-        let threadLines = selectedThreads.prefix(5).map(\.renderedLine)
+        let selectedThreads = prioritizedThreads(
+            from: snapshot.world.openThreads,
+            activeCharacters: activeCharacters
+        )
+        let threadLines = selectedThreads.map(\.renderedLine)
         if !threadLines.isEmpty {
             parts.append("【待兑现叙事承诺/伏笔】\n" + threadLines.joined(separator: "\n"))
         }
@@ -498,6 +486,32 @@ enum WriterPromptBuilder {
             title: "场景工作记忆",
             body: parts.joined(separator: "\n\n")
         )
+    }
+
+    /// 3+2 伏笔配额：最多 3 条在场关联伏笔 + 最多 2 条最久未推进的跨线远期伏笔，避免陷入局部舒适区。
+    private static func prioritizedThreads(
+        from threads: [PlotThread],
+        activeCharacters: [CharacterCard]
+    ) -> [PlotThread] {
+        let openThreads = threads.filter { $0.status == .open }
+        guard !openThreads.isEmpty else { return [] }
+        let activeNames = Set(activeCharacters.flatMap { [$0.name] + $0.aliases })
+        let localThreads = openThreads
+            .filter { $0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
+            .sorted { $0.updatedAt > $1.updatedAt }
+        let crossLineThreads = openThreads
+            .filter { !$0.relatedCharacters.contains(where: { activeNames.contains($0) }) }
+            .sorted { $0.updatedAt < $1.updatedAt }
+
+        var selectedThreads = Array(localThreads.prefix(3))
+        let crossLimit = max(2, 5 - selectedThreads.count)
+        selectedThreads.append(contentsOf: crossLineThreads.prefix(crossLimit))
+        if selectedThreads.count < 5 {
+            let pickedIDs = Set(selectedThreads.map(\.id))
+            let remaining = localThreads.filter { !pickedIDs.contains($0.id) }
+            selectedThreads.append(contentsOf: remaining.prefix(5 - selectedThreads.count))
+        }
+        return Array(selectedThreads.prefix(5))
     }
 }
 

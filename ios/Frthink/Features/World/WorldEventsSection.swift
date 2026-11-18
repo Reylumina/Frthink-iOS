@@ -12,6 +12,7 @@ struct WorldEventsSection: View {
     var isActionDisabled: Bool = false
     var onExtract: () -> Void
     var onSyncState: () -> Void = {}
+    var onScanFullThreads: () -> Void = {}
     var onCheckConsistency: () -> Void = {}
 
     @State private var searchText = ""
@@ -82,6 +83,11 @@ struct WorldEventsSection: View {
                 onSyncState()
             } label: {
                 Label("同步末段状态与伏笔", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button {
+                onScanFullThreads()
+            } label: {
+                Label("全书扫描伏笔与状态", systemImage: "doc.text.magnifyingglass")
             }
             Button {
                 onCheckConsistency()

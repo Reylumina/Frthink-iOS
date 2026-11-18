@@ -117,6 +117,46 @@ enum StateSyncWorkflow {
         )
     }
 
+    /// 按时间顺序分段扫描全书正文，补全早期章节埋下的未决伏笔与人物演进状态。
+    static func syncFullManuscript(
+        session: ProjectSession,
+        store: AppStore,
+        onProgress: ((Int, Int) -> Void)? = nil
+    ) async throws -> SyncOutcome {
+        let fullText = session.manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fullText.isEmpty else {
+            throw WorldRunError(message: "当前书稿为空，无法扫描全书伏笔。")
+        }
+        let context = try WorldRequestContext.make(store: store)
+        let chunkBudget = max(1_500, min(4_000, context.inputBudget / 3))
+        let chunks = WorldDigest.chunks(of: fullText, tokenBudget: chunkBudget, overlapTokens: 120)
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !chunks.isEmpty else {
+            throw WorldRunError(message: "未切分出可扫描的正文片段。")
+        }
+
+        var totalUpdated = 0
+        var totalConflicts = 0
+        var totalAdded = 0
+        var totalResolved = 0
+        for (idx, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
+            onProgress?(idx + 1, chunks.count)
+            let step = try await syncExcerpt(chunk, session: session, store: store)
+            totalUpdated += step.updatedCharacters
+            totalConflicts = max(totalConflicts, step.conflictCharacters)
+            totalAdded += step.addedThreads
+            totalResolved += step.resolvedThreads
+        }
+        return SyncOutcome(
+            updatedCharacters: totalUpdated,
+            conflictCharacters: totalConflicts,
+            addedThreads: totalAdded,
+            resolvedThreads: totalResolved
+        )
+    }
+
     static func buildMessages(
         excerpt: String,
         characters: [CharacterCard],
