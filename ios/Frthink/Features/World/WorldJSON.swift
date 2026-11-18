@@ -221,51 +221,47 @@ enum WorldJSON {
 
     /// 解析单段状态同步响应：支持 `character_snapshots` / `new_threads` / `resolved_threads`。
     static func parseStateSync(_ raw: String) throws -> StateSyncPayload {
-        let root = try decodeRoot(raw)
-        guard let object = dictionary(root) else {
+        guard case .object(let object) = try decodeRoot(raw) else {
             throw WorldJSONError.invalidJSON("状态同步结果顶层不是 JSON 对象")
         }
         var payload = StateSyncPayload()
 
-        if let rawSnapshots = field(object, ["character_snapshots", "characterSnapshots"]) as? [Any] {
-            for item in rawSnapshots {
-                guard let obj = dictionary(item) else { continue }
-                let name = string(field(obj, ["name", "character"]))
+        if case .array(let rawSnapshots) = object.firstNonNull(["character_snapshots", "characterSnapshots"]) {
+            for case .object(let obj) in rawSnapshots {
+                let name = obj.firstNonNull(["name", "character"])?.proseString ?? ""
                 guard !name.isEmpty else { continue }
                 let snap = CharacterDynamicSnapshot(
-                    location: string(field(obj, ["location"])),
-                    condition: string(field(obj, ["condition", "status"])),
-                    possessions: strings(field(obj, ["possessions", "items"]))
+                    location: obj.firstNonNull(["location"])?.proseString ?? "",
+                    condition: obj.firstNonNull(["condition", "status"])?.proseString ?? "",
+                    possessions: obj.firstNonNull(["possessions", "items"])?.stringList ?? []
                 )
-                let currentGoal = string(field(obj, ["current_goal", "currentGoal", "goal"]))
-                let knownFacts = strings(field(obj, ["known_facts", "knownFacts"]))
-                let relationshipUpdate = string(field(obj, ["relationship_notes", "relationshipNotes", "relationships"]))
-                let conflictNote = string(field(obj, ["conflict_note", "conflictNote", "conflict"]))
-                if !snap.isEmpty
-                    || !currentGoal.isEmpty
-                    || !knownFacts.isEmpty
-                    || !relationshipUpdate.isEmpty
-                    || !conflictNote.isEmpty {
-                    payload.snapshotUpdates.append(WorldMerge.SnapshotUpdateInput(
-                        characterName: name,
-                        snapshot: snap,
-                        currentGoal: currentGoal,
-                        newKnownFacts: knownFacts,
-                        relationshipUpdate: relationshipUpdate,
-                        conflictNote: conflictNote.isEmpty ? nil : conflictNote
-                    ))
-                }
+                let currentGoal = obj.firstNonNull(["current_goal", "currentGoal", "goal"])?.proseString ?? ""
+                let knownFacts = obj.firstNonNull(["known_facts", "knownFacts"])?.stringList ?? []
+                let relationshipUpdate = obj.firstNonNull(["relationship_notes", "relationshipNotes", "relationships"])?.proseString ?? ""
+                let conflictNote = obj.firstNonNull(["conflict_note", "conflictNote", "conflict"])?.proseString ?? ""
+                let hasUpdate = !snap.isEmpty || !currentGoal.isEmpty || !knownFacts.isEmpty
+                    || !relationshipUpdate.isEmpty || !conflictNote.isEmpty
+                guard hasUpdate else { continue }
+                payload.snapshotUpdates.append(WorldMerge.SnapshotUpdateInput(
+                    characterName: name,
+                    snapshot: snap,
+                    currentGoal: currentGoal,
+                    newKnownFacts: knownFacts,
+                    relationshipUpdate: relationshipUpdate,
+                    conflictNote: conflictNote.isEmpty ? nil : conflictNote
+                ))
             }
         }
 
-        if let rawThreads = field(object, ["new_threads", "newThreads", "open_threads"]) as? [Any] {
-            for item in rawThreads {
-                guard let obj = dictionary(item) else { continue }
-                let title = string(field(obj, ["title", "name"]))
+        if case .array(let rawThreads) = object.firstNonNull(["new_threads", "newThreads", "open_threads"]) {
+            for case .object(let obj) in rawThreads {
+                let title = obj.firstNonNull(["title", "name"])?.proseString ?? ""
                 guard !title.isEmpty else { continue }
-                let obligation = prose(field(obj, ["obligation", "description", "detail"]))
-                let planted = string(field(obj, ["planted_context", "plantedContext"]))
-                let chars = strings(field(obj, ["related_characters", "relatedCharacters", "characters"]))
+                let obligation = WorldProseNormalizer.normalizeProse(
+                    obj.firstNonNull(["obligation", "description", "detail"])?.proseString ?? ""
+                )
+                let planted = obj.firstNonNull(["planted_context", "plantedContext"])?.proseString ?? ""
+                let chars = obj.firstNonNull(["related_characters", "relatedCharacters", "characters"])?.stringList ?? []
                 payload.newThreads.append(PlotThread(
                     title: title,
                     obligation: obligation,
@@ -276,13 +272,8 @@ enum WorldJSON {
             }
         }
 
-        if let rawResolved = field(object, ["resolved_threads", "resolvedThreads"]) {
-            payload.resolvedThreads = strings(rawResolved)
-        }
-        if let rawGaps = field(object, ["epistemic_gaps", "epistemicGaps"]) {
-            payload.epistemicGaps = strings(rawGaps)
-        }
-
+        payload.resolvedThreads = object.firstNonNull(["resolved_threads", "resolvedThreads"])?.stringList ?? []
+        payload.epistemicGaps = object.firstNonNull(["epistemic_gaps", "epistemicGaps"])?.stringList ?? []
         return payload
     }
 
@@ -299,35 +290,42 @@ enum WorldJSON {
 
     static func parseConsistencyIssues(_ raw: String) throws -> [ConsistencyIssue] {
         let root = try decodeRoot(raw)
-        let items: [Any]
-        if let array = root as? [Any] {
+        let items: [JSONValue]
+        switch root {
+        case .array(let array):
             items = array
-        } else if let obj = dictionary(root),
-                  let array = field(obj, ["issues", "contradictions", "results"]) as? [Any] {
+        case .object(let obj):
+            guard case .array(let array) = obj.firstNonNull(["issues", "contradictions", "results"]) else {
+                throw WorldJSONError.invalidJSON("一致性审校结果缺少 issues 数组")
+            }
             items = array
-        } else {
+        default:
             throw WorldJSONError.invalidJSON("一致性审校结果缺少 issues 数组")
         }
 
-        var issues: [ConsistencyIssue] = []
-        for (index, item) in items.enumerated() {
-            guard let obj = dictionary(item) else { continue }
-            let category = string(field(obj, ["category", "type"]))
-            let severity = string(field(obj, ["severity", "level"]))
-            let factQuote = prose(field(obj, ["fact_quote", "factQuote", "fact"]))
-            let contradictionQuote = prose(field(obj, ["contradiction_quote", "contradictionQuote", "quote"]))
-            let reason = prose(field(obj, ["reason", "explanation", "suggestion"]))
-            guard !reason.isEmpty || !contradictionQuote.isEmpty else { continue }
-            issues.append(ConsistencyIssue(
+        return items.enumerated().compactMap { index, item in
+            guard case .object(let obj) = item else { return nil }
+            let category = obj.firstNonNull(["category", "type"])?.proseString ?? ""
+            let severity = obj.firstNonNull(["severity", "level"])?.proseString ?? ""
+            let factQuote = WorldProseNormalizer.normalizeProse(
+                obj.firstNonNull(["fact_quote", "factQuote", "fact"])?.proseString ?? ""
+            )
+            let contradictionQuote = WorldProseNormalizer.normalizeProse(
+                obj.firstNonNull(["contradiction_quote", "contradictionQuote", "quote"])?.proseString ?? ""
+            )
+            let reason = WorldProseNormalizer.normalizeProse(
+                obj.firstNonNull(["reason", "explanation", "suggestion"])?.proseString ?? ""
+            )
+            guard !reason.isEmpty || !contradictionQuote.isEmpty else { return nil }
+            return ConsistencyIssue(
                 id: "issue-\(index)",
                 category: category.isEmpty ? "事实与细节" : category,
                 severity: severity.isEmpty ? "中" : severity,
                 factQuote: factQuote,
                 contradictionQuote: contradictionQuote,
                 reason: reason
-            ))
+            )
         }
-        return issues
     }
 
     // MARK: - 人物卡
