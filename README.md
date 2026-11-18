@@ -18,23 +18,20 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 
 | 项目 | 状态 |
 |---|---|
-| 编译与打包 | 通过。CI 生成未签名 IPA |
-| 运行时自检 | 65 项通过。仓库内 fixture 通过 `Real Archive Verify` 执行真实备份导入、导出、落盘与读回 |
-| 真实存档导入与导出 | 模拟器运行时验证通过。真机文件选择器未验证 |
+| 编译与打包 | 通过。`main` 与 `feat/context-distill` 均由 `iOS Build` 编译并生成未签名 IPA |
+| 运行时自检 | 代码内置 `SelfCheck` 逻辑校验（`main` 为原版基线，`feat/context-distill` 含上下文引擎校验）；当前环境无 macOS 模拟器，运行时未验证 |
 | 联网功能 | 未在真机验证，详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-| 界面与交互 | 按 [docs/DESIGN.md](docs/DESIGN.md) 重写（iOS 26.2 基线）：用户气泡实底填充、书架改名「书架」、书封单色占位、系统 `UndoManager` 撤销重做、浮层玻璃「回到最新」、玻璃输入条。`UI Screenshots` 逐页目检通过；iOS 26 的 ×/✓ 与 iPad 宽度未在真机确认 |
-| 流式渲染 | `Stream Check` 基于 mock SSE 连续执行三次，正文行数与段落断言一致（267 行 / 18 段）。真机联网流式交互体验未验证 |
+| 界面与交互 | 按 [docs/DESIGN.md](docs/DESIGN.md) 实现（iOS 26.2 基线）：用户气泡实底填充、书封单色占位、系统 `UndoManager` 撤销重做、浮层玻璃「回到最新」、玻璃输入条。真机及 iPad 宽度未验证 |
 | 加密存储 | `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 落盘 AES-256-GCM，主密钥在 Keychain，导出保持原版明文 |
-| 正文分页、导入导出与后台生成 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页；支持 UTF-8 / UTF-16 / GB18030 正文导入与纯文本 `.txt` 正文导出，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 世界设定 | `worldbook:setting` 伪词条已移除。旧设定文本迁移为世界书词条，分栏改为概览 |
-| 长期写作规则 | 手动触发整理、P54、历史版本与 `sourceHash` 门控已实现；摘要模型可单独指定，留空跟随当前服务提供方 |
+| 正文分页与导入导出 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页；支持 UTF-8 / UTF-16 / GB18030 正文导入与纯文本 `.txt` 正文导出，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 世界设定与规则 | `worldbook:setting` 伪词条已移除；支持长期写作规则手动整理、P54、历史版本与 `sourceHash` 门控 |
 
 ## 环境要求
 
 | 项目 | 版本 |
 |---|---|
 | 最低系统 | iOS 17.0 |
-| 构建 SDK | iOS 26.2（CI 用 Xcode 26.3 + iPhoneSimulator26.2.sdk；Liquid Glass 通过 `#available(iOS 26.0, *)` 判断，17–25 回落材质） |
+| 构建 SDK | iOS 26.2（CI 使用 Xcode 26.3 与 iPhoneSimulator26.2.sdk；Liquid Glass 通过 `#available(iOS 26.0, *)` 判断，17 至 25 回落材质） |
 | 构建环境 | Xcode 26.3，Swift 5 语言模式 |
 | 第三方依赖 | 无 |
 
@@ -47,7 +44,8 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | DeepSeek | [Simple Icons](https://simpleicons.org/?q=deepseek)（CC0），填充官方蓝 `#4D6BFE` |
 | OpenRouter | [官方品牌页](https://openrouter.ai/brand) glyph，浅色 Grape / 深色 Volt |
 | Anthropic (Claude) | 内置 Claude 官方品牌 SVG（`ProviderAnthropic`） |
-| OpenAI 兼容 | 内置 16 家厂商 SVG（DeepSeek、Kimi、Zai/GLM、混元、Qwen、豆包、MiniMax、OpenCode、Command Code、OpenDesign、Ollama、OpenAI、Claude、Gemini、Grok、Mistral），按服务地址自动匹配并默认回落 OpenAI |
+| Gemini | 内置高清 PNG（`@2x` / `@3x`） |
+| OpenAI 兼容 | 内置厂商 SVG（DeepSeek、Kimi、Zai/GLM、混元、Qwen、豆包、MiniMax、OpenCode、Command Code、OpenDesign、Ollama、OpenAI、Claude、Gemini、Grok、Mistral），按服务地址自动匹配并默认回落 OpenAI |
 
 品牌标只用于标识对应服务商，不拉伸、不改色。商标归各自所有者。
 
@@ -75,13 +73,13 @@ ios/
       Archive*.swift             .frthink 存档模型、快照导出与恢复导入、RFC1952 gzip
       Models/                  Project、WorldBook、CharacterCard、EventCard、Universe
       Store/                   文件持久化、正文编解码（TextFileCodec）、Keychain、@Observable 状态
-      LLM/                     OpenAI 兼容与 Anthropic 客户端、SSE 解析、token 估算
+      LLM/                     OpenAI 兼容、Anthropic 与 Gemini 原生客户端、LLMHTTPTransport、ThinkTagStreamSplitter、token 估算
       Prompts/                 提示词与拼装逻辑
       Design/                  主题、通用容器与表单组件、TextKit 两端对齐排版
     Features/
       Library/                 书架与回收站
-      Writer/                  创作、码字机、正文编辑器
-      World/                   世界、世界书、人物卡、事件卡、模板与规则
+      Writer/                  创作、码字机（WriterPane+Actions）、正文编辑器
+      World/                   世界、世界书、人物卡、事件卡、WorldJSON / WorldProseNormalizer、模板与规则
       Translation/             阅读、章节目录、搜索、书签、原文与译文对照
       Universe/                跨项目共享设定
       Settings/                供应方、密钥、提示词、语料与存档管理
@@ -120,7 +118,8 @@ script/            本地校验脚本与一次性迁移脚本
 | DeepSeek | `https://api.deepseek.com` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Anthropic | `https://api.anthropic.com` |
-| OpenAI 兼容 | 由用户填写，提供 OpenCode Go 预设 |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta` |
+| OpenAI 兼容 | 由用户填写，提供 OpenCode Go / Ollama Cloud 等预设 |
 
 应用不内置凭据，不上报数据。
 
