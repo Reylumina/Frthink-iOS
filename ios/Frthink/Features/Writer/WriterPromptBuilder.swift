@@ -119,7 +119,7 @@ enum WriterPromptBuilder {
         assembly.plotOutline = dynamicSelection.renderedEvents
         let fewShot = StyleDistiller.fewShotDialoguePairs(
             from: assembly.corpus,
-            maxPairs: 2,
+            maxPairs: 5,
             tokenBudget: max(1, snapshot.inputBudget / 4)
         )
         if !fewShot.injectedEntryIDs.isEmpty {
@@ -134,35 +134,40 @@ enum WriterPromptBuilder {
         }
         try checkpoint()
 
-        let prefixMessages = PromptComposer.writingPrefixMessages(assembly: assembly)
+        let prefixMessages = PromptComposer.writingPrefixMessages(
+            assembly: assembly,
+            fewShotMessages: fewShot.messages
+        )
         let reasoningPolicy = snapshot.settings.reasoningContextPolicy
         let tailAnchor = styleTailAnchor(snapshot: snapshot)
         let history: [LLMMessage]
         let built: [LLMMessage]
         switch snapshot.action {
         case .send(let instruction):
-            history = fewShot.messages + PromptComposer.llmMessages(from: snapshot.messages, reasoningPolicy: reasoningPolicy)
+            history = PromptComposer.llmMessages(from: snapshot.messages, reasoningPolicy: reasoningPolicy)
             let effectiveInstruction = tailAnchor.map { "\($0)\n\n\(instruction)" } ?? instruction
             built = PromptComposer.writingMessages(
                 assembly: assembly,
                 history: history,
-                userInstruction: effectiveInstruction
+                userInstruction: effectiveInstruction,
+                fewShotMessages: fewShot.messages
             )
         case .continueWriting:
             // 若最后一条就是助手消息，将其从历史中剥离并作为续接片段，避免同一内容重复发送两遍。
             if let last = snapshot.messages.last, last.role == .assistant {
                 let fragment = last.content
-                history = fewShot.messages + PromptComposer.llmMessages(
+                history = PromptComposer.llmMessages(
                     from: snapshot.messages.dropLast(),
                     reasoningPolicy: reasoningPolicy
                 )
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: history,
-                    fragment: fragment
+                    fragment: fragment,
+                    fewShotMessages: fewShot.messages
                 )
             } else {
-                history = fewShot.messages + PromptComposer.llmMessages(
+                history = PromptComposer.llmMessages(
                     from: snapshot.messages,
                     reasoningPolicy: reasoningPolicy
                 )
@@ -170,7 +175,8 @@ enum WriterPromptBuilder {
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
                     history: history,
-                    fragment: lastAssistant
+                    fragment: lastAssistant,
+                    fewShotMessages: fewShot.messages
                 )
             }
         case .regenerate(let index):
@@ -185,14 +191,16 @@ enum WriterPromptBuilder {
                 regenHistory.removeLast()
                 built = PromptComposer.continueFragmentMessages(
                     assembly: assembly,
-                    history: fewShot.messages + regenHistory,
-                    fragment: last.content
+                    history: regenHistory,
+                    fragment: last.content,
+                    fewShotMessages: fewShot.messages
                 )
             } else {
                 built = PromptComposer.writingMessages(
                     assembly: assembly,
-                    history: fewShot.messages + regenHistory,
-                    userInstruction: nil
+                    history: regenHistory,
+                    userInstruction: nil,
+                    fewShotMessages: fewShot.messages
                 )
             }
         }
@@ -200,7 +208,7 @@ enum WriterPromptBuilder {
 
         let trimmed = try trimHistory(
             built,
-            protectedPrefixCount: prefixMessages.count + fewShot.messages.count,
+            protectedPrefixCount: prefixMessages.count,
             budget: snapshot.inputBudget,
             checkpoint: checkpoint
         )

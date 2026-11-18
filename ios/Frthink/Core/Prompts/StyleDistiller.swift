@@ -73,108 +73,116 @@ enum StyleDistiller {
         )
     }
 
-    /// 从全书按职能互补抽取最多 3 段原著节选：
-    /// 第 1 段（800 token）：纯叙事/场景/心理描写；
-    /// 第 2 段（800 token）：对白与动作穿插互动；
-    /// 第 3 段（1200 token）：后半程综合推进段。
-    static func selectExemplarPassages(from text: String, maxCount: Int = 3) -> [String] {
+    /// 基于「5 维文体风格向量 + MMR 最大边际相关性」从全书抽取最多 5 段多样化原著节选（每段约 400 token）。
+    /// 先选最贴近全书风格质心的代表段，再依次选出既贴合本书基调又与已选样本在句法/节奏/对白上尽量正交的段落。
+    static func selectExemplarPassages(from text: String, maxCount: Int = 5) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
         func isQualified(_ chunk: String) -> Bool {
-            guard chunk.count >= 200 else { return false }
+            guard chunk.count >= 180 else { return false }
             let endCount = chunk.unicodeScalars.filter { sentenceEnds.contains($0) }.count
             return endCount >= 3
         }
 
-        let chunks800 = WorldDigest.chunks(of: text, tokenBudget: 800, overlapTokens: 0)
+        let chunks = WorldDigest.chunks(of: text, tokenBudget: 400, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter(isQualified)
-        guard !chunks800.isEmpty else { return [] }
-        if chunks800.count == 1 || maxCount <= 1 {
-            return Array(chunks800.prefix(maxCount))
-        }
+        guard !chunks.isEmpty else { return [] }
+        guard chunks.count > maxCount else { return Array(chunks.prefix(maxCount)) }
 
-        func dialogueStats(_ chunk: String) -> (quotes: Int, dialogueShare: Double, puncts: Int) {
+        func styleVector(_ chunk: String) -> [Double] {
+            let totalChars = max(1, chunk.count)
             var inQuote = false
             var dialogueChars = 0
-            var quotes = 0
-            var puncts = 0
+            var clausePuncts = 0
             for ch in chunk {
                 if ch == "“" || ch == "「" {
                     inQuote = true
-                    quotes += 1
                 } else if ch == "”" || ch == "」" {
                     inQuote = false
                 } else if inQuote {
                     dialogueChars += 1
                 }
-                if "。！？，；".contains(ch) {
-                    puncts += 1
+                if "，；、".contains(ch) {
+                    clausePuncts += 1
                 }
             }
-            let share = Double(dialogueChars) / Double(max(1, chunk.count))
-            return (quotes, share, puncts)
+
+            let paragraphs = chunk.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let sentences = chunk.components(separatedBy: sentenceEnds)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            let sentLengths = sentences.map { Double($0.count) }
+            let meanLen = sentLengths.isEmpty
+                ? Double(totalChars)
+                : sentLengths.reduce(0, +) / Double(sentLengths.count)
+            let variance = sentLengths.isEmpty
+                ? 0.0
+                : sentLengths.reduce(0.0) { $0 + ($1 - meanLen) * ($1 - meanLen) } / Double(sentLengths.count)
+            let stdDev = variance.squareRoot()
+
+            let vMeanLen = min(1.0, meanLen / 45.0)
+            let vBurstiness = min(1.0, stdDev / 20.0)
+            let vCadence = min(1.0, (Double(clausePuncts) / Double(totalChars)) / 0.15)
+            let vParaDensity = min(1.0, (Double(paragraphs.count) / (Double(totalChars) / 100.0)) / 2.5)
+            let vDialogue = min(1.0, Double(dialogueChars) / Double(totalChars))
+            return [vMeanLen, vBurstiness, vCadence, vParaDensity, vDialogue]
         }
 
-        // 第 1 段：优先纯叙事/场景/心理段（低对白占比 + 高描写密度）。
-        func narrativeScore(_ chunk: String) -> Double {
-            let st = dialogueStats(chunk)
-            let lowDialogueBonus = st.quotes == 0 ? 20.0 : (st.dialogueShare < 0.15 ? 10.0 : -st.dialogueShare * 25.0)
-            let lenFactor = min(1.0, Double(chunk.count) / 450.0)
-            return (Double(st.puncts) + lowDialogueBonus) * lenFactor
-        }
-
-        // 第 2 段：优先对白与动作叙述均衡穿插的段落（避免纯水台词）。
-        func dialogueActionScore(_ chunk: String) -> Double {
-            let st = dialogueStats(chunk)
-            let balancedBonus: Double
-            if st.quotes >= 2 && st.dialogueShare >= 0.15 && st.dialogueShare <= 0.65 {
-                balancedBonus = 18.0
-            } else if st.quotes >= 1 {
-                balancedBonus = 6.0
-            } else {
-                balancedBonus = 0.0
+        func distance(_ a: [Double], _ b: [Double]) -> Double {
+            var sum = 0.0
+            for i in 0..<min(a.count, b.count) {
+                let d = a[i] - b[i]
+                sum += d * d
             }
-            let lenFactor = min(1.0, Double(chunk.count) / 450.0)
-            return (Double(st.puncts) + balancedBonus) * lenFactor
+            return (sum / Double(max(1, a.count))).squareRoot()
         }
 
-        var picked: [String] = []
-        var usedIndices: Set<Int> = []
+        let vectors = chunks.map(styleVector)
+        let dims = 5
+        var centroid = Array(repeating: 0.0, count: dims)
+        for v in vectors {
+            for i in 0..<dims { centroid[i] += v[i] }
+        }
+        for i in 0..<dims { centroid[i] /= Double(vectors.count) }
 
-        if let firstIdx = chunks800.indices.max(by: { narrativeScore(chunks800[$0]) < narrativeScore(chunks800[$1]) }) {
-            picked.append(chunks800[firstIdx])
-            usedIndices.insert(firstIdx)
+        var selectedIndices: [Int] = []
+        var used: Set<Int> = []
+
+        // 第 1 段：最贴近全书风格质心的饱满代表段，锚定主基调。
+        if let first = chunks.indices.max(by: { a, b in
+            let sa = (1.0 - distance(vectors[a], centroid)) * min(1.0, Double(chunks[a].count) / 260.0)
+            let sb = (1.0 - distance(vectors[b], centroid)) * min(1.0, Double(chunks[b].count) / 260.0)
+            return sa < sb
+        }) {
+            selectedIndices.append(first)
+            used.insert(first)
         }
 
-        if maxCount >= 2 {
-            let remaining = chunks800.indices.filter { !usedIndices.contains($0) }
-            if let secondIdx = remaining.max(by: { dialogueActionScore(chunks800[$0]) < dialogueActionScore(chunks800[$1]) }) {
-                picked.append(chunks800[secondIdx])
-                usedIndices.insert(secondIdx)
-            }
-        }
-
-        // 第 3 段：放宽至 1200 token，从后半程选取综合推进段（避免与前两段重复）。
-        if maxCount >= 3 {
-            let ns = text as NSString
-            let tailStart = ns.length / 2
-            let tailSlice = tailStart > 0 ? ns.substring(from: tailStart) : text
-            let chunks1200 = WorldDigest.chunks(of: tailSlice, tokenBudget: 1200, overlapTokens: 0)
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { chunk in
-                    isQualified(chunk) && !picked.contains(where: { chunk.contains($0) || $0.contains(chunk) })
+        // 第 2..maxCount 段：MMR（兼顾贴合主基调 + 与已选样本在 5 维向量上最大差异 + 位置分散）。
+        while selectedIndices.count < maxCount {
+            var bestIdx: Int?
+            var bestScore = -Double.infinity
+            for idx in chunks.indices where !used.contains(idx) {
+                let relevance = 1.0 - distance(vectors[idx], centroid)
+                let minStyleGap = selectedIndices.map { distance(vectors[idx], vectors[$0]) }.min() ?? 0.0
+                let minPosGap = selectedIndices.map { abs(idx - $0) }.min() ?? chunks.count
+                let posBonus = minPosGap >= 2 ? 0.05 : -0.15
+                let lenFactor = min(1.0, Double(chunks[idx].count) / 240.0)
+                let score = (0.35 * relevance + 0.65 * minStyleGap + posBonus) * lenFactor
+                if score > bestScore {
+                    bestScore = score
+                    bestIdx = idx
                 }
-            if let third = chunks1200.max(by: { dialogueActionScore($0) < dialogueActionScore($1) }) {
-                picked.append(third)
-            } else {
-                let remaining = chunks800.indices.filter { !usedIndices.contains($0) }
-                if let fallbackThirdIdx = remaining.last {
-                    picked.append(chunks800[fallbackThirdIdx])
-                }
             }
+            guard let chosen = bestIdx else { break }
+            selectedIndices.append(chosen)
+            used.insert(chosen)
         }
 
-        return Array(picked.prefix(maxCount))
+        return selectedIndices.map { chunks[$0] }
     }
 
     /// 构造深度蒸馏请求（总览全书前中后样章，按模型输入预算均衡采样）。
@@ -326,7 +334,7 @@ enum StyleDistiller {
     /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造固定前置对话示范（明确标注仅参考笔法，不带偏当前正文剧情）。
     static func fewShotDialoguePairs(
         from corpus: [PromptAssembly.Corpus],
-        maxPairs: Int = 2,
+        maxPairs: Int = 5,
         tokenBudget: Int? = nil
     ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
         guard maxPairs > 0 else { return ([], []) }

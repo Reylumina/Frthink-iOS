@@ -2354,6 +2354,26 @@ enum SelfCheck {
                 bookBAssembly.corpus.count == 1 && bookBAssembly.corpus[0].entryName == "通用",
                 "切换书时应仅注入全局语料或本书绑定语料，不得串入他书节选"
             )
+            let orderAssembly = PromptAssembly.from(
+                world: WorldBook(),
+                manuscript: "这是当前的权威正文末尾。",
+                assistantSupplement: "",
+                settings: AppSettings(),
+                projectID: "order-test",
+                enabledUniverseEntryIDs: []
+            )
+            let ordered = PromptComposer.writingMessages(
+                assembly: orderAssembly,
+                history: [.user("历史1"), .assistant("回复1")],
+                userInstruction: "继续",
+                fewShotMessages: fewShot.messages
+            )
+            let fewShotIdx = ordered.firstIndex(where: { $0.content.contains("雨夜长街对峙") }) ?? Int.max
+            let bodyIdx = ordered.firstIndex(where: { $0.content.contains("这是当前的权威正文末尾") }) ?? -1
+            try expect(
+                fewShotIdx < bodyIdx,
+                "Few-Shot 示范轮次应位于权威正文之前，避免紧贴末尾干扰续写衔接"
+            )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
 

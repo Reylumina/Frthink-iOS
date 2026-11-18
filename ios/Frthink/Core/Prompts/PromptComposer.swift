@@ -181,8 +181,12 @@ enum PromptComposer {
         blocks.map(\.rendered).filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
-    /// 主写作请求不可裁剪的前缀消息：system（块 1–10 + 非用户侧追加块）→ 只读日志/正文 user 块（块 11–12 + 锚点）。
-    static func writingPrefixMessages(assembly: PromptAssembly) -> [LLMMessage] {
+    /// 主写作请求不可裁剪的前缀消息：system（块 1–10 + 非用户侧追加块）→ Few-Shot 示范轮次 → 只读日志/正文 user 块（块 11–12 + 锚点）。
+    /// 将 Few-Shot 放在权威正文之前，既避免与权威正文发生 `user + user` 合并，也保证模型末尾紧贴当前正文而非旧示范。
+    static func writingPrefixMessages(
+        assembly: PromptAssembly,
+        fewShotMessages: [LLMMessage] = []
+    ) -> [LLMMessage] {
         var blocks = writingBlocks(assembly)
         // 13 · 调用方追加的块
         blocks.append(contentsOf: assembly.appendedBlocks)
@@ -201,6 +205,9 @@ enum PromptComposer {
         var prefix: [LLMMessage] = []
         let system = systemPrompt(from: systemBlocks)
         if !system.isEmpty { prefix.append(.system(system)) }
+        if !fewShotMessages.isEmpty {
+            prefix.append(contentsOf: fewShotMessages)
+        }
         for block in contextUserBlocks {
             let rendered = block.rendered
             if !rendered.isEmpty { prefix.append(.user(rendered)) }
@@ -208,13 +215,14 @@ enum PromptComposer {
         return prefix
     }
 
-    /// 主写作请求的 messages：前缀块（system + 只读日志/正文/锚点）→ 历史消息 → 本轮 user 指令。
+    /// 主写作请求的 messages：前缀块（system + Few-Shot 示范 + 只读日志/正文/锚点）→ 历史消息 → 本轮 user 指令。
     static func writingMessages(
         assembly: PromptAssembly,
         history: [LLMMessage],
-        userInstruction: String?
+        userInstruction: String?,
+        fewShotMessages: [LLMMessage] = []
     ) -> [LLMMessage] {
-        var messages = writingPrefixMessages(assembly: assembly)
+        var messages = writingPrefixMessages(assembly: assembly, fewShotMessages: fewShotMessages)
         messages.append(contentsOf: history)
         // 本轮用户指令（P15 这类「用户输入」角色）永远在最后。
         if let userInstruction, !userInstruction.isEmpty {
@@ -272,16 +280,23 @@ enum PromptComposer {
     static func continueFragmentMessages(
         assembly: PromptAssembly,
         history: [LLMMessage],
-        fragment: String
+        fragment: String,
+        fewShotMessages: [LLMMessage] = []
     ) -> [LLMMessage] {
         guard !fragment.isEmpty else {
             return writingMessages(
                 assembly: assembly,
                 history: history,
-                userInstruction: PromptLibrary.continueLatestBubbleInstruction
+                userInstruction: PromptLibrary.continueLatestBubbleInstruction,
+                fewShotMessages: fewShotMessages
             )
         }
-        var messages = writingMessages(assembly: assembly, history: history, userInstruction: nil)
+        var messages = writingMessages(
+            assembly: assembly,
+            history: history,
+            userInstruction: nil,
+            fewShotMessages: fewShotMessages
+        )
         messages.append(.assistant(codePointTail(fragment, limit: 2000)))
         messages.append(.user(PromptLibrary.continueLastFragmentInstruction))
         return messages
