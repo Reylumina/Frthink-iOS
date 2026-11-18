@@ -33,6 +33,11 @@ struct WorldCharactersSection: View {
         case all
         case ungrouped
         case group(String)
+
+        var groupID: String? {
+            if case .group(let id) = self { return id }
+            return nil
+        }
     }
 
     private struct Route: Identifiable {
@@ -67,10 +72,10 @@ struct WorldCharactersSection: View {
         }
         .onChange(of: session.payload.world.characterGroups) { _, groups in
             // 若当前筛选分组被删除，自动重置为「全部分组」。
-            guard groupFilter != "__all__", groupFilter != "__ungrouped__",
-                  !groups.contains(where: { $0.id == groupFilter })
-            else { return }
-            groupFilter = "__all__"
+            if let selectedID = groupFilter.groupID,
+               !groups.contains(where: { $0.id == selectedID }) {
+                groupFilter = .all
+            }
         }
     }
 
@@ -359,10 +364,7 @@ struct WorldCharactersSection: View {
     }
 
     private func addCard() {
-        let initialGroupID: String? = (groupFilter == "__all__" || groupFilter == "__ungrouped__")
-            ? nil
-            : groupFilter
-        let card = CharacterCard(name: "", groupId: initialGroupID)
+        let card = CharacterCard(name: "", groupId: groupFilter.groupID)
         session.payload.world.characters.append(card)
         session.scheduleSave()
         route = Route(id: card.id)
