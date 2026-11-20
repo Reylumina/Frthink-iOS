@@ -43,7 +43,6 @@ struct WriterPane: View {
     @State private var expandedReasoningIDs: Set<String> = []
     @State private var budgetPresented = false
     @State private var activeSheet: WriterSheet?
-    @State private var isImportingBody = false
     @State var isExportingBody = false
     @State var bodyExportDocument = PlainTextFileDocument()
     @State var bodyExportFilename = "正文.txt"
@@ -220,16 +219,6 @@ struct WriterPane: View {
             .sheet(item: $activeSheet, onDismiss: sheetDidDismiss) { sheet in
                 sheetContent(for: sheet)
             }
-            .background {
-                Color.clear
-                    .sheet(isPresented: $isImportingBody) {
-                        DocumentPickerView(allowedContentTypes: [.plainText, .text]) { result in
-                            isImportingBody = false
-                            handleBodyImport(result)
-                        }
-                        .ignoresSafeArea()
-                    }
-            }
             .fileExporter(
                 isPresented: $isExportingBody,
                 document: bodyExportDocument,
@@ -392,7 +381,9 @@ struct WriterPane: View {
             // 延迟调用文件选择器，确保当前菜单收起转场完毕。
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(350))
-                isImportingBody = true
+                DocumentPickerPresenter.present(allowedContentTypes: [.plainText, .text]) { result in
+                    handleBodyImport(result)
+                }
             }
         } label: {
             Label("导入正文…", systemImage: "square.and.arrow.down")

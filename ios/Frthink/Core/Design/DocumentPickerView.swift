@@ -1,35 +1,65 @@
-// 共享文件导入选择器：借助 UIKit `asCopy: true` 让系统直接拷贝至沙盒临时目录，
-// 规避 SwiftUI `.fileImporter` 的安全作用域权限过期与多修饰符呈现冲突。
+// 共享文件导入选择器：直接由当前顶层 UIViewController 弹出原生 UIDocumentPickerViewController(asCopy: true)，
+// 避免 SwiftUI .sheet 双层包裹远程视图控制器造成白屏，并在选中后立即拷贝至沙盒临时目录。
 
-import SwiftUI
+import ObjectiveC
 import UIKit
 import UniformTypeIdentifiers
 
-struct DocumentPickerView: UIViewControllerRepresentable {
-    let allowedContentTypes: [UTType]
-    let onComplete: (Result<URL, Error>) -> Void
+@MainActor
+enum DocumentPickerPresenter {
+    private static var activeDelegateKey: UInt8 = 0
 
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+    static func present(
+        allowedContentTypes: [UTType],
+        onComplete: @escaping @MainActor (Result<URL, Error>) -> Void
+    ) {
+        guard let presenter = topViewController() else {
+            onComplete(.failure(NSError(
+                domain: "Frthink.DocumentPicker",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "无法获取当前界面控制器，请重试。"]
+            )))
+            return
+        }
+
         let picker = UIDocumentPickerViewController(
             forOpeningContentTypes: allowedContentTypes,
             asCopy: true
         )
-        picker.delegate = context.coordinator
+        let coordinator = Coordinator { result in
+            objc_setAssociatedObject(picker, &activeDelegateKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            Task { @MainActor in
+                // 等待 UIKit 文档选择器完成收起转场，再触发后续导航或弹窗。
+                try? await Task.sleep(for: .milliseconds(150))
+                onComplete(result)
+            }
+        }
+        objc_setAssociatedObject(picker, &activeDelegateKey, coordinator, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        picker.delegate = coordinator
         picker.allowsMultipleSelection = false
-        return picker
+        presenter.present(picker, animated: true)
     }
 
-    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onComplete: onComplete)
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        let window = scenes
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows.first(where: \.isKeyWindow)
+            ?? scenes.flatMap(\.windows).first(where: \.isKeyWindow)
+            ?? scenes.flatMap(\.windows).first
+        var current = window?.rootViewController
+        while let presented = current?.presentedViewController {
+            current = presented
+        }
+        return current
     }
 
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onComplete: (Result<URL, Error>) -> Void
+    private final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let finish: (Result<URL, Error>) -> Void
 
-        init(onComplete: @escaping (Result<URL, Error>) -> Void) {
-            self.onComplete = onComplete
+        init(finish: @escaping (Result<URL, Error>) -> Void) {
+            self.finish = finish
         }
 
         func documentPicker(
@@ -37,7 +67,7 @@ struct DocumentPickerView: UIViewControllerRepresentable {
             didPickDocumentsAt urls: [URL]
         ) {
             guard let sourceURL = urls.first else {
-                onComplete(.failure(CocoaError(.userCancelled)))
+                finish(.failure(CocoaError(.userCancelled)))
                 return
             }
             do {
@@ -47,14 +77,14 @@ struct DocumentPickerView: UIViewControllerRepresentable {
                     try FileManager.default.removeItem(at: stagedURL)
                 }
                 try FileManager.default.copyItem(at: sourceURL, to: stagedURL)
-                onComplete(.success(stagedURL))
+                finish(.success(stagedURL))
             } catch {
-                onComplete(.failure(error))
+                finish(.failure(error))
             }
         }
 
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onComplete(.failure(CocoaError(.userCancelled)))
+            finish(.failure(CocoaError(.userCancelled)))
         }
     }
 }

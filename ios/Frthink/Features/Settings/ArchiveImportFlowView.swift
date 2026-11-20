@@ -6,8 +6,14 @@ import SwiftUI
 
 /// 导入流程页：进度 / 覆盖确认 / 结果。由「存档与备份」页推进导航栈。
 struct ArchiveImportFlowView: View {
-    @Bindable var controller: ArchiveImportController
+    let request: ArchiveImportRequest
+    @State private var controller: ArchiveImportController
     @Environment(\.dismiss) private var dismiss
+
+    init(store: AppStore, request: ArchiveImportRequest) {
+        self.request = request
+        _controller = State(initialValue: ArchiveImportController(store: store))
+    }
 
     var body: some View {
         Group {
@@ -23,6 +29,9 @@ struct ArchiveImportFlowView: View {
         .navigationTitle("导入存档")
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(controller.stage != nil)
+        .task(id: request.id) {
+            controller.begin(request)
+        }
         .toolbar {
             if controller.stage != nil {
                 ToolbarItem(placement: .cancellationAction) {
