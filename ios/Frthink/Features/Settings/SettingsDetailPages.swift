@@ -41,20 +41,39 @@ struct SettingsArchivePage: View {
                 }
             )
         }
-        .fileImporter(
-            isPresented: $isPickingImportFile,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false
-        ) { result in
-            let kind = activeImportKind
-            switch result {
-            case .failure(let error):
-                guard !settingsIsUserCancelled(error) else { return }
-                store.errorMessage = "读取存档失败：\(error.localizedDescription)"
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                beginImport(kind, url: url)
-            }
+        .background {
+            // fileImporter 与 fileExporter 拆挂在独立宿主视图，避免同一视图节点上呈现器冲突。
+            Color.clear
+                .fileImporter(
+                    isPresented: $isPickingImportFile,
+                    allowedContentTypes: [.item],
+                    allowsMultipleSelection: false
+                ) { result in
+                    let kind = activeImportKind
+                    switch result {
+                    case .failure(let error):
+                        guard !settingsIsUserCancelled(error) else { return }
+                        store.errorMessage = "读取存档失败：\(error.localizedDescription)"
+                    case .success(let urls):
+                        guard let url = urls.first else { return }
+                        // 让出文档选择器收起转场，避免与 NavigationStack 推入竞争导致页面被丢弃。
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(150))
+                            beginImport(kind, url: url)
+                        }
+                    }
+                }
+        }
+        .background {
+            Color.clear
+                .fileExporter(
+                    isPresented: $isExporting,
+                    document: exportDocument,
+                    contentType: .data,
+                    defaultFilename: exportFilename
+                ) { result in
+                    handleExportResult(result)
+                }
         }
         .navigationTitle("存档与备份")
         .navigationBarTitleDisplayMode(.inline)
@@ -66,14 +85,6 @@ struct SettingsArchivePage: View {
                         importer.begin(request)
                     }
             }
-        }
-        .fileExporter(
-            isPresented: $isExporting,
-            document: exportDocument,
-            contentType: .data,
-            defaultFilename: exportFilename
-        ) { result in
-            handleExportResult(result)
         }
     }
 
