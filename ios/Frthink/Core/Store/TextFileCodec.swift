@@ -25,7 +25,7 @@ enum SecurityScopedFileReader {
         var readResult: Result<Data, Error>?
         NSFileCoordinator().coordinate(
             readingItemAt: url,
-            options: [],
+            options: .withoutChanges,
             error: &coordinationError
         ) { readableURL in
             readResult = Result {
@@ -34,6 +34,9 @@ enum SecurityScopedFileReader {
         }
         if let readResult {
             return try readResult.get()
+        }
+        if let direct = try? readBounded(url, maxBytes: maxBytes, tooLargeError: tooLargeError) {
+            return direct
         }
         if let coordinationError {
             throw coordinationError

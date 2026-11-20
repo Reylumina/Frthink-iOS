@@ -25,7 +25,6 @@ struct TranslationPane: View {
     @State private var runTask: Task<Void, Never>?
     /// 批量任务执行标识：中断并立即重启新批次时，防止旧任务回调覆盖新状态。
     @State private var runID = UUID()
-    @State private var importing = false
     /// 翻译进行中触发关闭需二次确认，防止误触中断未完成任务。
     @State private var confirmingStop = false
     /// 原文编辑区域基准高度，适配动态字体。
@@ -63,13 +62,6 @@ struct TranslationPane: View {
         .onChange(of: session.sourceText) { _, _ in
             session.scheduleSourceSave()
         }
-        .fileImporter(
-            isPresented: $importing,
-            allowedContentTypes: [.plainText, .text, .utf8PlainText],
-            allowsMultipleSelection: false
-        ) { result in
-            handleImport(result)
-        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 SheetCloseButton(title: "关闭") { requestClose() }
@@ -95,7 +87,11 @@ struct TranslationPane: View {
                 Text("原文")
                     .font(Font.headline)
                 Spacer(minLength: 0)
-                Button("导入文件") { importing = true }
+                Button("导入文件") {
+                    DocumentPickerPresenter.present(allowedContentTypes: [.plainText, .text, .utf8PlainText]) { result in
+                        handleImport(result)
+                    }
+                }
                     .font(Font.footnote)
                     .buttonStyle(.borderless)
             }
@@ -296,12 +292,12 @@ struct TranslationPane: View {
     // MARK: - 导入
 
     @MainActor
-    private func handleImport(_ result: Result<[URL], Error>) {
+    private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .failure(let error):
+            guard !settingsIsUserCancelled(error) else { return }
             store.errorMessage = "导入失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
+        case .success(let url):
             Task {
                 do {
                     let text = try await Self.readTextFile(url)

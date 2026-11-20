@@ -9,10 +9,7 @@ import UniformTypeIdentifiers
 struct SettingsArchivePage: View {
     let store: AppStore
 
-    @State private var isPickingImportFile = false
-    @State private var activeImportKind: ArchiveImportKind = .project
     @State private var pendingImport: ArchiveImportRequest?
-    @State private var importer: ArchiveImportController?
     @State private var exportDocument: ArchiveFileDocument?
     @State private var exportFilename = "frthink书项目.frthink"
     @State private var exportToast = ""
@@ -22,50 +19,18 @@ struct SettingsArchivePage: View {
         Form {
             SettingsProjectArchiveSection(
                 store: store,
-                onPickFile: {
-                    activeImportKind = .project
-                    isPickingImportFile = true
-                },
+                onPickFile: { pickArchive(.project) },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "书项目存档已导出")
                 }
             )
             SettingsFullArchiveSection(
                 store: store,
-                onPickFile: {
-                    activeImportKind = .full
-                    isPickingImportFile = true
-                },
+                onPickFile: { pickArchive(.full) },
                 onExportReady: { data, filename in
                     presentExport(data: data, filename: filename, toast: "全量存档已导出")
                 }
             )
-        }
-        .fileImporter(
-            isPresented: $isPickingImportFile,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false
-        ) { result in
-            let kind = activeImportKind
-            switch result {
-            case .failure(let error):
-                guard !settingsIsUserCancelled(error) else { return }
-                store.errorMessage = "读取存档失败：\(error.localizedDescription)"
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                beginImport(kind, url: url)
-            }
-        }
-        .navigationTitle("存档与备份")
-        .navigationBarTitleDisplayMode(.inline)
-        .settingsFormColumn()
-        .navigationDestination(item: $pendingImport) { request in
-            if let importer {
-                ArchiveImportFlowView(controller: importer)
-                    .task(id: request.id) {
-                        importer.begin(request)
-                    }
-            }
         }
         .fileExporter(
             isPresented: $isExporting,
@@ -75,12 +40,25 @@ struct SettingsArchivePage: View {
         ) { result in
             handleExportResult(result)
         }
+        .navigationTitle("存档与备份")
+        .navigationBarTitleDisplayMode(.inline)
+        .settingsFormColumn()
+        .navigationDestination(item: $pendingImport) { request in
+            ArchiveImportFlowView(store: store, request: request)
+        }
     }
 
     @MainActor
-    private func beginImport(_ kind: ArchiveImportKind, url: URL) {
-        importer = ArchiveImportController(store: store)
-        pendingImport = ArchiveImportRequest(kind: kind, url: url)
+    private func pickArchive(_ kind: ArchiveImportKind) {
+        DocumentPickerPresenter.present(allowedContentTypes: [.item]) { result in
+            switch result {
+            case .failure(let error):
+                guard !settingsIsUserCancelled(error) else { return }
+                store.errorMessage = "读取存档失败：\(error.localizedDescription)"
+            case .success(let localURL):
+                pendingImport = ArchiveImportRequest(kind: kind, url: localURL)
+            }
+        }
     }
 
     @MainActor
