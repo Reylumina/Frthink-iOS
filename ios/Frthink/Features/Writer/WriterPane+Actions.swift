@@ -312,13 +312,12 @@ extension WriterPane {
 
     // MARK: - 导入导出正文
 
-    func handleBodyImport(_ result: Result<[URL], Error>) {
+    func handleBodyImport(_ result: Result<URL, Error>) {
         switch result {
         case .failure(let error):
             guard !settingsIsUserCancelled(error) else { return }
             store.errorMessage = "读取正文失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
+        case .success(let url):
             Task { @MainActor in
                 do {
                     let text = try await readBodyFile(from: url)
@@ -326,6 +325,7 @@ extension WriterPane {
                         store.errorMessage = "这个文件没有正文内容。"
                         return
                     }
+                    try? await Task.sleep(for: .milliseconds(200))
                     pendingBodyImport = PendingBodyImport(
                         filename: url.lastPathComponent,
                         text: text

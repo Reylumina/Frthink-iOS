@@ -220,12 +220,15 @@ struct WriterPane: View {
             .sheet(item: $activeSheet, onDismiss: sheetDidDismiss) { sheet in
                 sheetContent(for: sheet)
             }
-            .fileImporter(
-                isPresented: $isImportingBody,
-                allowedContentTypes: [.plainText, .text],
-                allowsMultipleSelection: false
-            ) { result in
-                handleBodyImport(result)
+            .background {
+                Color.clear
+                    .sheet(isPresented: $isImportingBody) {
+                        DocumentPickerView(allowedContentTypes: [.plainText, .text]) { result in
+                            isImportingBody = false
+                            handleBodyImport(result)
+                        }
+                        .ignoresSafeArea()
+                    }
             }
             .fileExporter(
                 isPresented: $isExportingBody,

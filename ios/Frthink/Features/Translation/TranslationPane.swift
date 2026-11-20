@@ -63,12 +63,12 @@ struct TranslationPane: View {
         .onChange(of: session.sourceText) { _, _ in
             session.scheduleSourceSave()
         }
-        .fileImporter(
-            isPresented: $importing,
-            allowedContentTypes: [.plainText, .text, .utf8PlainText],
-            allowsMultipleSelection: false
-        ) { result in
-            handleImport(result)
+        .sheet(isPresented: $importing) {
+            DocumentPickerView(allowedContentTypes: [.plainText, .text, .utf8PlainText]) { result in
+                importing = false
+                handleImport(result)
+            }
+            .ignoresSafeArea()
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -296,12 +296,12 @@ struct TranslationPane: View {
     // MARK: - 导入
 
     @MainActor
-    private func handleImport(_ result: Result<[URL], Error>) {
+    private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .failure(let error):
+            guard !settingsIsUserCancelled(error) else { return }
             store.errorMessage = "导入失败：\(error.localizedDescription)"
-        case .success(let urls):
-            guard let url = urls.first else { return }
+        case .success(let url):
             Task {
                 do {
                     let text = try await Self.readTextFile(url)

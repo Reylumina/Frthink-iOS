@@ -1,7 +1,6 @@
 // 设置二级页：存档与备份、存储与用量、外观及关于。
 
 import SwiftUI
-import UIKit
 import UniformTypeIdentifiers
 
 /// 数据 → 存档与备份。
@@ -43,7 +42,7 @@ struct SettingsArchivePage: View {
             )
         }
         .sheet(isPresented: $isPickingImportFile) {
-            ArchiveDocumentPicker(allowedContentTypes: [.item]) { result in
+            DocumentPickerView(allowedContentTypes: [.item]) { result in
                 isPickingImportFile = false
                 let kind = activeImportKind
                 switch result {
@@ -103,55 +102,6 @@ struct SettingsArchivePage: View {
         case .failure(let error):
             guard !settingsIsUserCancelled(error) else { return }
             store.errorMessage = "导出失败：\(error.localizedDescription)"
-        }
-    }
-}
-
-/// 借助 UIKit `asCopy: true` 让系统直接拷贝所选文件到沙盒临时目录，规避 SwiftUI `.fileImporter` 的安全作用域权限失效与容器冲突。
-private struct ArchiveDocumentPicker: UIViewControllerRepresentable {
-    let allowedContentTypes: [UTType]
-    let onComplete: (Result<URL, Error>) -> Void
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: allowedContentTypes, asCopy: true)
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onComplete: onComplete)
-    }
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onComplete: (Result<URL, Error>) -> Void
-
-        init(onComplete: @escaping (Result<URL, Error>) -> Void) {
-            self.onComplete = onComplete
-        }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let sourceURL = urls.first else {
-                onComplete(.failure(CocoaError(.userCancelled)))
-                return
-            }
-            do {
-                let stagedURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("frthink-import-\(UUID().uuidString)-\(sourceURL.lastPathComponent)")
-                if FileManager.default.fileExists(atPath: stagedURL.path) {
-                    try FileManager.default.removeItem(at: stagedURL)
-                }
-                try FileManager.default.copyItem(at: sourceURL, to: stagedURL)
-                onComplete(.success(stagedURL))
-            } catch {
-                onComplete(.failure(error))
-            }
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            onComplete(.failure(CocoaError(.userCancelled)))
         }
     }
 }
