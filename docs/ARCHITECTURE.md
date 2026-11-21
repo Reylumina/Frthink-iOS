@@ -39,7 +39,7 @@ Core/
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）、DynamicContextSelector / StyleDistiller（增强分支）
   LLM/          协议抽象（`ReasoningDialect`）、`LLMHTTPTransport`、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、token 估算
   Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（`WritableKeyPath` 合并策略、恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
-  Design/       Theme、AppComponents、AppFormComponents、JustifiedText 等
+  Design/       Theme、AppComponents、AppFormComponents、JustifiedText、DocumentPickerView（原生 `asCopy` 文件选择器）等
 ```
 
 依赖方向是单向的：Features 依赖 Core，Core 不认识 Features，App 可以依赖两者。
@@ -56,7 +56,7 @@ Core/
 
 已知架构约束：`RootView` 中的 `activeProjectID` 与 `ProjectSession` 共享当前打开书稿标识；`WriterPane.handleDisappear()` 通过比对 `RootView.activeProjectKey` 区分「系统内存告警释放缓存会话」与「用户主动关闭/切换书稿」，避免内存压力误中断后台生成。原版通过 Android 前台 Service 保活，iOS 端受系统后台配额限制。
 
-存档界面将系统文件面板与导入流程视图解耦挂载：`fileImporter` / `fileExporter` 挂载于「存档与备份」页面，导入流程视图通过 `navigationDestination` 推入呈现，而非在按钮所在视图上直接弹出 `fullScreenCover`。当系统文件面板收起与自定义模态视图同时转场时容易发生冲突导致后者被系统丢弃；通过导航推入则可避免转场竞争。读取外部文件时先确保 iCloud 同步完成，再通过 `NSFileCoordinator` 进行协同读取。
+文件导入统一通过 `DocumentPickerPresenter`（直接由当前顶层 `UIViewController` 弹出 `UIDocumentPickerViewController(..., asCopy: true)`）将所选文件拷贝至沙盒临时目录，再延迟通过 `navigationDestination` 推入非空导入流程页（`ArchiveImportFlowView`），规避 SwiftUI `.fileImporter` 与 `.sheet` 呈现器冲突及安全作用域权限过期问题；导出继续由 `.fileExporter` 承担。读取外部本地文件时通过 `NSFileCoordinator`（`.withoutChanges`）协同读取并保留直读兜底。
 
 ### 4.3 状态与并发
 
@@ -108,7 +108,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 自动摘要流水线在此基础上增加一个环节：当上下文占用达到阈值时，依据 P54 模板将尚未摘要的用户轮次合并至长期规则中，并记录 `sourceMessageKeys`。该步骤仅更新长期规则，不删除既有对话消息。
 
-**增强分支（`feat/context-distill`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词或 1 层递归触发）、`SceneMemoryBuilder`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3 条活跃与 2 条长期伏笔配额以及 `ManuscriptIndex` BM25 因果截断回查）、`StateSyncWorkflow.syncSmart`（基于 `WorldBook.lastStateSyncOffset` 游标自动切换全书分段建档与增量同步）、`StyleDistiller`（五维 MMR 选样与四维语域门控 Few-Shot），以及白名单 `prefillCoT`（DeepSeek `/beta` 开启 `prefix: true` 与 `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）。`GeminiClient` 原生 `/v1beta` 与 `ThinkTagStreamSplitter` `<think>` 剥离已同步合入 `main`。
+**增强分支（`feat/context-distill`）增量流水线**：在 `main` 基线之上，增加 `DynamicContextSelector`（L1/L2 渐进式披露、3 轮 Sticky 与世界书关键词或 1 层递归触发）、`SceneMemoryBuilder`（统一只读记忆块：在场状态、未出场摘要、认知信息差、3 条活跃与 2 条长期伏笔配额以及 `ManuscriptIndex` BM25 因果截断回查）、`StateSyncWorkflow.syncSmart`（基于 `WorldBook.lastStateSyncOffset` 游标自动切换全书分段建档与增量同步）、`StyleDistiller`（五维 MMR 选样与 `styleReferenceBlock` 只读容器隔离、指令关键词与书末语域指纹分离、主基调质心锚定），以及白名单 `prefillCoT`（DeepSeek `/beta` 开启 `prefix: true` 与 `reasoning_content`、OpenCode 兼容字段与 `400/422` 降级）；并将 P07 仿写模板下沉至权威正文与续写锚点之后、对话历史之前。`GeminiClient` 原生 `/v1beta` 与 `ThinkTagStreamSplitter` `<think>` 剥离已同步合入 `main`。
 
 ### 4.6 错误模型
 
