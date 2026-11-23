@@ -117,7 +117,7 @@ struct ThinkTagStreamSplitter {
                 prose += chunk
             case .reasoning(let chunk):
                 reasoning += chunk
-            case .finished:
+            case .toolCalls, .finished:
                 break
             }
         }
