@@ -325,7 +325,7 @@ final class OpenAICompatibleClient: LLMClient {
         for event in splitter.finish() {
             emittedAnything = true
             switch event {
-            case .content(let delta):
+            case .delta(let delta):
                 accumulatedOutput += delta
             case .reasoning(let delta):
                 accumulatedReasoning += delta
@@ -437,7 +437,7 @@ final class OpenAICompatibleClient: LLMClient {
                 emittedAnything = true
                 for event in splitter.push(content) {
                     switch event {
-                    case .content(let deltaText):
+                    case .delta(let deltaText):
                         accumulatedOutput += deltaText
                     case .reasoning(let deltaReasoning):
                         accumulatedReasoning += deltaReasoning
@@ -455,7 +455,7 @@ final class OpenAICompatibleClient: LLMClient {
             emittedAnything = true
             for event in splitter.push(content) {
                 switch event {
-                case .content(let deltaText):
+                case .delta(let deltaText):
                     accumulatedOutput += deltaText
                 case .reasoning(let deltaReasoning):
                     accumulatedReasoning += deltaReasoning

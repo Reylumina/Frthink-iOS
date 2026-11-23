@@ -335,7 +335,7 @@ final class GeminiClient: LLMClient {
                     } else {
                         for event in splitter.push(text) {
                             switch event {
-                            case .content(let delta):
+                            case .delta(let delta):
                                 accumulatedOutput += delta
                             case .reasoning(let delta):
                                 accumulatedReasoning += delta
@@ -352,7 +352,7 @@ final class GeminiClient: LLMClient {
         for event in splitter.finish() {
             emittedAnything = true
             switch event {
-            case .content(let delta):
+            case .delta(let delta):
                 accumulatedOutput += delta
             case .reasoning(let delta):
                 accumulatedReasoning += delta

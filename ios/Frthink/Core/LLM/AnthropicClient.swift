@@ -368,7 +368,7 @@ final class AnthropicClient: LLMClient {
                     emittedAnything = true
                     for splitEvent in splitter.push(text) {
                         switch splitEvent {
-                        case .content(let delta):
+                        case .delta(let delta):
                             accumulatedOutput += delta
                         case .reasoning(let delta):
                             accumulatedReasoning += delta
@@ -400,7 +400,7 @@ final class AnthropicClient: LLMClient {
         for splitEvent in splitter.finish() {
             emittedAnything = true
             switch splitEvent {
-            case .content(let delta):
+            case .delta(let delta):
                 accumulatedOutput += delta
             case .reasoning(let delta):
                 accumulatedReasoning += delta
