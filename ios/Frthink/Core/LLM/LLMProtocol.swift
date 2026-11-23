@@ -354,49 +354,78 @@ extension Error {
 
 /// 单次 LLM 请求的 Token 用量统计与本地估算回退。
 enum LLMTokenUsage {
-    /// 优先采用服务端返回的 `usage` 总量；若服务端未返回（如部分流式网关或中途停止），
-    /// 则在已产生有效输出时按 `TokenEstimator` 估算输入+输出总消耗。
+    /// 优先采用服务端返回的 `usage` 总量；若仅返回一侧或未返回（如部分流式网关或中途停止），
+    /// 则在已产生有效输出时按 `TokenEstimator` 补齐缺失侧或估算完整输入+输出消耗。
     static func resolveTotal(
-        reportedPrompt: Int = 0,
-        reportedCompletion: Int = 0,
-        reportedTotal: Int = 0,
+        reportedPrompt: Int? = nil,
+        reportedCompletion: Int? = nil,
+        reportedTotal: Int? = nil,
         request: LLMRequest,
         outputText: String = "",
         reasoningText: String = "",
         toolCalls: [LLMToolCall] = [],
         emittedAnything: Bool = true
     ) -> Int {
-        let serverSum = max(0, reportedPrompt) + max(0, reportedCompletion)
-        let serverTotal = max(max(0, reportedTotal), serverSum)
-        if serverTotal > 0 {
-            return serverTotal
+        if let reportedTotal, reportedTotal > 0 {
+            return reportedTotal
         }
-        guard emittedAnything else { return 0 }
+        let p = max(0, reportedPrompt ?? 0)
+        let c = max(0, reportedCompletion ?? 0)
+        if p > 0, c > 0 {
+            return p + c
+        }
+        guard emittedAnything || p > 0 || c > 0 else { return 0 }
 
-        let promptTokens = request.messages.reduce(0) { acc, msg in
-            var count = TokenEstimator.estimate(msg.content)
+        let promptTokens = p > 0 ? p : estimatePromptTokens(for: request)
+        let completionTokens = c > 0 ? c : estimateCompletionTokens(
+            outputText: outputText,
+            reasoningText: reasoningText,
+            toolCalls: toolCalls
+        )
+        return max(0, promptTokens + completionTokens)
+    }
+
+    static func estimatePromptTokens(for request: LLMRequest) -> Int {
+        var total = request.messages.reduce(0) { acc, msg in
+            var count = msg.content.isEmpty ? 4 : TokenEstimator.estimate(msg.content)
             if let reasoning = msg.reasoningContent, !reasoning.isEmpty {
                 count += TokenEstimator.estimate(reasoning)
             }
             if let calls = msg.toolCalls, !calls.isEmpty {
                 for call in calls {
-                    count += TokenEstimator.estimate(call.functionName) + TokenEstimator.estimate(call.arguments)
+                    count += TokenEstimator.estimate(call.functionName + "\n" + call.arguments)
                 }
             }
             return acc + count
         }
+        if let tools = request.tools, !tools.isEmpty {
+            for tool in tools {
+                total += TokenEstimator.estimate(tool.name + "\n" + tool.description + "\n" + tool.parametersJSON)
+            }
+        }
+        return max(0, total)
+    }
 
-        var completionTokens = 0
+    static func estimateCompletionTokens(
+        outputText: String,
+        reasoningText: String,
+        toolCalls: [LLMToolCall]
+    ) -> Int {
+        var parts: [String] = []
         if !outputText.isEmpty {
-            completionTokens += TokenEstimator.estimate(outputText)
+            parts.append(outputText)
         }
         if !reasoningText.isEmpty {
-            completionTokens += TokenEstimator.estimate(reasoningText)
+            parts.append(reasoningText)
         }
         for call in toolCalls {
-            completionTokens += TokenEstimator.estimate(call.functionName) + TokenEstimator.estimate(call.arguments)
+            parts.append(call.functionName + "\n" + call.arguments)
         }
-        return max(0, promptTokens + completionTokens)
+        let joined = parts.joined(separator: "\n")
+        guard !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return 0
+        }
+        return TokenEstimator.estimate(joined)
     }
 }
 
