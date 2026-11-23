@@ -118,11 +118,26 @@ struct SettingsTokenUsageSection: View {
         measured = false
         let projects = store.activeProjects
         let files = store.fileStore
+        var liveOverrides: [String: String] = [:]
+        for project in projects {
+            if let text = store.loadedSessionManuscriptIfAvailable(for: project.id) {
+                liveOverrides[project.id] = text
+            }
+        }
         Task { @MainActor in
             let total = await Task.detached(priority: .utility) {
                 projects.reduce(0) { partial, project in
-                    // 正文采用分页存储，直接通过分页数据计算长度，避免因内存 payload 字段为空导致统计为 0。
-                    partial + TokenEstimator.estimate(files.loadBody(project.id)?.text ?? "")
+                    let raw: String
+                    if let override = liveOverrides[project.id], !override.isEmpty {
+                        raw = override
+                    } else if let body = files.loadBody(project.id)?.text, !body.isEmpty {
+                        raw = body
+                    } else {
+                        raw = files.loadPayload(project.id).manuscript
+                    }
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return partial }
+                    return partial + TokenEstimator.estimate(trimmed)
                 }
             }.value
             contentTokens = total

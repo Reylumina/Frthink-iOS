@@ -213,6 +213,11 @@ final class AppStore {
         sessions[projectID]
     }
 
+    /// 若目标项目当前已打开会话，返回其内存中的最新正文（避免统计时漏算尚未落盘的编辑）。
+    func loadedSessionManuscriptIfAvailable(for projectID: String) -> String? {
+        sessions[projectID]?.manuscript
+    }
+
     /// 后台解码整份 payload 再建会话。
     ///
     /// 大体量 JSON 解码置于后台异步执行以避免阻塞主线程渲染；
@@ -521,6 +526,12 @@ final class AppStore {
         try client(for: translationProvider)
     }
 
+    func recordTokenUsage(_ tokens: Int) {
+        guard tokens > 0 else { return }
+        settings.tokenUsageTotal += tokens
+        try? fileStore.saveSettings(settings)
+    }
+
     func makeClient(
         for provider: ProviderSetting?,
         apiKeyOverride: String? = nil
@@ -538,24 +549,33 @@ final class AppStore {
         guard !key.isEmpty else {
             throw LLMError.missingAPIKey(provider.displayTitle)
         }
+        let usageHandler: @Sendable (Int) -> Void = { [weak self] tokens in
+            guard tokens > 0 else { return }
+            Task { @MainActor [weak self] in
+                self?.recordTokenUsage(tokens)
+            }
+        }
         switch provider.kind {
         case .anthropic:
             return AnthropicClient(
                 baseURL: provider.baseURLForDisplay,
                 apiKey: key,
-                provider: provider
+                provider: provider,
+                onUsage: usageHandler
             )
         case .gemini:
             return GeminiClient(
                 baseURL: provider.baseURLForDisplay,
                 apiKey: key,
-                provider: provider
+                provider: provider,
+                onUsage: usageHandler
             )
         case .deepseek, .openRouter, .openAICompatible, .openCodeGo:
             return OpenAICompatibleClient(
                 baseURL: provider.baseURLForDisplay,
                 apiKey: key,
-                provider: provider
+                provider: provider,
+                onUsage: usageHandler
             )
         }
     }

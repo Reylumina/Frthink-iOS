@@ -11,13 +11,20 @@ final class AnthropicClient: LLMClient {
     private let baseURL: String
     private let apiKey: String
     private let provider: ProviderSetting
+    private let onUsage: (@Sendable (Int) -> Void)?
 
     private var session: URLSession { OpenAICompatibleClient.sharedSession }
 
-    init(baseURL: String, apiKey: String, provider: ProviderSetting) {
+    init(
+        baseURL: String,
+        apiKey: String,
+        provider: ProviderSetting,
+        onUsage: (@Sendable (Int) -> Void)? = nil
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.provider = provider
+        self.onUsage = onUsage
     }
 
     // MARK: - URL 与请求头
@@ -269,6 +276,7 @@ final class AnthropicClient: LLMClient {
             let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
             try await consumeStream(
                 bytes,
+                request: req,
                 startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: req.messages),
                 continuation: continuation
             )
@@ -277,6 +285,7 @@ final class AnthropicClient: LLMClient {
 
     private func consumeStream(
         _ bytes: URLSession.AsyncBytes,
+        request: LLMRequest,
         startsInsideThink: Bool,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
@@ -284,6 +293,26 @@ final class AnthropicClient: LLMClient {
         var emittedAnything = false
         var sawStop = false
         var undecodableLines = 0
+        var inputTokens = 0
+        var outputTokens = 0
+        var accumulatedOutput = ""
+        var accumulatedReasoning = ""
+        var emittedToolCalls: [LLMToolCall] = []
+        defer {
+            let tokens = LLMTokenUsage.resolveTotal(
+                reportedPrompt: inputTokens,
+                reportedCompletion: outputTokens,
+                reportedTotal: nil,
+                request: request,
+                outputText: accumulatedOutput,
+                reasoningText: accumulatedReasoning,
+                toolCalls: emittedToolCalls,
+                emittedAnything: emittedAnything || inputTokens > 0 || outputTokens > 0
+            )
+            if tokens > 0 {
+                onUsage?(tokens)
+            }
+        }
         var rawLog: [String] = []
         let decoder = JSONDecoder()
         var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
@@ -309,6 +338,17 @@ final class AnthropicClient: LLMClient {
             if let error = event.error {
                 throw LLMError.streamError(detail: error.detail)
             }
+            if let usage = event.message?.usage ?? event.usage {
+                let promptSum = (usage.input_tokens ?? 0)
+                    + (usage.cache_creation_input_tokens ?? 0)
+                    + (usage.cache_read_input_tokens ?? 0)
+                if promptSum > 0 {
+                    inputTokens = max(inputTokens, promptSum)
+                }
+                if let out = usage.output_tokens, out > 0 {
+                    outputTokens = max(outputTokens, out)
+                }
+            }
             switch event.type {
             case "content_block_start":
                 if event.content_block?.type == "tool_use" {
@@ -321,11 +361,20 @@ final class AnthropicClient: LLMClient {
             case "content_block_delta":
                 if let thinking = event.delta?.thinking, !thinking.isEmpty {
                     emittedAnything = true
+                    accumulatedReasoning += thinking
                     continuation.yield(.reasoning(thinking))
                 }
                 if let text = event.delta?.text, !text.isEmpty {
                     emittedAnything = true
                     for splitEvent in splitter.push(text) {
+                        switch splitEvent {
+                        case .content(let delta):
+                            accumulatedOutput += delta
+                        case .reasoning(let delta):
+                            accumulatedReasoning += delta
+                        case .toolCalls, .finished:
+                            break
+                        }
                         continuation.yield(splitEvent)
                     }
                 }
@@ -350,6 +399,14 @@ final class AnthropicClient: LLMClient {
 
         for splitEvent in splitter.finish() {
             emittedAnything = true
+            switch splitEvent {
+            case .content(let delta):
+                accumulatedOutput += delta
+            case .reasoning(let delta):
+                accumulatedReasoning += delta
+            case .toolCalls, .finished:
+                break
+            }
             continuation.yield(splitEvent)
         }
 
@@ -365,6 +422,7 @@ final class AnthropicClient: LLMClient {
             }
             if !calls.isEmpty {
                 emittedAnything = true
+                emittedToolCalls = calls
                 continuation.yield(.toolCalls(calls))
             }
         }
@@ -463,6 +521,43 @@ final class AnthropicClient: LLMClient {
         if let error = decoded.error {
             throw LLMError.streamError(detail: error.detail)
         }
+        let u = decoded.usage
+        let promptTokens = (u?.input_tokens ?? 0)
+            + (u?.cache_creation_input_tokens ?? 0)
+            + (u?.cache_read_input_tokens ?? 0)
+        let completionTokens = u?.output_tokens ?? 0
+        let outputText = (decoded.content ?? [])
+            .filter { $0.type == "text" }
+            .compactMap(\.text)
+            .joined()
+        let reasoningText = (decoded.content ?? [])
+            .filter { $0.type == "thinking" }
+            .compactMap { $0.thinking ?? $0.text }
+            .joined()
+        let toolCalls: [LLMToolCall] = (decoded.content ?? []).compactMap { block in
+            guard block.type == "tool_use", let name = block.name else { return nil }
+            let argsData = (try? JSONSerialization.data(withJSONObject: block.inputObject ?? [:])) ?? Data()
+            let args = String(data: argsData, encoding: .utf8) ?? "{}"
+            return LLMToolCall(id: block.id ?? "", functionName: name, arguments: args)
+        }
+        let hasPayload = !outputText.isEmpty
+            || !reasoningText.isEmpty
+            || !toolCalls.isEmpty
+            || promptTokens > 0
+            || completionTokens > 0
+        let tokens = LLMTokenUsage.resolveTotal(
+            reportedPrompt: promptTokens,
+            reportedCompletion: completionTokens,
+            reportedTotal: nil,
+            request: req,
+            outputText: outputText,
+            reasoningText: reasoningText,
+            toolCalls: toolCalls,
+            emittedAnything: hasPayload
+        )
+        if tokens > 0 {
+            onUsage?(tokens)
+        }
         return decoded
     }
 
@@ -516,6 +611,13 @@ final class AnthropicClient: LLMClient {
         }
     }
 
+    private struct UsagePayload: Decodable {
+        let input_tokens: Int?
+        let output_tokens: Int?
+        let cache_creation_input_tokens: Int?
+        let cache_read_input_tokens: Int?
+    }
+
     private struct StreamEvent: Decodable {
         struct ContentBlock: Decodable {
             let type: String?
@@ -529,10 +631,15 @@ final class AnthropicClient: LLMClient {
             let partial_json: String?
             let stop_reason: String?
         }
+        struct MessageStartPayload: Decodable {
+            let usage: UsagePayload?
+        }
         let type: String?
         let index: Int?
         let content_block: ContentBlock?
         let delta: Delta?
+        let message: MessageStartPayload?
+        let usage: UsagePayload?
         let error: APIError?
     }
 
@@ -540,6 +647,7 @@ final class AnthropicClient: LLMClient {
         struct ContentBlock: Decodable {
             let type: String
             let text: String?
+            let thinking: String?
             let id: String?
             let name: String?
             let input: AnyCodableValue?
@@ -548,6 +656,7 @@ final class AnthropicClient: LLMClient {
         }
         let content: [ContentBlock]?
         let stop_reason: String?
+        let usage: UsagePayload?
         let error: APIError?
     }
 

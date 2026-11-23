@@ -352,6 +352,54 @@ extension Error {
     }
 }
 
+/// 单次 LLM 请求的 Token 用量统计与本地估算回退。
+enum LLMTokenUsage {
+    /// 优先采用服务端返回的 `usage` 总量；若服务端未返回（如部分流式网关或中途停止），
+    /// 则在已产生有效输出时按 `TokenEstimator` 估算输入+输出总消耗。
+    static func resolveTotal(
+        reportedPrompt: Int = 0,
+        reportedCompletion: Int = 0,
+        reportedTotal: Int = 0,
+        request: LLMRequest,
+        outputText: String = "",
+        reasoningText: String = "",
+        toolCalls: [LLMToolCall] = [],
+        emittedAnything: Bool = true
+    ) -> Int {
+        let serverSum = max(0, reportedPrompt) + max(0, reportedCompletion)
+        let serverTotal = max(max(0, reportedTotal), serverSum)
+        if serverTotal > 0 {
+            return serverTotal
+        }
+        guard emittedAnything else { return 0 }
+
+        let promptTokens = request.messages.reduce(0) { acc, msg in
+            var count = TokenEstimator.estimate(msg.content)
+            if let reasoning = msg.reasoningContent, !reasoning.isEmpty {
+                count += TokenEstimator.estimate(reasoning)
+            }
+            if let calls = msg.toolCalls, !calls.isEmpty {
+                for call in calls {
+                    count += TokenEstimator.estimate(call.functionName) + TokenEstimator.estimate(call.arguments)
+                }
+            }
+            return acc + count
+        }
+
+        var completionTokens = 0
+        if !outputText.isEmpty {
+            completionTokens += TokenEstimator.estimate(outputText)
+        }
+        if !reasoningText.isEmpty {
+            completionTokens += TokenEstimator.estimate(reasoningText)
+        }
+        for call in toolCalls {
+            completionTokens += TokenEstimator.estimate(call.functionName) + TokenEstimator.estimate(call.arguments)
+        }
+        return max(0, promptTokens + completionTokens)
+    }
+}
+
 protocol LLMClient: Sendable {
     /// 流式生成。调用方 `for try await` 消费。
     func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, Error>

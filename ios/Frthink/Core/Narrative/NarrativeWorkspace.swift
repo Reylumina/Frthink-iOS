@@ -350,7 +350,8 @@ struct NarrativeWorkspace: Codable, Hashable {
             live.entityPages[belief.characterID] != nil || branchState.entityPages[belief.characterID] == nil
         }
         for entityID in Array(merged.entityPages.keys) {
-            merged.entityPages[entityID]?.currentFactIDs = merged.facts(for: entityID).map(\.id)
+            let factIDs = merged.facts(for: entityID).map(\.id)
+            merged.entityPages[entityID]?.currentFactIDs = factIDs
         }
 
         applyMaterializedState(merged)

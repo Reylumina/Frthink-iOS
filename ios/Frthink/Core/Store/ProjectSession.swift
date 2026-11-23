@@ -498,7 +498,8 @@ final class ProjectSession {
             return false
         }
         guard !removed.isEmpty else { return nil }
-        workspace.pendingSyncNodeIDs.removeAll { workspace.storyGraph.nodes[$0] == nil }
+        let remainingNodes = workspace.storyGraph.nodes
+        workspace.pendingSyncNodeIDs.removeAll { remainingNodes[$0] == nil }
         workspace.realignBranchLedgersToHead()
         noteNarrativeWorkspaceUpdated(workspace)
         return previousSnapshot

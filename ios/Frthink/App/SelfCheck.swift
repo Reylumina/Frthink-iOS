@@ -101,6 +101,73 @@ enum SelfCheck {
             return "cjk=\(cjk) ascii=\(ascii) empty=\(empty)"
         }
 
+        // 1b · LLMTokenUsage 统计（优先采用服务端 usage，缺失时自动回退至本地 TokenEstimator）
+        check("token.usageResolution") {
+            let req = LLMRequest(
+                model: "deepseek-chat",
+                messages: [
+                    .system("你是小说续写助手"),
+                    .user("请继续写下一段"),
+                ],
+                stream: true,
+                temperature: 0.7,
+                maxTokens: 1024,
+                thinking: true
+            )
+            let reported = LLMTokenUsage.resolveTotal(
+                reportedPrompt: 320,
+                reportedCompletion: 180,
+                reportedTotal: 500,
+                request: req,
+                outputText: "少年推开木门。",
+                reasoningText: "先描写推门动作",
+                toolCalls: [],
+                emittedAnything: true
+            )
+            try expect(reported == 500, "服务端已返回 total_tokens=500 时应优先采用，实际 \(reported)")
+
+            let partialReported = LLMTokenUsage.resolveTotal(
+                reportedPrompt: 320,
+                reportedCompletion: 0,
+                reportedTotal: nil,
+                request: req,
+                outputText: "少年推开木门。",
+                reasoningText: "先描写推门动作",
+                toolCalls: [],
+                emittedAnything: true
+            )
+            let expectedCompletion = TokenEstimator.estimate("少年推开木门。\n先描写推门动作")
+            try expect(
+                partialReported == 320 + expectedCompletion,
+                "仅返回 input_tokens 时应补齐输出估算 \(320 + expectedCompletion)，实际 \(partialReported)"
+            )
+
+            let fallback = LLMTokenUsage.resolveTotal(
+                reportedPrompt: nil,
+                reportedCompletion: nil,
+                reportedTotal: nil,
+                request: req,
+                outputText: "少年推开木门。",
+                reasoningText: "",
+                toolCalls: [],
+                emittedAnything: true
+            )
+            try expect(fallback > 15, "未返回 usage 时应按请求与响应文本回退估算，实际 \(fallback)")
+
+            let notEmitted = LLMTokenUsage.resolveTotal(
+                reportedPrompt: nil,
+                reportedCompletion: nil,
+                reportedTotal: nil,
+                request: req,
+                outputText: "",
+                reasoningText: "",
+                toolCalls: [],
+                emittedAnything: false
+            )
+            try expect(notEmitted == 0, "未产出任何内容的失败请求不应计费，实际 \(notEmitted)")
+            return "reported=\(reported) partial=\(partialReported) fallback=\(fallback)"
+        }
+
         // 2 · 预算推导
         check("budget.formula") {
             var settings = AppSettings()

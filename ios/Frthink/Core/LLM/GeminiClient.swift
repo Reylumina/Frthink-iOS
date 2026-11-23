@@ -9,13 +9,20 @@ final class GeminiClient: LLMClient {
     private let baseURL: String
     private let apiKey: String
     private let provider: ProviderSetting
+    private let onUsage: (@Sendable (Int) -> Void)?
 
     private var session: URLSession { OpenAICompatibleClient.sharedSession }
 
-    init(baseURL: String, apiKey: String, provider: ProviderSetting) {
+    init(
+        baseURL: String,
+        apiKey: String,
+        provider: ProviderSetting,
+        onUsage: (@Sendable (Int) -> Void)? = nil
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.provider = provider
+        self.onUsage = onUsage
     }
 
     // MARK: - URL
@@ -231,21 +238,45 @@ final class GeminiClient: LLMClient {
                 attemptId: req.attemptId
             )
             let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
-            try await consumeStream(bytes, continuation: continuation)
+            try await consumeStream(bytes, request: req, continuation: continuation)
         }
     }
 
     private func consumeStream(
         _ bytes: URLSession.AsyncBytes,
+        request: LLMRequest,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
         var finishReason: String?
         var emittedAnything = false
         var undecodableLines = 0
+        var reportedPromptTokens = 0
+        var reportedCompletionTokens = 0
+        var reportedTotalTokens = 0
+        var accumulatedOutput = ""
+        var accumulatedReasoning = ""
         var rawLog: [String] = []
         let decoder = JSONDecoder()
         var splitter = ThinkTagStreamSplitter(startsInsideThink: false)
         var collectedToolCalls: [LLMToolCall] = []
+        defer {
+            let tokens = LLMTokenUsage.resolveTotal(
+                reportedPrompt: reportedPromptTokens,
+                reportedCompletion: reportedCompletionTokens,
+                reportedTotal: reportedTotalTokens,
+                request: request,
+                outputText: accumulatedOutput,
+                reasoningText: accumulatedReasoning,
+                toolCalls: collectedToolCalls,
+                emittedAnything: emittedAnything
+                    || reportedTotalTokens > 0
+                    || reportedPromptTokens > 0
+                    || reportedCompletionTokens > 0
+            )
+            if tokens > 0 {
+                onUsage?(tokens)
+            }
+        }
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -267,6 +298,18 @@ final class GeminiClient: LLMClient {
             if let error = chunk.error {
                 throw LLMError.streamError(detail: error.detail)
             }
+            if let usage = chunk.usageMetadata {
+                if let p = usage.promptTokenCount, p > 0 {
+                    reportedPromptTokens = p
+                }
+                let c = (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0)
+                if c > 0 {
+                    reportedCompletionTokens = c
+                }
+                if let t = usage.totalTokenCount, t > 0 {
+                    reportedTotalTokens = t
+                }
+            }
             if let candidate = chunk.candidates?.first {
                 if let rawReason = candidate.finishReason, !rawReason.isEmpty {
                     finishReason = rawReason == "MAX_TOKENS" ? "length" : rawReason.lowercased()
@@ -287,9 +330,18 @@ final class GeminiClient: LLMClient {
                     guard let text = part.text, !text.isEmpty else { continue }
                     emittedAnything = true
                     if part.thought == true {
+                        accumulatedReasoning += text
                         continuation.yield(.reasoning(text))
                     } else {
                         for event in splitter.push(text) {
+                            switch event {
+                            case .content(let delta):
+                                accumulatedOutput += delta
+                            case .reasoning(let delta):
+                                accumulatedReasoning += delta
+                            case .toolCalls, .finished:
+                                break
+                            }
                             continuation.yield(event)
                         }
                     }
@@ -299,6 +351,14 @@ final class GeminiClient: LLMClient {
 
         for event in splitter.finish() {
             emittedAnything = true
+            switch event {
+            case .content(let delta):
+                accumulatedOutput += delta
+            case .reasoning(let delta):
+                accumulatedReasoning += delta
+            case .toolCalls, .finished:
+                break
+            }
             continuation.yield(event)
         }
 
@@ -386,6 +446,38 @@ final class GeminiClient: LLMClient {
         if let error = decoded.error {
             throw LLMError.streamError(detail: error.detail)
         }
+        let u = decoded.usageMetadata
+        let promptTokens = u?.promptTokenCount ?? 0
+        let completionTokens = (u?.candidatesTokenCount ?? 0) + (u?.thoughtsTokenCount ?? 0)
+        let totalTokens = u?.totalTokenCount ?? 0
+        let parts = decoded.candidates?.first?.content?.parts ?? []
+        let outputText = parts.filter { $0.thought != true }.compactMap(\.text).joined()
+        let reasoningText = parts.filter { $0.thought == true }.compactMap(\.text).joined()
+        let toolCalls: [LLMToolCall] = parts.compactMap { part in
+            guard let fc = part.functionCall else { return nil }
+            let argsData = (try? JSONSerialization.data(withJSONObject: fc.argsObject ?? [:])) ?? Data()
+            let args = String(data: argsData, encoding: .utf8) ?? "{}"
+            return LLMToolCall(id: "", functionName: fc.name, arguments: args)
+        }
+        let hasPayload = !outputText.isEmpty
+            || !reasoningText.isEmpty
+            || !toolCalls.isEmpty
+            || totalTokens > 0
+            || promptTokens > 0
+            || completionTokens > 0
+        let tokens = LLMTokenUsage.resolveTotal(
+            reportedPrompt: promptTokens,
+            reportedCompletion: completionTokens,
+            reportedTotal: totalTokens,
+            request: req,
+            outputText: outputText,
+            reasoningText: reasoningText,
+            toolCalls: toolCalls,
+            emittedAnything: hasPayload
+        )
+        if tokens > 0 {
+            onUsage?(tokens)
+        }
         return decoded
     }
 
@@ -431,7 +523,15 @@ final class GeminiClient: LLMClient {
     // MARK: - 响应结构
 
     private struct GenerateResponse: Decodable {
+        struct UsageMetadata: Decodable {
+            let promptTokenCount: Int?
+            let candidatesTokenCount: Int?
+            let thoughtsTokenCount: Int?
+            let totalTokenCount: Int?
+        }
+
         let candidates: [Candidate]?
+        let usageMetadata: UsageMetadata?
         let error: APIError?
 
         struct Candidate: Decodable {
