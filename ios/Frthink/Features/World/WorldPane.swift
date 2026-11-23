@@ -1,47 +1,24 @@
-// 「世界」面板：概览 / 世界书 / 人物 / 事件 / 规则五个分栏。
+// 「世界」工作台：档案 / 剧情 / 规则三段式直出界面，及顶栏动作与环境态设定核查入口。
 
-import SwiftUI
 import Foundation
+import SwiftUI
 
 enum WorldTab: String, CaseIterable, Identifiable, Hashable {
-    case setting = "概览"
-    case worldbook = "世界书"
-    case characters = "人物卡"
-    case events = "事件卡"
-    case rules = "模板与规则"
+    case entities = "档案"
+    case plot = "剧情"
+    case rules = "规则"
 
     var id: String { rawValue }
-
-    /// 分栏控件紧凑标签文本。
-    var shortTitle: String {
-        switch self {
-        case .setting: return "概览"
-        case .worldbook: return "世界书"
-        case .characters: return "人物"
-        case .events: return "事件"
-        case .rules: return "规则"
-        }
-    }
 }
 
 enum WorldBusy: Equatable {
-    case refreshingWorld
-    case extractingEvents
-    case syncingState
-    case checkingConsistency
-    case extractingStyleNotes
     case distillingStyle
     case updatingRules
 
     var label: String {
         switch self {
-        case .refreshingWorld: return "正在刷新人物卡…"
-        case .extractingEvents: return "正在抽取事件卡…"
-        case .syncingState: return "正在同步状态与伏笔…"
-        case .checkingConsistency: return "正在检查设定与情节一致性…"
-        case .extractingStyleNotes: return "正在提炼文风笔记…"
-        case .distillingStyle: return "正在深度蒸馏…"
-        case .updatingRules: return "正在整理长期规则…"
+        case .distillingStyle: return "正在提炼文风…"
+        case .updatingRules: return "正在从最近对话归纳规则…"
         }
     }
 }
@@ -57,28 +34,34 @@ struct WorldPane: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
 
-    @State private var tab: WorldTab = .setting
+    @State private var tab: WorldTab = .entities
+    @State private var entityKindFilter: EntityKind? = nil
+    @State private var entityCreateTrigger = 0
+    @State private var entityExtractTrigger = 0
+    @State private var plotBeatTrigger = 0
+    @State private var plotThreadTrigger = 0
+    @State private var plotForkTrigger = 0
+    @State private var ruleCreateTrigger = 0
+
+    @State private var showingAudit = false
+    @State private var showingStyleLint = false
+    @State private var pendingAuditCount = 0
+    @State private var auditRefreshTrigger = 0
+
     @State private var busy: WorldBusy? = nil
-    @State private var progressText = ""
     @State private var statusMessage: String? = nil
     @State private var lastRawResponse: String? = nil
     @State private var showingRawResponse = false
-    @State private var consistencyIssues: [WorldJSON.ConsistencyIssue]? = nil
-    @State private var showingConsistencyReport = false
     @State private var worldTask: Task<Void, Never>?
 
-    /// 各分栏只感知自己的任务；全局状态条仍显示当前运行的任务。
-    private var isWorldRefreshing: Bool { busy == .refreshingWorld }
-    private var isExtractingEvents: Bool { busy == .extractingEvents }
-
-    /// 状态行最小高度，跟随 Dynamic Type。
     @ScaledMetric(relativeTo: .footnote) private var statusSlotHeight: CGFloat = 36
     @ScaledMetric(relativeTo: .footnote) private var statusIconWidth: CGFloat = 16
+
+    private let allEntityKinds: [EntityKind] = [.character, .location, .artifact, .lore]
 
     init(session: ProjectSession) {
         self.session = session
         #if DEBUG
-        // 截图流水线：`-worldTab setting|worldbook|characters|events|rules` 直接落到分栏。
         if let launch = WorldPane.launchTab {
             _tab = State(initialValue: launch)
         }
@@ -88,21 +71,27 @@ struct WorldPane: View {
     #if DEBUG
     private static var launchTab: WorldTab? {
         switch LaunchArguments.worldTab {
-        case "setting": return .setting
-        case "worldbook": return .worldbook
-        case "characters": return .characters
-        case "events": return .events
-        case "rules": return .rules
-        default: return nil
+        case "entities", "setting", "worldbook", "characters":
+            return .entities
+        case "plot", "events":
+            return .plot
+        case "rules":
+            return .rules
+        default:
+            return nil
         }
     }
     #endif
+
+    private var hasManuscriptContent: Bool {
+        session.manuscriptCharacterCount > 0 || session.bodyPageCount > 0
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Picker("世界分栏", selection: $tab) {
                 ForEach(WorldTab.allCases) { item in
-                    Text(item.shortTitle).tag(item)
+                    Text(item.rawValue).tag(item)
                 }
             }
             .pickerStyle(.segmented)
@@ -112,66 +101,180 @@ struct WorldPane: View {
             statusArea
 
             switch tab {
-            case .setting:
-                WorldSettingSection(
+            case .entities:
+                EntityPagesView(
                     session: session,
-                    onOpenTab: { newTab in
-                        withAnimation(Theme.motionSelection) { tab = newTab }
-                    }
+                    embeddedInWorld: true,
+                    externalSelectedKind: $entityKindFilter,
+                    externalCreateTrigger: entityCreateTrigger,
+                    externalExtractTrigger: entityExtractTrigger
                 )
-            case .characters:
-                WorldCharactersSection(
+            case .plot:
+                StoryGraphView(
                     session: session,
-                    isActionDisabled: busy != nil,
-                    onRefresh: { startWorldRefresh(forceFull: false) },
-                    onRefreshFull: { startWorldRefresh(forceFull: true) }
-                )
-            case .worldbook:
-                // 世界书词条为结构化清单配置，独立于世界设定正文。
-                WorldbookPane(session: session)
-            case .events:
-                WorldEventsSection(
-                    session: session,
-                    isBusy: isExtractingEvents,
-                    isSyncingState: busy == .syncingState,
-                    isCheckingConsistency: busy == .checkingConsistency,
-                    isActionDisabled: busy != nil,
-                    onExtract: startEventExtraction,
-                    onSyncState: startStateSync,
-                    onCheckConsistency: startConsistencyCheck
+                    embeddedInWorld: true,
+                    externalBeatTrigger: plotBeatTrigger,
+                    externalThreadTrigger: plotThreadTrigger,
+                    externalForkTrigger: plotForkTrigger
                 )
             case .rules:
-                WorldRulesSection(
+                WorldRulesHubView(
                     session: session,
-                    busy: busy,
+                    isDistillingStyle: busy == .distillingStyle,
                     isActionDisabled: busy != nil,
-                    onExtractStyleNotes: startStyleNoteExtraction,
-                    onDistillStyle: startStyleDistillation,
-                    onUpdateRules: startLongTermRuleUpdate
+                    externalCreateTrigger: ruleCreateTrigger,
+                    onDistillStyle: { refreshTemplate in
+                        startStyleDistillation(refreshTemplate: refreshTemplate)
+                    }
                 )
             }
         }
         .groupedPageBackground()
+        .sensoryFeedback(.selection, trigger: tab) { _, _ in store.settings.hapticsEnabled }
+        .toolbar { worldToolbar }
+        .navigationDestination(isPresented: $showingAudit) {
+            DreamingAuditView(session: session)
+        }
+        .navigationDestination(isPresented: $showingStyleLint) {
+            StyleLintCardView(session: session)
+        }
+        .onChange(of: showingAudit) { _, presented in
+            if !presented {
+                auditRefreshTrigger &+= 1
+            }
+        }
+        .task(id: "\(session.project.id)-\(session.narrativeRevision)-\(auditRefreshTrigger)") {
+            await refreshAuditBadge()
+        }
         .onDisappear {
             session.scheduleSave()
         }
         .sheet(isPresented: $showingRawResponse) {
             WorldRawResponseSheet(text: lastRawResponse ?? "")
         }
-        .sheet(isPresented: $showingConsistencyReport) {
-            ConsistencyReportSheet(issues: consistencyIssues ?? [])
+    }
+
+    // MARK: - 导航栏动作
+
+    @ToolbarContentBuilder
+    private var worldToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            switch tab {
+            case .entities:
+                entityFilterMenu
+                entityAddMenu
+            case .plot:
+                plotAddMenu
+            case .rules:
+                Button {
+                    ruleCreateTrigger &+= 1
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("添加写作规则")
+
+                rulesMoreMenu
+            }
+
+            auditToolbarButton
         }
+    }
+
+    private var entityFilterMenu: some View {
+        Menu {
+            Picker("按分类筛选", selection: $entityKindFilter) {
+                Text("全部").tag(EntityKind?.none)
+                ForEach(allEntityKinds, id: \.rawValue) { kind in
+                    Text(NarrativeViewSupport.entityKindLabel(kind))
+                        .tag(EntityKind?.some(kind))
+                }
+            }
+        } label: {
+            Image(
+                systemName: entityKindFilter == nil
+                    ? "line.3.horizontal.decrease.circle"
+                    : "line.3.horizontal.decrease.circle.fill"
+            )
+        }
+        .accessibilityLabel("按分类筛选")
+    }
+
+    private var entityAddMenu: some View {
+        Menu {
+            Button("新建设定", systemImage: "plus") {
+                entityCreateTrigger &+= 1
+            }
+            Button("从正文提取设定", systemImage: "arrow.clockwise") {
+                entityExtractTrigger &+= 1
+            }
+            .disabled(!hasManuscriptContent)
+        } label: {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("添加设定")
+    }
+
+    private var plotAddMenu: some View {
+        Menu {
+            Button("规划下一幕", systemImage: "plus.rectangle.on.rectangle") {
+                plotBeatTrigger &+= 1
+            }
+            Button("新建伏笔", systemImage: "flag") {
+                plotThreadTrigger &+= 1
+            }
+            Button("从当前幕分叉", systemImage: "arrow.triangle.branch") {
+                plotForkTrigger &+= 1
+            }
+        } label: {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("新增剧情或伏笔")
+    }
+
+    private var rulesMoreMenu: some View {
+        Menu {
+            Button("提炼文风", systemImage: "wand.and.stars") {
+                let hasTemplate = !session.payload.world.styleTemplate
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                startStyleDistillation(refreshTemplate: hasTemplate)
+            }
+            .disabled(busy != nil || !hasManuscriptContent)
+
+            Button("从最近对话归纳规则", systemImage: "text.badge.plus") {
+                startLongTermRuleUpdate()
+            }
+            .disabled(busy != nil)
+
+            Divider()
+
+            Button("文风检查", systemImage: "doc.text.magnifyingglass") {
+                showingStyleLint = true
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .accessibilityLabel("更多规则操作")
+    }
+
+    private var auditToolbarButton: some View {
+        Button {
+            showingAudit = true
+        } label: {
+            if pendingAuditCount > 0 {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .foregroundStyle(AppTone.warning.color)
+            } else {
+                Image(systemName: "checkmark.shield")
+            }
+        }
+        .accessibilityLabel(pendingAuditCount > 0 ? "设定核查，\(pendingAuditCount) 项待处理" : "设定核查")
     }
 
     // MARK: - 状态条
 
-    /// 有任务、有回执或能看原始响应时才占位；空闲时不预留空白行。
     @ViewBuilder
     private var statusArea: some View {
-        // 概览分栏内建刷新与终止控制；其余分栏由该状态行统一展示进度。
-        if isWorldRefreshing, tab == .setting {
-            EmptyView()
-        } else if busy != nil || statusMessage != nil || lastRawResponse != nil {
+        if busy != nil || statusMessage != nil || lastRawResponse != nil {
             HStack(spacing: Theme.Spacing.s) {
                 statusIcon
                     .frame(width: statusIconWidth)
@@ -255,21 +358,27 @@ struct WorldPane: View {
     }
 
     private var statusText: String {
-        // 优先显示最新的状态提示文本。
         if let statusMessage, !statusMessage.isEmpty { return statusMessage }
-        if let busy { return progressText.isEmpty ? busy.label : progressText }
+        if let busy { return busy.label }
         return ""
     }
 
-    // MARK: - 世界刷新
+    // MARK: - 后台任务
 
-    /// 启动一个可在切书时统一取消的世界任务。
-    ///
-    /// 任务注册至 `AppStore` 集中调度，切换项目时支持全局统一取消，防止视图销毁后残留后台写入。
-    /// 注册生成的专属令牌用于任务注销校验，保证多任务并发时状态隔离。
+    private func refreshAuditBadge() async {
+        do {
+            let report = try await ConsistencyCheckWorkflow.runOfflineDreamingAsync(
+                session: session,
+                store: store
+            )
+            let dismissed = NarrativeViewSupport.dismissedAuditFindingIDs(for: session.project.id)
+            pendingAuditCount = report.findings.filter { !dismissed.contains($0.id) }.count
+        } catch {
+            pendingAuditCount = 0
+        }
+    }
+
     private func startTrackedTask(_ work: @escaping @MainActor () async -> Void) {
-        // 令牌要在任务闭包里读，而它来自「登记这个任务之后」；用一个引用盒子
-        // 传递，避免闭包捕获可变的局部变量。
         let token = WorldTaskToken()
         let task = Task { @MainActor in
             await work()
@@ -285,7 +394,6 @@ struct WorldPane: View {
         token.value = store.registerWorldTask(task, for: session.project.id)
     }
 
-    /// 统一的世界任务调度入口：集中管理运行状态、进度反馈、取消处理与异常展示。
     private func startWorldTask(
         kind: WorldBusy,
         cancelled: String,
@@ -296,13 +404,11 @@ struct WorldPane: View {
             return
         }
         busy = kind
-        progressText = ""
         statusMessage = nil
         startTrackedTask {
             do {
                 self.statusMessage = try await operation()
             } catch {
-                // 统一判定各类取消异常（结构化并发、网络层与模型客户端取消）。
                 if error.isLLMCancellation {
                     self.statusMessage = cancelled
                 } else {
@@ -310,91 +416,18 @@ struct WorldPane: View {
                 }
             }
             self.busy = nil
-            self.progressText = ""
         }
     }
 
-    private func startWorldRefresh(forceFull: Bool) {
-        startWorldTask(
-            kind: .refreshingWorld,
-            cancelled: "已停止刷新；已完成的段已保留。"
-        ) {
-            let outcome = try await WorldWorkflow.refreshWorld(
-                session: self.session,
-                store: self.store,
-                forceFull: forceFull,
-                progress: { current, total in
-                    self.progressText = total > 1
-                        ? "正在整理第 \(current)/\(total) 段正文…"
-                        : "正在分析正文…"
-                }
-            )
-            return outcome.summary
-        }
-    }
-
-    private func startEventExtraction() {
-        startWorldTask(
-            kind: .extractingEvents,
-            cancelled: "已停止抽取；已完成的段已保留。"
-        ) {
-            let outcome = try await WorldMaterialWorkflow.extractEvents(
-                session: self.session,
-                store: self.store
-            )
-            return outcome.summary
-        }
-    }
-
-    private func startStateSync() {
-        startWorldTask(
-            kind: .syncingState,
-            cancelled: "已停止状态同步。"
-        ) {
-            let outcome = try await StateSyncWorkflow.syncSmart(
-                session: self.session,
-                store: self.store
-            )
-            return outcome.summary
-        }
-    }
-
-    private func startConsistencyCheck() {
-        startWorldTask(
-            kind: .checkingConsistency,
-            cancelled: "已停止一致性审校。"
-        ) {
-            let outcome = try await ConsistencyCheckWorkflow.checkTail(
-                session: self.session,
-                store: self.store
-            )
-            self.consistencyIssues = outcome.issues
-            self.showingConsistencyReport = true
-            return outcome.summary
-        }
-    }
-
-    private func startStyleNoteExtraction() {
-        startWorldTask(
-            kind: .extractingStyleNotes,
-            cancelled: "已停止提炼；已完成的笔记已保留。"
-        ) {
-            let outcome = try await WorldMaterialWorkflow.extractStyleNotes(
-                session: self.session,
-                store: self.store
-            )
-            return outcome.summary
-        }
-    }
-
-    private func startStyleDistillation() {
+    private func startStyleDistillation(refreshTemplate: Bool) {
         startWorldTask(
             kind: .distillingStyle,
-            cancelled: "已停止深度蒸馏。"
+            cancelled: "已停止提炼文风。"
         ) {
             try await WorldMaterialWorkflow.distillStyleProfile(
                 session: self.session,
-                store: self.store
+                store: self.store,
+                refreshTemplate: refreshTemplate
             )
         }
     }
@@ -402,13 +435,20 @@ struct WorldPane: View {
     private func startLongTermRuleUpdate() {
         startWorldTask(
             kind: .updatingRules,
-            cancelled: "已停止更新长期规则。"
+            cancelled: "已停止归纳规则。"
         ) {
             let outcome = try await WorldRulesWorkflow.updateLongTermRules(
                 session: self.session,
                 store: self.store
             )
-            return outcome.summary
+            let added = NarrativeViewSupport.syncLongTermRulesToDirectives(
+                session: self.session,
+                store: self.store
+            )
+            if added > 0 {
+                return "已归纳并添加 \(added) 条写作规则。"
+            }
+            return outcome.updated ? "写作规则已同步。" : "未发现新的写作规则。"
         }
     }
 
@@ -453,69 +493,5 @@ struct WorldRawResponseSheet: View {
                 }
             }
         }
-    }
-}
-
-/// 一致性审校结果展示页：按证据链呈现矛盾前文与建议。
-struct ConsistencyReportSheet: View {
-    let issues: [WorldJSON.ConsistencyIssue]
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List(issues) { issue in
-                ConsistencyIssueRow(issue: issue)
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .overlay {
-                if issues.isEmpty {
-                    ContentUnavailableView(
-                        "未发现明显矛盾",
-                        systemImage: "checkmark.seal",
-                        description: Text("末尾正文与当前人物快照、未决伏笔及早期召回片段保持一致。")
-                    )
-                }
-            }
-            .groupedPageBackground()
-            .navigationTitle("一致性审校")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { dismiss() }
-                }
-            }
-        }
-    }
-}
-
-private struct ConsistencyIssueRow: View {
-    let issue: WorldJSON.ConsistencyIssue
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.s) {
-                Text(issue.category)
-                    .font(Font.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                Text(issue.severity)
-                    .font(Font.caption.weight(.medium))
-                    .foregroundStyle(issue.severity == "高" ? AppTone.danger.color : AppTone.warning.color)
-            }
-            if !issue.factQuote.isEmpty {
-                Text("既有依据：\(issue.factQuote)")
-                    .font(Font.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if !issue.contradictionQuote.isEmpty {
-                Text("本段冲突：\(issue.contradictionQuote)")
-                    .font(Font.caption)
-                    .foregroundStyle(.primary)
-            }
-            Text(issue.reason)
-                .font(Font.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.vertical, Theme.Spacing.xs)
     }
 }

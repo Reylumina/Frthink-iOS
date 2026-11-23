@@ -36,7 +36,8 @@ enum NarrativeContextOrchestrator {
         skills: [Skill],
         universes: [UniverseEntry],
         preservedStyle: PreservedStyleDistillation,
-        bookIndexLines: [String]
+        bookIndexLines: [String],
+        volumeOneLiners: [String] = []
     ) -> String {
         var sections: [String] = []
 
@@ -97,6 +98,14 @@ enum NarrativeContextOrchestrator {
                 """
                 sections.append(wrappedCentroid)
             }
+        }
+
+        let cleanVolumes = volumeOneLiners
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !cleanVolumes.isEmpty {
+            let cappedVolumes = Array(cleanVolumes.prefix(12))
+            sections.append("【全书卷纲脉络】\n" + cappedVolumes.map { "- \($0)" }.joined(separator: "\n"))
         }
 
         if !bookIndexLines.isEmpty {
@@ -190,6 +199,39 @@ enum NarrativeContextOrchestrator {
         let readyThreads = state.threads.values
             .filter { $0.state == .ready }
             .sorted { lhs, rhs in lhs.id < rhs.id }
+
+        let oneHopOffStagePages = collectOneHopRelatedOffStagePages(
+            selectedPages: selectedPages,
+            onStageIDs: onStageIDs,
+            enabledPages: enabledPages,
+            readyThreads: readyThreads,
+            state: state
+        )
+        if !oneHopOffStagePages.isEmpty {
+            var relatedLines = ["【关联离场实体（一跳）】"]
+            for page in oneHopOffStagePages {
+                var briefParts: [String] = []
+                let summaryRaw = [page.summary, page.identity]
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first { !$0.isEmpty }
+                if let summaryRaw {
+                    let clipped = summaryRaw.count > 60 ? String(summaryRaw.prefix(60)) + "…" : summaryRaw
+                    briefParts.append("简述：\(clipped)")
+                }
+                let keyFacts = state.facts(for: page.id).prefix(2)
+                for fact in keyFacts {
+                    briefParts.append("\(fact.attribute)=\(fact.value)")
+                }
+                let header = "- \(page.name)（\(page.kind.rawValue)/\(page.id)）"
+                if briefParts.isEmpty {
+                    relatedLines.append(header)
+                } else {
+                    relatedLines.append("\(header)：" + briefParts.joined(separator: "｜"))
+                }
+            }
+            parts.append(relatedLines.joined(separator: "\n"))
+        }
+
         if !readyThreads.isEmpty {
             var threadLines = ["【条件已就绪待推进伏笔（Ready）】"]
             for thread in readyThreads {
@@ -212,12 +254,73 @@ enum NarrativeContextOrchestrator {
             parts.append("【本幕待写目标】\n- \(cleanBeat)")
         }
 
-        let recentCards = state.pyramid.recentSceneCards.suffix(2)
+        let closedPlotlines = state.pyramid.closedPlotlines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .suffix(5)
+        if !closedPlotlines.isEmpty {
+            parts.append("【近期阶段/章节摘要】\n" + closedPlotlines.map { "- \($0)" }.joined(separator: "\n"))
+        }
+
+        let recentCards = state.pyramid.recentSceneCards.suffix(3)
         if !recentCards.isEmpty {
             parts.append("【近期场拍卡】\n" + recentCards.map { "- \($0)" }.joined(separator: "\n"))
         }
 
         return (parts.joined(separator: "\n\n"), onStageIDs)
+    }
+
+    /// 从就绪伏笔的关联实体及在场实体的关系事实出发，做纯符号一跳扩展，补全最多 2 个离场关键实体。
+    private static func collectOneHopRelatedOffStagePages(
+        selectedPages: [EntityPage],
+        onStageIDs: Set<String>,
+        enabledPages: [EntityPage],
+        readyThreads: [ProspectiveThread],
+        state: MaterializedNarrativeState,
+        limit: Int = 2
+    ) -> [EntityPage] {
+        guard limit > 0 else { return [] }
+        let offStagePages = enabledPages.filter { !onStageIDs.contains($0.id) }
+        guard !offStagePages.isEmpty else { return [] }
+
+        var matchedIDs = Set<String>()
+
+        for thread in readyThreads {
+            for entityID in thread.relatedEntityIDs where !onStageIDs.contains(entityID) {
+                matchedIDs.insert(entityID)
+            }
+        }
+
+        let relationValues: [String] = selectedPages.flatMap { page in
+            state.facts(for: page.id)
+                .filter { fact in
+                    fact.attribute == WorldFactEvent.StandardAttribute.relation || fact.attribute == "关系"
+                }
+                .map(\.value)
+        }
+        if !relationValues.isEmpty {
+            for candidate in offStagePages {
+                let name = candidate.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let aliases = candidate.aliases
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { $0.count >= 2 }
+                let hit = relationValues.contains { value in
+                    if !name.isEmpty {
+                        if value == name { return true }
+                        if name.count >= 2 && value.localizedCaseInsensitiveContains(name) {
+                            return true
+                        }
+                    }
+                    return aliases.contains { value.localizedCaseInsensitiveContains($0) }
+                }
+                if hit {
+                    matchedIDs.insert(candidate.id)
+                }
+            }
+        }
+
+        guard !matchedIDs.isEmpty else { return [] }
+        return Array(offStagePages.filter { matchedIDs.contains($0.id) }.prefix(limit))
     }
 
     static func effectiveTailText(
@@ -266,7 +369,8 @@ enum NarrativeContextOrchestrator {
             skills: settings.skills,
             universes: enabledUniverses,
             preservedStyle: workspace.preservedStyle,
-            bookIndexLines: bookIndex
+            bookIndexLines: bookIndex,
+            volumeOneLiners: state.pyramid.volumeOneLiners
         )
 
         // 按继续写作锚点执行严格因果截断，杜绝锚点之后的正文进入下文工作区。
@@ -282,6 +386,9 @@ enum NarrativeContextOrchestrator {
         let cleanInstruction = userInstruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let scanText = [cleanInstruction, tailText].filter { !$0.isEmpty }.joined(separator: "\n")
 
+        let resolvedPOVID = povCharacterID.flatMap {
+            state.entityPages[$0]?.enabled == true ? $0 : nil
+        }
         let causalAncestors = workspace.storyGraph.causalAncestorSummaries(
             of: workspace.storyGraph.headNodeID,
             limit: 6
@@ -290,7 +397,7 @@ enum NarrativeContextOrchestrator {
         let queryCone = buildQueryConeBlock(
             state: state,
             scanText: scanText,
-            povCharacterID: povCharacterID,
+            povCharacterID: resolvedPOVID,
             causalAncestors: causalAncestors,
             plannedBeat: plannedBeat
         )
@@ -354,80 +461,23 @@ enum NarrativeContextOrchestrator {
             tailSections.append(renderedStyle)
         }
 
-        var usedFallbackBM25 = false
-        if !enableTools {
-            let onStageNames = queryCone.onStageEntityIDs.compactMap { state.entityPages[$0]?.name }
-            let recallBudget = min(600, max(200, inputBudget / 8))
-            let excerpts: [ManuscriptIndex.Excerpt]
-            if let bm25Index, bm25Index.cachedPageCount > 0 {
-                excerpts = bm25Index.recall(
-                    queryTerms: onStageNames,
-                    instructionText: cleanInstruction,
-                    causalLimit: causalCutoff,
-                    excludeTrailingUTF16: (tailText as NSString).length,
-                    maxResults: 3,
-                    maxTokens: recallBudget
-                )
-            } else {
-                excerpts = ManuscriptIndex.recallHistoricalExcerpts(
-                    fullManuscript: causalPrefix,
-                    activeWindowText: tailText,
-                    queryTerms: onStageNames,
-                    instructionText: cleanInstruction,
-                    causalLimit: causalCutoff,
-                    maxResults: 3,
-                    maxTokens: recallBudget
-                )
-            }
-            let anchorQuery = cleanInstruction.isEmpty ? scanText : cleanInstruction
-            let rawHits = workspace.anchorIndex
-                .anchors(beforeUTF16: causalCutoff)
-                .filter { anchor in
-                    guard tailText.isEmpty || !tailText.contains(anchor.span.quote) else {
-                        return false
-                    }
-                    return anchorQuery.localizedCaseInsensitiveContains(anchor.surfaceText)
-                        || onStageNames.contains { name in
-                            !name.isEmpty && (
-                                anchor.surfaceText.localizedCaseInsensitiveContains(name)
-                                    || anchor.span.quote.localizedCaseInsensitiveContains(name)
-                            )
-                        }
-                }
-                .sorted { lhs, rhs in
-                    let leftScore = anchorPriorityScore(lhs, instruction: cleanInstruction)
-                    let rightScore = anchorPriorityScore(rhs, instruction: cleanInstruction)
-                    if leftScore != rightScore { return leftScore > rightScore }
-                    return lhs.span.utf16Start > rhs.span.utf16Start
-                }
-
-            var seenAnchorKeys = Set<String>()
-            var anchorHits: [MechanicalAnchor] = []
-            for hit in rawHits {
-                let dedupKey = "\(hit.kind.rawValue)\u{1F}\(hit.surfaceText)\u{1F}\(hit.span.paragraphHash)"
-                guard seenAnchorKeys.insert(dedupKey).inserted else { continue }
-                anchorHits.append(hit)
-                if anchorHits.count >= 6 { break }
-            }
-
-            var fallbackLines: [String] = []
-            if !excerpts.isEmpty {
-                fallbackLines.append("【自动预检早期正文片段】")
-                for item in excerpts {
-                    fallbackLines.append(item.text)
-                }
-            }
-            if !anchorHits.isEmpty {
-                fallbackLines.append("【关联细节锚点】")
-                for hit in anchorHits {
-                    fallbackLines.append("- [\(hit.kind.rawValue)] \(hit.surfaceText)：\(hit.span.quote)")
-                }
-            }
-            if !fallbackLines.isEmpty {
-                tailSections.append(fallbackLines.joined(separator: "\n"))
-                usedFallbackBM25 = true
-            }
+        let prefetch = buildLexicalPrefetchSection(
+            workspace: workspace,
+            state: state,
+            onStageEntityIDs: queryCone.onStageEntityIDs,
+            causalPrefix: causalPrefix,
+            tailText: tailText,
+            scanText: scanText,
+            cleanInstruction: cleanInstruction,
+            causalCutoff: causalCutoff,
+            inputBudget: inputBudget,
+            enableTools: enableTools,
+            bm25Index: bm25Index
+        )
+        if let section = prefetch.section {
+            tailSections.append(section)
         }
+        let usedFallbackBM25 = prefetch.usedFallbackBM25
 
         var assembled: [LLMMessage] = []
         if !frozenSystemPrefix.isEmpty {
@@ -475,6 +525,99 @@ enum NarrativeContextOrchestrator {
             }
         }
         return result
+    }
+
+    private static func buildLexicalPrefetchSection(
+        workspace: NarrativeWorkspace,
+        state: MaterializedNarrativeState,
+        onStageEntityIDs: Set<String>,
+        causalPrefix: String,
+        tailText: String,
+        scanText: String,
+        cleanInstruction: String,
+        causalCutoff: Int?,
+        inputBudget: Int,
+        enableTools: Bool,
+        bm25Index: ManuscriptIndex.IncrementalBM25Index?
+    ) -> (section: String?, usedFallbackBM25: Bool) {
+        let onStageNames = onStageEntityIDs.compactMap { state.entityPages[$0]?.name }
+        let maxExcerpts = enableTools ? 2 : 3
+        let maxAnchors = enableTools ? 3 : 6
+        let recallBudget = enableTools
+            ? min(350, max(160, inputBudget / 12))
+            : min(600, max(200, inputBudget / 8))
+
+        let excerpts: [ManuscriptIndex.Excerpt]
+        if let bm25Index, bm25Index.cachedPageCount > 0 {
+            excerpts = bm25Index.recall(
+                queryTerms: onStageNames,
+                instructionText: cleanInstruction,
+                causalLimit: causalCutoff,
+                excludeTrailingUTF16: (tailText as NSString).length,
+                maxResults: maxExcerpts,
+                maxTokens: recallBudget
+            )
+        } else {
+            excerpts = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: causalPrefix,
+                activeWindowText: tailText,
+                queryTerms: onStageNames,
+                instructionText: cleanInstruction,
+                causalLimit: causalCutoff,
+                maxResults: maxExcerpts,
+                maxTokens: recallBudget
+            )
+        }
+
+        let anchorQuery = cleanInstruction.isEmpty ? scanText : cleanInstruction
+        let rawHits = workspace.anchorIndex
+            .anchors(beforeUTF16: causalCutoff)
+            .filter { anchor in
+                guard tailText.isEmpty || !tailText.contains(anchor.span.quote) else {
+                    return false
+                }
+                return anchorQuery.localizedCaseInsensitiveContains(anchor.surfaceText)
+                    || onStageNames.contains { name in
+                        !name.isEmpty && (
+                            anchor.surfaceText.localizedCaseInsensitiveContains(name)
+                                || anchor.span.quote.localizedCaseInsensitiveContains(name)
+                        )
+                    }
+            }
+            .sorted { lhs, rhs in
+                let leftScore = anchorPriorityScore(lhs, instruction: cleanInstruction)
+                let rightScore = anchorPriorityScore(rhs, instruction: cleanInstruction)
+                if leftScore != rightScore { return leftScore > rightScore }
+                return lhs.span.utf16Start > rhs.span.utf16Start
+            }
+
+        var seenAnchorKeys = Set<String>()
+        var anchorHits: [MechanicalAnchor] = []
+        for hit in rawHits {
+            let dedupKey = "\(hit.kind.rawValue)\u{1F}\(hit.surfaceText)\u{1F}\(hit.span.paragraphHash)"
+            guard seenAnchorKeys.insert(dedupKey).inserted else { continue }
+            anchorHits.append(hit)
+            if anchorHits.count >= maxAnchors { break }
+        }
+
+        var lines: [String] = []
+        if !excerpts.isEmpty {
+            let header = enableTools
+                ? "【高关联早期细节预检（需更多原文可调用 grep_manuscript / read_entity_page）】"
+                : "【自动预检早期正文片段】"
+            lines.append(header)
+            for item in excerpts {
+                lines.append(item.text)
+            }
+        }
+        if !anchorHits.isEmpty {
+            lines.append(enableTools ? "【高关联细节锚点】" : "【关联细节锚点】")
+            for hit in anchorHits {
+                lines.append("- [\(hit.kind.rawValue)] \(hit.surfaceText)：\(hit.span.quote)")
+            }
+        }
+        guard !lines.isEmpty else { return (nil, false) }
+        return (lines.joined(separator: "\n"), !enableTools)
     }
 
     private static func anchorPriorityScore(

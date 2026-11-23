@@ -335,6 +335,7 @@ enum WriterPromptBuilder {
             tailCodePointLimitOverride: tailCodePointOverride,
             inputBudget: snapshot.inputBudget,
             enableTools: enableTools,
+            povCharacterID: workspace.activePOVCharacterID,
             bm25Index: snapshot.bm25Index
         )
         try checkpoint()

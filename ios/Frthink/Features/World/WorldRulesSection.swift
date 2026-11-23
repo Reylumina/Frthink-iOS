@@ -1,177 +1,10 @@
-// 「模板与规则」分栏：文风笔记、仿写模板、长期写作规则。
-//
-// 主列表提供内容概览与更新触发入口；文本编辑收拢至子页面。
-//
-// 写作提示词直接采用「事件」分栏的 `plotEvents`；`plotOutline` 为废弃字段，不提供编辑入口。
+// 规则工作台：统一收纳「仿写模板」（支持文风提炼、富文本预览与编辑）与结构化「写作规则」。
 
-import SwiftUI
 import Foundation
+import SwiftUI
+import UIKit
 
-/// 模板与规则的文本字段定义枚举。
-enum WorldRuleTextKind: String, CaseIterable, Identifiable, Hashable {
-    case styleNotes
-    case styleTemplate
-    case longTermRules
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .styleNotes: return "文风笔记"
-        case .styleTemplate: return "仿写模板"
-        case .longTermRules: return "长期写作规则"
-        }
-    }
-
-    var placeholder: String {
-        switch self {
-        case .styleNotes:
-            return "每行一条可迁移的写法规则"
-        case .styleTemplate:
-            return "叙事视角与结构、因果推进与节奏、句式用词、对白、转场与收束……"
-        case .longTermRules:
-            return "例如：\n- 每章结尾留一个悬念\n- 不用第二人称\n- 对白不写「说道」"
-        }
-    }
-
-    func text(in world: WorldBook) -> String {
-        switch self {
-        case .styleNotes: return world.styleNotes
-        case .styleTemplate: return world.styleTemplate
-        case .longTermRules: return world.longTermRules
-        }
-    }
-
-    func valueLabel(in world: WorldBook) -> String {
-        switch self {
-        case .styleNotes:
-            return "\(WorldRuleTextKind.lineCount(of: world.styleNotes)) 行"
-        case .styleTemplate, .longTermRules:
-            let count = text(in: world)
-                .trimmingCharacters(in: .whitespacesAndNewlines).count
-            return count == 0 ? "未建立" : "\(count) 字"
-        }
-    }
-
-    static func lineCount(of text: String) -> Int {
-        text.split(whereSeparator: { $0.isNewline })
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .count
-    }
-}
-
-struct WorldRulesSection: View {
-    @Bindable var session: ProjectSession
-    /// 当前运行中的世界任务；只有本分栏的任务显示进度。
-    var busy: WorldBusy?
-    /// 存在进行中的世界任务时禁用 AI 操作入口。
-    var isActionDisabled: Bool = false
-    var onExtractStyleNotes: () -> Void
-    var onDistillStyle: () -> Void
-    var onUpdateRules: () -> Void
-
-    @State private var editing: WorldRuleTextKind?
-
-    /// 三个文本字段的快照；只在真正变化时触发一次保存。
-    private var ruleTexts: [String] {
-        [
-            session.payload.world.styleNotes,
-            session.payload.world.styleTemplate,
-            session.payload.world.longTermRules,
-        ]
-    }
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(WorldRuleTextKind.allCases) { kind in
-                    ruleRow(kind)
-                }
-            } header: {
-                AppSectionHeader(title: "模板与规则")
-            }
-
-            Section {
-                updateRow(
-                    title: "深度蒸馏",
-                    kind: .distillingStyle,
-                    action: onDistillStyle
-                )
-                updateRow(
-                    title: "从正文提炼文风笔记",
-                    kind: .extractingStyleNotes,
-                    action: onExtractStyleNotes
-                )
-                updateRow(
-                    title: "用最近对话更新长期规则",
-                    kind: .updatingRules,
-                    action: onUpdateRules
-                )
-            } header: {
-                AppSectionHeader(title: "从正文更新")
-            }
-        }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .groupedPageBackground()
-        .navigationDestination(item: $editing) { kind in
-            WorldRuleEditorPage(session: session, kind: kind)
-        }
-        .onChange(of: ruleTexts) { _, _ in
-            session.scheduleSave()
-        }
-    }
-
-    // MARK: - 概览行
-
-    private func ruleRow(_ kind: WorldRuleTextKind) -> some View {
-        Button {
-            editing = kind
-        } label: {
-            HStack(spacing: Theme.Spacing.s) {
-                // 二级页的列表行使用 Label，不加有色方块。
-                SettingsLabelRow(
-                    title: kind.title,
-                    detail: kind.valueLabel(in: session.payload.world)
-                )
-                Image(systemName: "chevron.right")
-                    .font(Font.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 模型更新入口置于列表层，与文本编辑入口清晰分离。
-    private func updateRow(
-        title: String,
-        kind: WorldBusy,
-        action: @escaping () -> Void
-    ) -> some View {
-        let running = busy == kind
-        return Button(action: action) {
-            HStack(spacing: Theme.Spacing.m) {
-                Text(title)
-                    .font(Font.body)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: Theme.Spacing.s)
-                if running {
-                    Text("进行中")
-                        .font(Font.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(minHeight: Theme.Layout.rowContentHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(isActionDisabled)
-        .accessibilityValue(running ? "进行中" : "")
-    }
-}
-
-/// 规则编辑页的草稿与外部（AI 摘要）写入之间的同步判定。
+/// 规则编辑页的草稿与外部（AI 提炼）写入之间的同步判定。
 ///
 /// 页面打开时 `draft == baseline`；仅在草稿未发生变动时接收外部更新，防止覆盖本地编辑内容。
 enum WorldRuleDraftSync: Equatable {
@@ -183,43 +16,206 @@ enum WorldRuleDraftSync: Equatable {
     }
 }
 
-/// 模板与规则的整页编辑器：正文在离开或点完成时一次写回，模型动作不在这里。
-private struct WorldRuleEditorPage: View {
+struct WorldRulesHubView: View {
     @Bindable var session: ProjectSession
-    let kind: WorldRuleTextKind
+    var isDistillingStyle: Bool = false
+    var isActionDisabled: Bool = false
+    var externalCreateTrigger: Int = 0
+    var onDistillStyle: (_ refreshTemplate: Bool) -> Void
 
+    @State private var showingAddRuleSheet = false
+
+    private var trimmedTemplate: String {
+        session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasManuscriptContent: Bool {
+        session.manuscriptCharacterCount > 0 || session.bodyPageCount > 0
+    }
+
+    var body: some View {
+        List {
+            styleTemplateSection
+            AuthorDirectivesListContent(
+                session: session,
+                showingAddSheet: $showingAddRuleSheet
+            )
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .groupedPageBackground()
+        .sheet(isPresented: $showingAddRuleSheet) {
+            AddAuthorDirectiveSheet(session: session)
+        }
+        .onChange(of: externalCreateTrigger) { _, _ in
+            showingAddRuleSheet = true
+        }
+    }
+
+    private var styleTemplateSection: some View {
+        let template = trimmedTemplate
+        return Section {
+            if !template.isEmpty {
+                NavigationLink {
+                    StyleTemplateDetailView(
+                        session: session,
+                        isDistillingStyle: isDistillingStyle,
+                        isActionDisabled: isActionDisabled,
+                        canDistill: hasManuscriptContent,
+                        onDistillStyle: { onDistillStyle(true) }
+                    )
+                } label: {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        HStack(spacing: Theme.Spacing.s) {
+                            Text("仿写模板")
+                                .font(Theme.labelEmphasis)
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                            Text("\(template.count.formatted()) 字")
+                                .font(Theme.numericSmall)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(previewText(for: template))
+                            .font(Theme.labelSmall)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                    .padding(.vertical, Theme.Spacing.xs)
+                }
+            } else {
+                if isDistillingStyle {
+                    AppStatusLine(kind: .progress, text: "正在提炼文风…")
+                }
+
+                Button {
+                    onDistillStyle(false)
+                } label: {
+                    SettingsLabelRow(
+                        title: "从正文提炼文风",
+                        detail: hasManuscriptContent ? "自动归纳" : "需先有正文"
+                    )
+                }
+                .disabled(isActionDisabled || !hasManuscriptContent)
+
+                NavigationLink {
+                    StyleTemplateEditorPage(session: session)
+                } label: {
+                    SettingsLabelRow(title: "手动填写")
+                }
+            }
+        } header: {
+            AppSectionHeader(title: "仿写模板")
+        }
+    }
+
+    private func previewText(for markdown: String) -> String {
+        let lines = markdown
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !MarkdownInline.isDivider($0) }
+            .map { MarkdownInline.headingLevel($0) == nil ? $0 : MarkdownInline.strippingHeadingMarker($0) }
+        return lines.prefix(3).joined(separator: "\n")
+    }
+}
+
+/// 仿写模板详情页：富文本排版预览，右上角支持重新提炼与编辑。
+struct StyleTemplateDetailView: View {
+    @Environment(AppStore.self) private var store
+    @Bindable var session: ProjectSession
+    var isDistillingStyle: Bool
+    var isActionDisabled: Bool
+    var canDistill: Bool
+    var onDistillStyle: () -> Void
+
+    @State private var isEditing = false
+
+    private var template: String {
+        session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        List {
+            if isDistillingStyle {
+                Section {
+                    AppStatusLine(kind: .progress, text: "正在提炼文风…")
+                }
+            }
+
+            Section {
+                if template.isEmpty {
+                    InlineEmptyState(
+                        symbol: "wand.and.stars",
+                        message: "暂无仿写模板。",
+                        actionTitle: canDistill ? "从正文提炼文风" : "手动填写",
+                        action: {
+                            if canDistill {
+                                onDistillStyle()
+                            } else {
+                                isEditing = true
+                            }
+                        }
+                    )
+                } else {
+                    MarkdownDocumentView(markdown: template)
+                        .padding(.vertical, Theme.Spacing.xs)
+
+                    Button("复制模板文本") {
+                        UIPasteboard.general.string = template
+                        store.toast = "已复制仿写模板"
+                    }
+                    .font(Theme.labelSmall)
+                }
+            } header: {
+                AppSectionHeader(title: template.isEmpty ? "内容" : "\(template.count.formatted()) 字")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .groupedPageBackground()
+        .navigationTitle("仿写模板")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button("重新提炼", action: onDistillStyle)
+                    .disabled(isActionDisabled || !canDistill)
+
+                Button("编辑") {
+                    isEditing = true
+                }
+            }
+        }
+        .navigationDestination(isPresented: $isEditing) {
+            StyleTemplateEditorPage(session: session)
+        }
+    }
+}
+
+/// 仿写模板正文编辑页：离开或点完成时同步写回并更新叙事工作区。
+private struct StyleTemplateEditorPage: View {
+    @Environment(AppStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @State private var confirmingMerge = false
-    @State private var receipt: String?
-    /// 编辑期间只改局部草稿，离开或点完成时一次写回 payload。
+    @Bindable var session: ProjectSession
+
     @State private var draft: String
-    /// 打开页面时的文本基准，用于检测本地修改与后台并发更新。
     @State private var baseline: String
 
-    init(session: ProjectSession, kind: WorldRuleTextKind) {
+    init(session: ProjectSession) {
         self.session = session
-        self.kind = kind
-        let initial = kind.text(in: session.payload.world)
+        let initial = session.payload.world.styleTemplate
         _draft = State(initialValue: initial)
         _baseline = State(initialValue: initial)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            AppTextEditor(
-                text: $draft,
-                placeholder: kind.placeholder,
-                minHeight: 180,
-                expands: true
-            )
-            .padding(Theme.Spacing.l)
-
-            if kind == .styleNotes {
-                mergeBar
-            }
-        }
+        AppTextEditor(
+            text: $draft,
+            placeholder: "叙事视角与结构、因果推进与节奏、句式用词、对白、转场与收束……",
+            minHeight: 200,
+            expands: true
+        )
+        .padding(Theme.Spacing.l)
         .groupedPageBackground()
-        .navigationTitle(kind.title)
+        .navigationTitle("编辑仿写模板")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -229,18 +225,10 @@ private struct WorldRuleEditorPage: View {
                 }
             }
         }
-        .alert(
-            "并入仿写模板？",
-            isPresented: $confirmingMerge
-        ) {
-            Button("并入", role: .destructive) { mergeNotesIntoTemplate() }
-            Button("取消", role: .cancel) {}
-        }
-        // 页面处于展示状态时，若草稿未被修改，则自动同步后台生成的最新文本。
-        .onChange(of: kind.text(in: session.payload.world)) { _, newValue in
-            guard WorldRuleDraftSync.decision(draft: draft, baseline: baseline)
-                == .adoptExternal
-            else { return }
+        .onChange(of: session.payload.world.styleTemplate) { _, newValue in
+            guard WorldRuleDraftSync.decision(draft: draft, baseline: baseline) == .adoptExternal else {
+                return
+            }
             draft = newValue
             baseline = newValue
         }
@@ -249,66 +237,13 @@ private struct WorldRuleEditorPage: View {
         }
     }
 
-    // MARK: - 草稿
-
     private func commitDraft() {
-        // 未发生变动则跳过提交，避免旧草稿覆盖编辑期间后台生成的最新结果。
         guard draft != baseline else { return }
-        switch kind {
-        case .styleNotes:
-            session.payload.world.styleNotes = draft
-        case .styleTemplate:
-            session.payload.world.styleTemplate = draft
-        case .longTermRules:
-            // 复用摘要更新接口，记录历史快照与更新时间戳。
-            let now = Int64(Date().timeIntervalSince1970 * 1000)
-            _ = session.payload.world.applySummaryUpdate(
-                content: draft,
-                newKeys: [],
-                now: now
-            )
-        }
+        session.payload.world.styleTemplate = draft
         baseline = draft
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
         session.scheduleSave()
-    }
-
-    // MARK: - 并入仿写模板
-
-    private var mergeBar: some View {
-        VStack(spacing: Theme.Spacing.s) {
-            SecondaryActionButton(
-                title: "并入仿写模板",
-                systemImage: "arrow.down.doc",
-                isEnabled: hasNotes
-            ) {
-                confirmingMerge = true
-            }
-
-            if let receipt {
-                AppStatusLine(kind: .success, text: receipt)
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.l)
-        .padding(.bottom, Theme.Spacing.m)
-    }
-
-    private var hasNotes: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func mergeNotesIntoTemplate() {
-        commitDraft()
-        let notes = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !notes.isEmpty else { return }
-
-        let template = session.payload.world.styleTemplate
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        session.payload.world.styleTemplate = template.isEmpty
-            ? notes
-            : template + "\n\n" + notes
-        session.payload.world.styleNotes = ""
-        draft = ""
-        session.scheduleSave()
-        receipt = "已并入仿写模板"
     }
 }

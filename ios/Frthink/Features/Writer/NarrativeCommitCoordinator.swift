@@ -6,20 +6,21 @@ struct NarrativeCommitReceipt {
     let projectID: String
     let previousHeadNodeID: String
     let committedNodeID: String
+    let committedNode: PlotNode
     let previousLedgerSnapshot: MaterializedNarrativeState
     let styleLint: StyleLintReport
 }
 
 /// 写作台「采纳后落盘」协调器：
 /// 确保未采纳气泡与候选变体绝不污染分支剧情图；仅在作者插入或追加正文后执行零延迟本地锚定、
-/// 文风检校与节点记账，并在开启睡眠态同步时以低温度在后台补充结构化状态增量。
+/// 文风检校与节点记账，维护待补抽队列并在后台补充结构化增量与分层金字塔滚动摘要。
 @MainActor
 enum NarrativeCommitCoordinator {
 
     private static let deltaExtractionTemperature: Double = 0.15
     private static var syncTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
 
-    /// 采纳正文后的同步落盘主入口，并在需要时派发后台增量抽取任务。
+    /// 采纳正文后的同步落盘主入口，并将符合条件的节拍登记至待同步队列按需后台提取。
     @discardableResult
     static func commitAcceptedProse(
         _ text: String,
@@ -115,6 +116,10 @@ enum NarrativeCommitCoordinator {
             return nil
         }
 
+        if trimmed.count >= 40, !workspace.pendingSyncNodeIDs.contains(nodeID) {
+            workspace.pendingSyncNodeIDs.append(nodeID)
+        }
+
         session.noteNarrativeWorkspaceUpdated(
             workspace,
             persistSynchronously: persistSynchronously
@@ -124,6 +129,7 @@ enum NarrativeCommitCoordinator {
             projectID: session.project.id,
             previousHeadNodeID: previousHeadID,
             committedNodeID: nodeID,
+            committedNode: node,
             previousLedgerSnapshot: stateBeforeCommit,
             styleLint: lintReport
         )
@@ -141,27 +147,34 @@ enum NarrativeCommitCoordinator {
         return receipt
     }
 
-    /// 撤销对应采纳提交：中止挂起冷同步任务并把剧情图头指针与三账本现状无损退回提交前快照。
+    /// 撤销对应采纳提交：中止挂起冷同步、从剧情线移除本次提交子树并无损退回三账本现状快照。
     static func undoCommit(_ receipt: NarrativeCommitReceipt, session: ProjectSession) {
         cancelPendingSync(projectID: receipt.projectID)
         guard var workspace = session.narrativeWorkspace else { return }
-        guard workspace.storyGraph.nodes[receipt.previousHeadNodeID] != nil else { return }
-        do {
-            try workspace.storyGraph.checkout(nodeID: receipt.previousHeadNodeID)
-            workspace.restoreLedgerSnapshot(from: receipt.previousLedgerSnapshot)
-            session.noteNarrativeWorkspaceUpdated(workspace)
-        } catch {
-            return
+        workspace.pendingSyncNodeIDs.removeAll { $0 == receipt.committedNodeID }
+        _ = workspace.storyGraph.pruneSubtree { $0.id == receipt.committedNodeID }
+        if workspace.storyGraph.nodes[receipt.previousHeadNodeID] != nil {
+            try? workspace.storyGraph.checkout(nodeID: receipt.previousHeadNodeID)
         }
+        workspace.restoreLedgerSnapshot(from: receipt.previousLedgerSnapshot)
+        session.noteNarrativeWorkspaceUpdated(workspace)
     }
 
-    /// 重做对应采纳提交：将剧情图头指针恢复到该次提交节点并重施该节点记录的三账本增量。
+    /// 重做对应采纳提交：将已撤销的剧情节拍放回图谱并重施其记录的三账本增量。
     static func redoCommit(_ receipt: NarrativeCommitReceipt, session: ProjectSession) {
         guard var workspace = session.narrativeWorkspace else { return }
-        guard let node = workspace.storyGraph.nodes[receipt.committedNodeID] else { return }
         do {
-            try workspace.storyGraph.checkout(nodeID: receipt.committedNodeID)
-            workspace.applyLedgerDelta(node.delta, sourceNodeID: node.id)
+            if workspace.storyGraph.nodes[receipt.committedNodeID] == nil {
+                var restored = receipt.committedNode
+                restored.secondaryCausalParentIDs = restored.secondaryCausalParentIDs.filter {
+                    workspace.storyGraph.nodes[$0] != nil
+                }
+                try workspace.storyGraph.appendNode(restored)
+                workspace.applyLedgerDelta(restored.delta, sourceNodeID: restored.id)
+            } else if let existing = workspace.storyGraph.nodes[receipt.committedNodeID] {
+                try workspace.storyGraph.checkout(nodeID: existing.id)
+                workspace.applyLedgerDelta(existing.delta, sourceNodeID: existing.id)
+            }
             session.noteNarrativeWorkspaceUpdated(workspace)
         } catch {
             return
@@ -171,6 +184,60 @@ enum NarrativeCommitCoordinator {
     static func cancelPendingSync(projectID: String) {
         syncTasks[projectID]?.task.cancel()
         syncTasks[projectID] = nil
+    }
+
+    /// 手动或定期补抽待同步队列中的采纳节拍，成功后自动清理队列并按需滚动合并金字塔摘要。
+    @discardableResult
+    static func flushPendingSyncs(
+        session: ProjectSession,
+        store: AppStore,
+        maxCount: Int = 5
+    ) async throws -> Int {
+        guard maxCount > 0 else { return 0 }
+        guard let provider = store.settings.activeProvider else {
+            throw LLMError.notConfigured
+        }
+        let client = try store.clientForActiveProvider()
+
+        var workspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let candidateIDs = Array(workspace.pendingSyncNodeIDs.prefix(maxCount))
+        guard !candidateIDs.isEmpty else { return 0 }
+
+        var syncedCount = 0
+        for nodeID in candidateIDs {
+            try Task.checkCancellation()
+            workspace = session.ensureNarrativeWorkspace(
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            guard let node = workspace.storyGraph.nodes[nodeID] else {
+                dequeuePendingNode(nodeID, in: session)
+                continue
+            }
+            guard let slice = resolveExcerptSlice(for: node, session: session) else {
+                dequeuePendingNode(nodeID, in: session)
+                continue
+            }
+
+            try await extractAndApplyDelta(
+                nodeID: nodeID,
+                excerpt: slice.excerpt,
+                pageIndex: slice.pageIndex,
+                baseUTF16Offset: slice.baseUTF16Offset,
+                client: client,
+                provider: provider,
+                session: session
+            )
+            syncedCount += 1
+        }
+
+        await consolidatePyramidIfNeeded(
+            client: client,
+            provider: provider,
+            session: session
+        )
+        return syncedCount
     }
 
     /// 按需规划下一步 2-3 个剧情分支选项（不修改任何账本，仅返回候选方案供作者抉择）。
@@ -261,59 +328,219 @@ enum NarrativeCommitCoordinator {
             else {
                 return
             }
-            let currentState = currentWorkspace.currentState()
-
-            let knownEntities = currentState.entityPages.values.sorted { $0.id < $1.id }
-            let activeThreads = currentState.threads.values
-                .filter { !$0.state.isTerminal }
-                .sorted { $0.id < $1.id }
-            let messages = NarrativeDeltaExtractor.buildExtractionMessages(
-                excerpt: excerpt,
-                knownEntities: knownEntities,
-                activeThreads: activeThreads
-            )
-            let request = LLMRequest(
-                model: provider.resolvedModel,
-                messages: messages,
-                stream: false,
-                temperature: deltaExtractionTemperature,
-                maxTokens: max(provider.maxTokens, 2_048),
-                failOnLength: true
-            )
 
             do {
-                let raw = try await client.complete(request)
-                guard !Task.isCancelled else { return }
-                let extraction = try NarrativeDeltaExtractor.parseDelta(
-                    from: raw,
-                    excerpt: excerpt,
+                try await extractAndApplyDelta(
                     nodeID: nodeID,
+                    excerpt: excerpt,
                     pageIndex: pageIndex,
-                    baseUTF16Offset: baseUTF16Offset
+                    baseUTF16Offset: baseUTF16Offset,
+                    client: client,
+                    provider: provider,
+                    session: session
                 )
-
-                guard var latestWorkspace = session.narrativeWorkspace,
-                      var targetNode = latestWorkspace.storyGraph.nodes[nodeID]
-                else {
-                    return
-                }
-
-                var updatedDelta = extraction.delta
-                if updatedDelta.pyramidPatch == nil {
-                    updatedDelta.pyramidPatch = targetNode.delta.pyramidPatch
-                } else if updatedDelta.pyramidPatch?.anchorIndexVersion == nil {
-                    updatedDelta.pyramidPatch?.anchorIndexVersion = targetNode.delta.pyramidPatch?.anchorIndexVersion
-                }
-                targetNode.delta = updatedDelta
-                latestWorkspace.storyGraph.nodes[nodeID] = targetNode
-                latestWorkspace.applyLedgerDelta(updatedDelta, sourceNodeID: nodeID)
-                session.noteNarrativeWorkspaceUpdated(latestWorkspace)
+                await consolidatePyramidIfNeeded(
+                    client: client,
+                    provider: provider,
+                    session: session
+                )
             } catch {
                 guard !Task.isCancelled, !error.isLLMCancellation else { return }
                 store.toast = "后台设定同步失败，可稍后在设定核查中重试"
             }
         }
         syncTasks[projectID] = (token: taskToken, task: task)
+    }
+
+    private static func extractAndApplyDelta(
+        nodeID: String,
+        excerpt: String,
+        pageIndex: Int,
+        baseUTF16Offset: Int,
+        client: any LLMClient,
+        provider: ProviderSetting,
+        session: ProjectSession
+    ) async throws {
+        guard let currentWorkspace = session.narrativeWorkspace,
+              currentWorkspace.storyGraph.nodes[nodeID] != nil
+        else {
+            return
+        }
+        let currentState = currentWorkspace.currentState()
+        let knownEntities = currentState.entityPages.values.sorted { $0.id < $1.id }
+        let activeThreads = currentState.threads.values
+            .filter { !$0.state.isTerminal }
+            .sorted { $0.id < $1.id }
+
+        let messages = NarrativeDeltaExtractor.buildExtractionMessages(
+            excerpt: excerpt,
+            knownEntities: knownEntities,
+            activeThreads: activeThreads
+        )
+        let request = LLMRequest(
+            model: provider.resolvedModel,
+            messages: messages,
+            stream: false,
+            temperature: deltaExtractionTemperature,
+            maxTokens: max(provider.maxTokens, 2_048),
+            failOnLength: true
+        )
+
+        let raw = try await client.complete(request)
+        try Task.checkCancellation()
+
+        guard var latestWorkspace = session.narrativeWorkspace,
+              var targetNode = latestWorkspace.storyGraph.nodes[nodeID]
+        else {
+            return
+        }
+        let latestKnownEntities = latestWorkspace.currentState().entityPages.values.sorted { $0.id < $1.id }
+        let extraction = try NarrativeDeltaExtractor.parseDelta(
+            from: raw,
+            excerpt: excerpt,
+            nodeID: nodeID,
+            pageIndex: pageIndex,
+            baseUTF16Offset: baseUTF16Offset,
+            knownEntities: latestKnownEntities
+        )
+
+        var updatedDelta = extraction.delta
+        if updatedDelta.pyramidPatch == nil {
+            updatedDelta.pyramidPatch = targetNode.delta.pyramidPatch
+        } else if updatedDelta.pyramidPatch?.anchorIndexVersion == nil {
+            updatedDelta.pyramidPatch?.anchorIndexVersion = targetNode.delta.pyramidPatch?.anchorIndexVersion
+        }
+        targetNode.delta = updatedDelta
+        latestWorkspace.storyGraph.nodes[nodeID] = targetNode
+        latestWorkspace.applyLedgerDelta(updatedDelta, sourceNodeID: nodeID)
+        latestWorkspace.pendingSyncNodeIDs.removeAll { $0 == nodeID }
+        session.noteNarrativeWorkspaceUpdated(latestWorkspace)
+    }
+
+    private static func consolidatePyramidIfNeeded(
+        client: any LLMClient,
+        provider: ProviderSetting,
+        session: ProjectSession
+    ) async {
+        guard var workspace = session.narrativeWorkspace else { return }
+
+        let sceneCards = NarrativePyramidConsolidator.pendingSceneCardsForRollup(in: workspace.pyramid)
+        if !sceneCards.isEmpty {
+            let summary = await rollupSummary(
+                items: sceneCards,
+                messages: NarrativePyramidConsolidator.buildSceneRollupMessages(cards: sceneCards),
+                fallbackMaxChars: 120,
+                client: client,
+                provider: provider
+            )
+            guard !Task.isCancelled, var latest = session.narrativeWorkspace else { return }
+            NarrativePyramidConsolidator.applySceneRollup(
+                summary: summary,
+                consumedCount: sceneCards.count,
+                to: &latest.pyramid
+            )
+            session.noteNarrativeWorkspaceUpdated(latest)
+            workspace = latest
+        }
+
+        let plotlines = NarrativePyramidConsolidator.pendingPlotlinesForRollup(in: workspace.pyramid)
+        if !plotlines.isEmpty {
+            let summary = await rollupSummary(
+                items: plotlines,
+                messages: NarrativePyramidConsolidator.buildVolumeRollupMessages(plotlines: plotlines),
+                fallbackMaxChars: 150,
+                client: client,
+                provider: provider
+            )
+            guard !Task.isCancelled, var latest = session.narrativeWorkspace else { return }
+            NarrativePyramidConsolidator.applyVolumeRollup(
+                summary: summary,
+                consumedCount: plotlines.count,
+                to: &latest.pyramid
+            )
+            session.noteNarrativeWorkspaceUpdated(latest)
+        }
+    }
+
+    private static func rollupSummary(
+        items: [String],
+        messages: [LLMMessage],
+        fallbackMaxChars: Int,
+        client: any LLMClient,
+        provider: ProviderSetting
+    ) async -> String {
+        let request = LLMRequest(
+            model: provider.resolvedModel,
+            messages: messages,
+            stream: false,
+            temperature: deltaExtractionTemperature,
+            maxTokens: min(max(provider.maxTokens, 512), 1_024),
+            failOnLength: false
+        )
+        if let raw = try? await client.complete(request) {
+            let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty {
+                return clean
+            }
+        }
+        return NarrativePyramidConsolidator.deterministicFallbackSummary(
+            items,
+            maxChars: fallbackMaxChars
+        )
+    }
+
+    private static func resolveExcerptSlice(
+        for node: PlotNode,
+        session: ProjectSession
+    ) -> (excerpt: String, pageIndex: Int, baseUTF16Offset: Int)? {
+        guard let anchor = node.manuscriptAnchor else { return nil }
+        if session.canReadByPage,
+           let pageText = session.bodyPage(anchor.pageIndex),
+           !pageText.isEmpty {
+            let pageSize = max(1, FileStore.bodyPageSize)
+            let pageBase = anchor.pageIndex * pageSize
+            let nsPage = pageText as NSString
+            let localStart = anchor.utf16Start - pageBase
+            if localStart >= 0,
+               anchor.utf16Length > 0,
+               anchor.utf16Length <= nsPage.length - localStart {
+                let span = nsPage.substring(with: NSRange(location: localStart, length: anchor.utf16Length))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if span.count >= 10 {
+                    return (String(span.prefix(3_000)), anchor.pageIndex, anchor.utf16Start)
+                }
+            }
+            let cleanPage = pageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanPage.count >= 10 {
+                return (String(cleanPage.prefix(3_000)), anchor.pageIndex, pageBase)
+            }
+        }
+
+        let nsFull = session.manuscript as NSString
+        if anchor.utf16Start >= 0,
+           anchor.utf16Length > 0,
+           anchor.utf16Length <= nsFull.length - anchor.utf16Start {
+            let span = nsFull.substring(with: NSRange(location: anchor.utf16Start, length: anchor.utf16Length))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if span.count >= 10 {
+                return (String(span.prefix(3_000)), anchor.pageIndex, anchor.utf16Start)
+            }
+        }
+
+        let quote = anchor.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        if quote.count >= 10 {
+            return (String(quote.prefix(3_000)), anchor.pageIndex, anchor.utf16Start)
+        }
+        return nil
+    }
+
+    private static func dequeuePendingNode(_ nodeID: String, in session: ProjectSession) {
+        guard var workspace = session.narrativeWorkspace else { return }
+        let before = workspace.pendingSyncNodeIDs.count
+        workspace.pendingSyncNodeIDs.removeAll { $0 == nodeID }
+        if workspace.pendingSyncNodeIDs.count != before {
+            session.noteNarrativeWorkspaceUpdated(workspace)
+        }
     }
 
     private static func compactLineSnippet(_ text: String, limit: Int) -> String {

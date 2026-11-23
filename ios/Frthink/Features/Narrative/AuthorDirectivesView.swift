@@ -1,4 +1,4 @@
-// 写作规则管理页：浏览生效/已停用规则，逐字新增全局或限定实体规则并通过左滑确认停用。
+// 写作规则管理页与复用区块：浏览生效/已停用规则，通过「+」弹窗新增规则，左滑停用。
 
 import Foundation
 import SwiftUI
@@ -7,77 +7,54 @@ struct AuthorDirectivesView: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
 
-    @State private var ruleDraft = ""
-    @State private var selectedEntityID = ""
-    @State private var scopeKind: ScopeKind = .global
-    @State private var pendingSupersede: AuthorDirective?
-    @State private var errorMessage: String?
-
-    private enum ScopeKind: String, CaseIterable, Identifiable {
-        case global = "全书"
-        case branch = "当前分支"
-        case entity = "指定设定"
-
-        var id: String { rawValue }
-    }
-
-    private var liveState: MaterializedNarrativeState? {
-        _ = session.narrativeRevision
-        return session.narrativeWorkspace?.currentState()
-    }
+    @State private var showingAddSheet = false
 
     var body: some View {
         List {
-            addRuleSection
-            activeDirectivesSection
-            if !supersededDirectives.isEmpty {
-                supersededDirectivesSection
-            }
+            AuthorDirectivesListContent(
+                session: session,
+                showingAddSheet: $showingAddSheet
+            )
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
         .navigationTitle("写作规则")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("添加写作规则")
+            }
+        }
+        .sheet(isPresented: $showingAddSheet) {
+            AddAuthorDirectiveSheet(session: session)
+        }
         .task {
             _ = session.ensureNarrativeWorkspace(
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
-            if selectedEntityID.isEmpty, let first = entityOptions.first {
-                selectedEntityID = first.id
-            }
-        }
-        .narrativeErrorAlert($errorMessage)
-        .alert(
-            "停用此写作规则？",
-            isPresented: Binding.isPresent($pendingSupersede),
-            presenting: pendingSupersede
-        ) { target in
-            Button("停用", role: .destructive) {
-                supersedeDirective(target)
-                pendingSupersede = nil
-            }
-            Button("取消", role: .cancel) {
-                pendingSupersede = nil
-            }
-        } message: { target in
-            Text("停用后不再影响生成，仍可在下方历史中查看：\(target.verbatimRule)")
         }
     }
+}
 
-    private var currentBranchLabel: String {
-        guard let workspace = session.narrativeWorkspace else { return "主线" }
-        let label = workspace.storyGraph.nodes[workspace.storyGraph.headNodeID]?.branchLabel ?? "主线"
-        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "主线" : trimmed
-    }
+/// 写作规则列表区块：供独立写作规则页与「世界 → 规则」工作台共用。
+struct AuthorDirectivesListContent: View {
+    @Environment(AppStore.self) private var store
+    let session: ProjectSession
+    @Binding var showingAddSheet: Bool
 
-    private var availableScopeKinds: [ScopeKind] {
-        entityOptions.isEmpty ? [.global, .branch] : ScopeKind.allCases
-    }
+    @State private var showSuperseded = false
+    @State private var pendingSupersede: AuthorDirective?
+    @State private var errorMessage: String?
 
-    private var entityOptions: [EntityPage] {
-        (liveState?.entityPages.values.sorted { $0.name < $1.name }) ?? []
+    private var liveState: MaterializedNarrativeState? {
+        _ = session.narrativeRevision
+        return session.narrativeWorkspace?.currentState()
     }
 
     private var activeDirectives: [AuthorDirective] {
@@ -94,44 +71,36 @@ struct AuthorDirectivesView: View {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var addRuleSection: some View {
-        Section {
-            TextField("输入需要遵守的写作规则…", text: $ruleDraft, axis: .vertical)
-                .font(Theme.label)
-                .lineLimit(2...6)
-
-            Picker("生效范围", selection: $scopeKind) {
-                ForEach(availableScopeKinds) { kind in
-                    Text(kind.rawValue).tag(kind)
-                }
+    var body: some View {
+        Group {
+            activeSection
+            if !supersededDirectives.isEmpty {
+                supersededSection
             }
-            .pickerStyle(.segmented)
-
-            if scopeKind == .branch {
-                AppValueRow(title: "绑定分支", value: currentBranchLabel)
-            } else if scopeKind == .entity, !entityOptions.isEmpty {
-                Picker("关联设定", selection: $selectedEntityID) {
-                    ForEach(entityOptions) { page in
-                        Text(page.name).tag(page.id)
-                    }
-                }
-            }
-
-            Button("添加写作规则") {
-                appendDirective()
-            }
-            .disabled(ruleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } header: {
-            AppSectionHeader(title: "新增写作规则")
+        }
+        .task {
+            _ = session.ensureNarrativeWorkspace(
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+        }
+        .narrativeErrorAlert($errorMessage)
+        .deleteConfirmationDialog(
+            { "停用规则「\(String($0.verbatimRule.prefix(20)))」？" },
+            item: $pendingSupersede,
+            actionTitle: "停用"
+        ) { target in
+            supersedeDirective(target)
         }
     }
 
-    private var activeDirectivesSection: some View {
+    private var activeSection: some View {
         Section {
             if activeDirectives.isEmpty {
                 InlineEmptyState(
                     symbol: "shield.lefthalf.filled",
-                    message: "暂无生效中的写作规则。"
+                    message: "暂无生效中的写作规则。",
+                    actionTitle: "添加写作规则",
+                    action: { showingAddSheet = true }
                 )
             } else {
                 ForEach(activeDirectives) { directive in
@@ -151,60 +120,27 @@ struct AuthorDirectivesView: View {
                 }
             }
         } header: {
-            AppSectionHeader(title: "生效中（\(activeDirectives.count)）")
+            AppSectionHeader(title: "生效中的写作规则（\(activeDirectives.count)）")
         }
     }
 
-    private var supersededDirectivesSection: some View {
+    private var supersededSection: some View {
         Section {
-            ForEach(supersededDirectives) { directive in
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(directive.verbatimRule)
-                        .font(Theme.labelSmall)
-                        .foregroundStyle(.secondary)
-                        .strikethrough()
-                    StatusPill(text: "已停用 · \(scopeLabel(for: directive.scope))", tone: .neutral)
+            DisclosureGroup("已停用（\(supersededDirectives.count)）", isExpanded: $showSuperseded) {
+                ForEach(supersededDirectives) { directive in
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text(directive.verbatimRule)
+                            .font(Theme.labelSmall)
+                            .foregroundStyle(.secondary)
+                            .strikethrough()
+                        StatusPill(
+                            text: "已停用 · \(scopeLabel(for: directive.scope))",
+                            tone: .neutral
+                        )
+                    }
+                    .padding(.vertical, Theme.Spacing.xs)
                 }
-                .padding(.vertical, Theme.Spacing.xs)
             }
-        } header: {
-            AppSectionHeader(title: "历史停用（\(supersededDirectives.count)）")
-        }
-    }
-
-    private func appendDirective() {
-        let trimmed = ruleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let scope: DirectiveScope
-        switch scopeKind {
-        case .global:
-            scope = .global
-        case .branch:
-            scope = .branch(id: currentBranchLabel)
-        case .entity:
-            if !selectedEntityID.isEmpty {
-                scope = .entity(id: selectedEntityID)
-            } else {
-                scope = .global
-            }
-        }
-
-        let directive = AuthorDirective(
-            verbatimRule: trimmed,
-            scope: scope
-        )
-        let delta = PlotNodeDelta(directiveAdds: [directive])
-        do {
-            _ = try session.commitNarrativeDelta(
-                delta,
-                summary: "新增写作规则",
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            ruleDraft = ""
-            store.toast = "已添加写作规则"
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -235,6 +171,134 @@ struct AuthorDirectivesView: View {
         case .entity(let id):
             let name = liveState?.entityPages[id]?.name ?? id
             return name
+        }
+    }
+}
+
+/// 新增写作规则弹窗：收拢输入与生效范围选择，避免常驻表单挤压主列表。
+struct AddAuthorDirectiveSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let session: ProjectSession
+
+    @State private var ruleDraft = ""
+    @State private var scopeKind: ScopeKind = .global
+    @State private var selectedEntityID = ""
+    @State private var errorMessage: String?
+
+    private enum ScopeKind: String, CaseIterable, Identifiable {
+        case global = "全书"
+        case branch = "当前分支"
+        case entity = "指定设定"
+
+        var id: String { rawValue }
+    }
+
+    private var liveState: MaterializedNarrativeState? {
+        _ = session.narrativeRevision
+        return session.narrativeWorkspace?.currentState()
+    }
+
+    private var entityOptions: [EntityPage] {
+        (liveState?.entityPages.values.sorted { $0.name < $1.name }) ?? []
+    }
+
+    private var availableScopeKinds: [ScopeKind] {
+        entityOptions.isEmpty ? [.global, .branch] : ScopeKind.allCases
+    }
+
+    private var currentBranchLabel: String {
+        guard let workspace = session.narrativeWorkspace else { return "主线" }
+        let label = workspace.storyGraph.nodes[workspace.storyGraph.headNodeID]?.branchLabel ?? "主线"
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "主线" : trimmed
+    }
+
+    private var trimmedRule: String {
+        ruleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("输入需要遵守的写作规则…", text: $ruleDraft, axis: .vertical)
+                        .font(Theme.label)
+                        .lineLimit(3...8)
+                } header: {
+                    AppSectionHeader(title: "规则正文")
+                }
+
+                Section {
+                    Picker("生效范围", selection: $scopeKind) {
+                        ForEach(availableScopeKinds) { kind in
+                            Text(kind.rawValue).tag(kind)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if scopeKind == .branch {
+                        AppValueRow(title: "绑定分支", value: currentBranchLabel)
+                    } else if scopeKind == .entity, !entityOptions.isEmpty {
+                        Picker("关联设定", selection: $selectedEntityID) {
+                            ForEach(entityOptions) { page in
+                                Text(page.name).tag(page.id)
+                            }
+                        }
+                    }
+                } header: {
+                    AppSectionHeader(title: "生效范围")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .groupedPageBackground()
+            .navigationTitle("添加写作规则")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    SheetCloseButton(title: "取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    SheetConfirmButton(title: "添加", isEnabled: !trimmedRule.isEmpty) {
+                        saveDirective()
+                    }
+                }
+            }
+            .task {
+                _ = session.ensureNarrativeWorkspace(
+                    settingsCorpusLibraries: store.settings.corpusLibraries
+                )
+                if selectedEntityID.isEmpty, let first = entityOptions.first {
+                    selectedEntityID = first.id
+                }
+            }
+            .narrativeErrorAlert($errorMessage)
+        }
+    }
+
+    private func saveDirective() {
+        guard !trimmedRule.isEmpty else { return }
+        let scope: DirectiveScope
+        switch scopeKind {
+        case .global:
+            scope = .global
+        case .branch:
+            scope = .branch(id: currentBranchLabel)
+        case .entity:
+            scope = selectedEntityID.isEmpty ? .global : .entity(id: selectedEntityID)
+        }
+
+        let directive = AuthorDirective(verbatimRule: trimmedRule, scope: scope)
+        do {
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(directiveAdds: [directive]),
+                summary: "新增写作规则",
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已添加写作规则"
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

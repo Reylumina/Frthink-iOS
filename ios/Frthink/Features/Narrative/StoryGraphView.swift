@@ -1,194 +1,215 @@
-// 剧情线视图：展示剧情进度、分支与合流关系，以及后续关联幕提示。
+// 剧情线视图：Focus + Context 线性激活主路径 + 分叉点内联切换 + 伏笔入口。
 
 import Foundation
 import SwiftUI
 
-/// 分支轨道纯计算布局器：将纯情节有向无环图映射为适合竖屏浏览的多轨道行布局。
-struct StoryGraphRailLayout {
+/// Focus + Context 线性主路径布局器：只展开当前激活分支，并在分叉节点汇总可用支线入口。
+struct StoryActivePathLayout {
+
+    struct BranchOption: Identifiable {
+        let id: String
+        let branchLabel: String
+        let tipNode: PlotNode
+        let beatCount: Int
+    }
 
     struct Row: Identifiable {
         let id: String
         let node: PlotNode
-        let lane: Int
-        let laneCount: Int
         let isHead: Bool
-        let isOnActiveLineage: Bool
-        let passThroughLanes: Set<Int>
-        let incomingAboveLanes: Set<Int>
-        let outgoingBelowLanes: Set<Int>
-        let branchToParentLane: Int?
-        let mergeParentLanes: [Int]
+        let showBranchPill: Bool
+        let alternateBranches: [BranchOption]
         let visibleParentSummary: String?
     }
 
     let rows: [Row]
+    let otherBranchTips: [BranchOption]
     let totalNodeCount: Int
+    let currentBranchLabel: String
 
-    static func build(graph: StoryGraph) -> StoryGraphRailLayout {
-        let activeLineageIDs = Set(
-            (try? graph.lineage(to: graph.headNodeID).map(\.id)) ?? [graph.headNodeID]
-        )
+    static func build(graph: StoryGraph) -> StoryActivePathLayout {
+        var spineReversed: [PlotNode] = []
+        var cursorID: String? = graph.headNodeID
+        var visitedSpine: Set<String> = []
+        while let id = cursorID, visitedSpine.insert(id).inserted, let node = graph.nodes[id] {
+            spineReversed.append(node)
+            cursorID = node.parentID
+        }
+        let activeLineage: [PlotNode] = spineReversed.reversed()
 
-        let depths = computeDepths(in: graph)
-        let sortedNodes = graph.nodes.values.sorted { lhs, rhs in
-            let leftDepth = depths[lhs.id] ?? 0
-            let rightDepth = depths[rhs.id] ?? 0
-            if leftDepth != rightDepth { return leftDepth > rightDepth }
-            if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
-            return lhs.id > rhs.id
+        let activeIDs = Set(activeLineage.map(\.id))
+
+        var childrenByParent: [String: [PlotNode]] = [:]
+        for node in graph.nodes.values {
+            guard let parentID = node.parentID, graph.nodes[parentID] != nil else { continue }
+            childrenByParent[parentID, default: []].append(node)
+        }
+        for parentID in childrenByParent.keys {
+            childrenByParent[parentID]?.sort(by: orderedBefore)
         }
 
-        var rowIndexByID: [String: Int] = [:]
-        for (idx, node) in sortedNodes.enumerated() {
-            rowIndexByID[node.id] = idx
-        }
-
-        let rootLabel = graph.nodes[graph.rootNodeID]?.branchLabel ?? "主线"
-        var laneByBranch: [String: Int] = [rootLabel: 0]
-        var nextLane = 1
-        for node in sortedNodes.reversed() {
-            let label = node.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = label.isEmpty ? rootLabel : label
-            if laneByBranch[key] == nil {
-                laneByBranch[key] = nextLane
-                nextLane += 1
+        func resolveBranchOption(from startNode: PlotNode) -> BranchOption {
+            var current = startNode
+            var beatCount = 1
+            var visited: Set<String> = [startNode.id]
+            while let candidates = childrenByParent[current.id], !candidates.isEmpty {
+                let preferred = candidates.last { $0.branchLabel == current.branchLabel }
+                    ?? candidates.last
+                guard let next = preferred, visited.insert(next.id).inserted else { break }
+                current = next
+                beatCount += 1
             }
-        }
-        let maxDisplayLanes = min(max(1, nextLane), 4)
-        let laneForNode: (PlotNode) -> Int = { node in
-            let label = node.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-            let raw = laneByBranch[label.isEmpty ? rootLabel : label] ?? 0
-            if raw == 0 { return 0 }
-            guard maxDisplayLanes > 1 else { return 0 }
-            return 1 + ((raw - 1) % (maxDisplayLanes - 1))
-        }
-
-        var passThrough: [Int: Set<Int>] = [:]
-        var incomingAbove: [Int: Set<Int>] = [:]
-        var outgoingBelow: [Int: Set<Int>] = [:]
-        var mergeLanesByID: [String: [Int]] = [:]
-
-        for (childIdx, node) in sortedNodes.enumerated() {
-            let childLane = laneForNode(node)
-            if let parentID = node.parentID,
-               let parentIdx = rowIndexByID[parentID],
-               let parentNode = graph.nodes[parentID] {
-                let parentLane = laneForNode(parentNode)
-                if parentIdx > childIdx {
-                    incomingAbove[parentIdx, default: []].insert(parentLane)
-                    if childLane == parentLane {
-                        outgoingBelow[childIdx, default: []].insert(childLane)
-                    }
-                    if parentIdx - childIdx > 1 {
-                        for k in (childIdx + 1)..<parentIdx {
-                            passThrough[k, default: []].insert(parentLane)
-                        }
-                    }
-                }
-            }
-
-            var mergeLanes: [Int] = []
-            for secID in node.secondaryCausalParentIDs {
-                guard let secIdx = rowIndexByID[secID],
-                      let secNode = graph.nodes[secID] else { continue }
-                let secLane = laneForNode(secNode)
-                mergeLanes.append(secLane)
-                if secIdx > childIdx {
-                    incomingAbove[secIdx, default: []].insert(secLane)
-                    if secIdx - childIdx > 1 {
-                        for k in (childIdx + 1)..<secIdx {
-                            passThrough[k, default: []].insert(secLane)
-                        }
-                    }
-                }
-            }
-            if !mergeLanes.isEmpty {
-                mergeLanesByID[node.id] = mergeLanes
-            }
-        }
-
-        let rows: [Row] = sortedNodes.enumerated().map { idx, node in
-            let lane = laneForNode(node)
-            let parentNode = node.parentID.flatMap { graph.nodes[$0] }
-            let branchParentLane: Int? = parentNode.flatMap { pNode in
-                let pLane = laneForNode(pNode)
-                return pLane == lane ? nil : pLane
-            }
-
-            return Row(
-                id: node.id,
-                node: node,
-                lane: lane,
-                laneCount: maxDisplayLanes,
-                isHead: node.id == graph.headNodeID,
-                isOnActiveLineage: activeLineageIDs.contains(node.id),
-                passThroughLanes: passThrough[idx] ?? [],
-                incomingAboveLanes: incomingAbove[idx] ?? [],
-                outgoingBelowLanes: outgoingBelow[idx] ?? [],
-                branchToParentLane: branchParentLane,
-                mergeParentLanes: mergeLanesByID[node.id] ?? [],
-                visibleParentSummary: parentNode?.summary
+            let cleanLabel = startNode.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            return BranchOption(
+                id: "\(startNode.id)->\(current.id)",
+                branchLabel: cleanLabel.isEmpty ? "支线" : cleanLabel,
+                tipNode: current,
+                beatCount: beatCount
             )
         }
 
-        return StoryGraphRailLayout(
-            rows: rows,
-            totalNodeCount: graph.nodes.count
+        var orderedRows: [Row] = []
+        orderedRows.reserveCapacity(activeLineage.count)
+
+        for (index, node) in activeLineage.enumerated() {
+            let nextActiveID = (index + 1 < activeLineage.count) ? activeLineage[index + 1].id : nil
+            let directChildren = childrenByParent[node.id] ?? []
+            let alternateChildren = directChildren.filter { $0.id != nextActiveID }
+            let alternateBranches = alternateChildren.map(resolveBranchOption(from:))
+
+            let parentNode = node.parentID.flatMap { graph.nodes[$0] }
+            let parentLabel = parentNode?.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let nodeLabel = node.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let showBranchPill = node.id != graph.rootNodeID
+                && !nodeLabel.isEmpty
+                && nodeLabel != parentLabel
+
+            orderedRows.append(
+                Row(
+                    id: node.id,
+                    node: node,
+                    isHead: node.id == graph.headNodeID,
+                    showBranchPill: showBranchPill,
+                    alternateBranches: alternateBranches,
+                    visibleParentSummary: parentNode?.summary
+                )
+            )
+        }
+
+        let leaves = graph.nodes.values
+            .filter { (childrenByParent[$0.id] ?? []).isEmpty && !activeIDs.contains($0.id) }
+            .sorted { lhs, rhs in
+                if lhs.createdAt != rhs.createdAt { return lhs.createdAt > rhs.createdAt }
+                return lhs.id > rhs.id
+            }
+
+        let otherTips: [BranchOption] = leaves.map { leaf in
+            var count = 1
+            var cursor = leaf.parentID
+            var visited: Set<String> = [leaf.id]
+            while let parentID = cursor,
+                  !activeIDs.contains(parentID),
+                  visited.insert(parentID).inserted,
+                  let parent = graph.nodes[parentID] {
+                count += 1
+                cursor = parent.parentID
+            }
+            let label = leaf.branchLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            return BranchOption(
+                id: leaf.id,
+                branchLabel: label.isEmpty ? "支线" : label,
+                tipNode: leaf,
+                beatCount: count
+            )
+        }
+
+        let headLabel = graph.nodes[graph.headNodeID]?.branchLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "主线"
+        return StoryActivePathLayout(
+            rows: Array(orderedRows.reversed()),
+            otherBranchTips: otherTips,
+            totalNodeCount: graph.nodes.count,
+            currentBranchLabel: headLabel.isEmpty ? "主线" : headLabel
         )
     }
 
-    private static func computeDepths(in graph: StoryGraph) -> [String: Int] {
-        var children: [String: [String]] = [:]
-        for node in graph.nodes.values {
-            for parentID in node.allParentIDs {
-                children[parentID, default: []].append(node.id)
-            }
-        }
-        var depthByID: [String: Int] = [graph.rootNodeID: 0]
-        var queue: [String] = [graph.rootNodeID]
-        var head = 0
-        while head < queue.count {
-            let current = queue[head]
-            head += 1
-            let nextDepth = (depthByID[current] ?? 0) + 1
-            for childID in children[current] ?? [] {
-                if nextDepth > (depthByID[childID] ?? -1) {
-                    depthByID[childID] = nextDepth
-                    queue.append(childID)
-                }
-            }
-        }
-        return depthByID
+    private static func orderedBefore(_ lhs: PlotNode, _ rhs: PlotNode) -> Bool {
+        if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+        return lhs.id < rhs.id
     }
 }
 
 struct StoryGraphView: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
+    var embeddedInWorld: Bool = false
+    var externalBeatTrigger: Int = 0
+    var externalThreadTrigger: Int = 0
+    var externalForkTrigger: Int = 0
 
     @State private var graph: StoryGraph = StoryGraph.makeInitial()
-    @State private var layout: StoryGraphRailLayout = StoryGraphRailLayout.build(
+    @State private var layout: StoryActivePathLayout = StoryActivePathLayout.build(
         graph: StoryGraph.makeInitial()
     )
     @State private var expandedNodeIDs: Set<String> = []
+    @State private var showOtherBranches = false
     @State private var pendingCheckoutNode: PlotNode?
     @State private var forkingFromNode: PlotNode?
     @State private var forkBranchName = ""
-    @State private var newBeatSummary = ""
+    @State private var showingAddBeatSheet = false
+    @State private var addBeatParentID: String?
+    @State private var showingPlantThreadSheet = false
     @State private var errorMessage: String?
 
+    private var liveState: MaterializedNarrativeState? {
+        _ = session.narrativeRevision
+        return session.narrativeWorkspace?.currentState()
+    }
+
+    private var activeThreadCount: Int {
+        liveState?.threads.values.filter { !$0.state.isTerminal }.count ?? 0
+    }
+
+    private var readyThreadCount: Int {
+        liveState?.threads.values.filter { $0.state == .ready }.count ?? 0
+    }
+
     var body: some View {
-        List {
-            planBeatSection
-            nodesSection
+        Group {
+            if embeddedInWorld {
+                timelineList
+            } else {
+                timelineList
+                    .navigationTitle("剧情线")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { standaloneToolbar }
+            }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .groupedPageBackground()
-        .navigationTitle("剧情线")
-        .navigationBarTitleDisplayMode(.inline)
         .task(id: session.narrativeRevision) {
             reloadGraph()
+        }
+        .onChange(of: externalBeatTrigger) { _, _ in
+            addBeatParentID = nil
+            showingAddBeatSheet = true
+        }
+        .onChange(of: externalThreadTrigger) { _, _ in
+            showingPlantThreadSheet = true
+        }
+        .onChange(of: externalForkTrigger) { _, _ in
+            if let head = graph.nodes[graph.headNodeID] {
+                forkBranchName = ""
+                forkingFromNode = head
+            }
+        }
+        .sheet(isPresented: $showingAddBeatSheet) {
+            AddPlotBeatSheet(
+                session: session,
+                parentNodeID: addBeatParentID
+            )
+        }
+        .sheet(isPresented: $showingPlantThreadSheet) {
+            PlantThreadSheet(session: session)
         }
         .narrativeErrorAlert($errorMessage, title: "操作失败")
         .alert(
@@ -204,7 +225,7 @@ struct StoryGraphView: View {
                 pendingCheckoutNode = nil
             }
         } message: { target in
-            Text("后续续写将承接「\(target.summary.isEmpty ? target.id : target.summary)」继续推进，不会修改现有正文和规则。")
+            Text("后续续写将承接「\(target.summary.isEmpty ? target.id : target.summary)」，不改动现有正文。")
         }
         .alert(
             "新建剧情分支",
@@ -227,78 +248,174 @@ struct StoryGraphView: View {
         }
     }
 
-    private var planBeatSection: some View {
+    private var timelineList: some View {
+        List {
+            threadsSummarySection
+            timelineSection
+            if !layout.otherBranchTips.isEmpty {
+                otherBranchesSection
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    @ToolbarContentBuilder
+    private var standaloneToolbar: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Menu {
+                Button("规划下一幕", systemImage: "plus.rectangle.on.rectangle") {
+                    addBeatParentID = nil
+                    showingAddBeatSheet = true
+                }
+                Button("新建伏笔", systemImage: "flag") {
+                    showingPlantThreadSheet = true
+                }
+                if let head = graph.nodes[graph.headNodeID] {
+                    Button("从当前幕分叉", systemImage: "arrow.triangle.branch") {
+                        forkBranchName = ""
+                        forkingFromNode = head
+                    }
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("新增剧情或伏笔")
+        }
+    }
+
+    private var threadsSummarySection: some View {
         Section {
-            AppValueRow(
-                title: "当前位置",
-                value: graph.nodes[graph.headNodeID]?.summary ?? graph.headNodeID
+            NavigationLink {
+                ProspectiveThreadsView(session: session)
+            } label: {
+                HStack(spacing: Theme.Spacing.s) {
+                    Text("待回收伏笔")
+                        .font(Theme.label)
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: Theme.Spacing.s)
+                    if readyThreadCount > 0 {
+                        StatusPill(text: "\(readyThreadCount) 可回收", tone: .accent)
+                    }
+                    Text(activeThreadCount == 0 ? "暂无" : "\(activeThreadCount) 条")
+                        .font(Theme.numeric)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minHeight: Theme.Layout.rowContentHeight)
+            }
+        }
+    }
+
+    private var timelineSection: some View {
+        Section {
+            ForEach(Array(layout.rows.enumerated()), id: \.element.id) { index, row in
+                nodeRowView(
+                    row,
+                    isFirst: index == 0,
+                    isLast: index == layout.rows.count - 1
+                )
+                .listRowInsets(EdgeInsets(
+                    top: 0,
+                    leading: Theme.Spacing.l,
+                    bottom: 0,
+                    trailing: Theme.Spacing.l
+                ))
+            }
+        } header: {
+            AppSectionHeader(
+                title: "当前路径 · \(layout.currentBranchLabel)（\(layout.rows.count) / \(layout.totalNodeCount) 幕）"
             )
-            TextField("规划下一幕（如：码头当面拆穿假信）", text: $newBeatSummary)
-                .font(Theme.label)
-            Button("添加一幕") {
-                addPlotBeat()
-            }
-            .disabled(newBeatSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } header: {
-            AppSectionHeader(title: "剧情进度（共 \(layout.totalNodeCount) 幕）")
         }
     }
 
-    private var nodesSection: some View {
+    private var otherBranchesSection: some View {
         Section {
-            ForEach(layout.rows) { row in
-                nodeRowView(row)
-                    .listRowInsets(EdgeInsets(
-                        top: 0,
-                        leading: Theme.Spacing.l,
-                        bottom: 0,
-                        trailing: Theme.Spacing.l
-                    ))
+            DisclosureGroup("其他分支（\(layout.otherBranchTips.count)）", isExpanded: $showOtherBranches) {
+                ForEach(layout.otherBranchTips) { branch in
+                    Button {
+                        pendingCheckoutNode = branch.tipNode
+                    } label: {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                            HStack(spacing: Theme.Spacing.s) {
+                                StatusPill(text: branch.branchLabel, tone: .neutral)
+                                Text("分支共 \(branch.beatCount) 幕")
+                                    .font(Theme.numericSmall)
+                                    .foregroundStyle(.secondary)
+                                Spacer(minLength: 0)
+                                Text("切换")
+                                    .font(Theme.labelSmall)
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            Text(branch.tipNode.summary.isEmpty ? branch.tipNode.id : branch.tipNode.summary)
+                                .font(Theme.labelSmall)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-        } header: {
-            AppSectionHeader(title: "脉络与分支")
         }
     }
 
-    private func nodeRowView(_ row: StoryGraphRailLayout.Row) -> some View {
+    private func nodeRowView(
+        _ row: StoryActivePathLayout.Row,
+        isFirst: Bool,
+        isLast: Bool
+    ) -> some View {
         let node = row.node
         let isExpanded = expandedNodeIDs.contains(node.id)
         let headNode = graph.nodes[graph.headNodeID]
         let alreadyParentOfHead = headNode?.allParentIDs.contains(node.id) ?? false
 
         return HStack(alignment: .center, spacing: Theme.Spacing.m) {
-            StoryGraphRailSlot(row: row)
+            StoryActiveTimelineSlot(
+                isFirst: isFirst,
+                isLast: isLast,
+                isHead: row.isHead,
+                hasFork: !row.alternateBranches.isEmpty
+            )
 
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 HStack(spacing: Theme.Spacing.s) {
-                    StatusPill(
-                        text: node.branchLabel,
-                        tone: row.isHead ? .accent : (row.isOnActiveLineage ? .success : .neutral)
-                    )
                     if row.isHead {
-                        StatusPill(text: "当前", tone: .accent)
+                        StatusPill(text: "当前进度", tone: .accent)
+                    }
+                    if row.showBranchPill {
+                        StatusPill(text: node.branchLabel, tone: .neutral)
                     }
                     if !node.secondaryCausalParentIDs.isEmpty {
                         StatusPill(text: "合流", tone: .success)
                     }
                     Spacer(minLength: 0)
-                    Menu("操作") {
+                    Menu {
                         if !row.isHead {
                             Button("切到这里继续写") {
                                 pendingCheckoutNode = node
                             }
                         }
-                        Button("从这里分叉") {
+                        Button("在此幕后规划下一幕") {
+                            addBeatParentID = node.id
+                            showingAddBeatSheet = true
+                        }
+                        Button("从这里新建分支") {
                             forkBranchName = ""
                             forkingFromNode = node
                         }
                         if !row.isHead && !alreadyParentOfHead {
-                            Button("并入当前线") {
+                            Button("并入当前分支") {
                                 mergeIntoHead(from: node.id)
                             }
                         }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(Theme.label)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(Theme.labelSmall)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("节点操作")
                 }
 
                 Button {
@@ -309,7 +426,7 @@ struct StoryGraphView: View {
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text(node.summary.isEmpty ? node.id : node.summary)
+                        Text(node.summary.isEmpty ? "初始节点" : node.summary)
                             .font(Theme.label)
                             .foregroundStyle(.primary)
                             .multilineTextAlignment(.leading)
@@ -326,12 +443,53 @@ struct StoryGraphView: View {
                 }
                 .buttonStyle(.plain)
 
+                if !row.alternateBranches.isEmpty {
+                    forkSwitcherPill(for: row)
+                }
+
                 if isExpanded {
                     nodeCausalDetails(node, parentSummary: row.visibleParentSummary)
                 }
             }
             .padding(.vertical, Theme.Spacing.s)
         }
+    }
+
+    private func forkSwitcherPill(for row: StoryActivePathLayout.Row) -> some View {
+        let count = row.alternateBranches.count
+        let title = row.isHead
+            ? "向下延伸 \(count) 条剧情"
+            : "另有 \(count) 条分支"
+
+        return Menu {
+            ForEach(row.alternateBranches) { branch in
+                Button {
+                    checkoutNode(branch.tipNode.id)
+                } label: {
+                    let tipSummary = branch.tipNode.summary.isEmpty
+                        ? branch.tipNode.id
+                        : branch.tipNode.summary
+                    Text("\(branch.branchLabel)（\(branch.beatCount) 幕）· \(tipSummary)")
+                }
+            }
+            Divider()
+            Button("从此处新建分支") {
+                forkBranchName = ""
+                forkingFromNode = row.node
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "arrow.triangle.branch")
+                Text(title)
+                Image(systemName: "chevron.down")
+            }
+            .font(Theme.badge)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, Theme.Spacing.s)
+            .padding(.vertical, Theme.Spacing.xs)
+            .background(Capsule().fill(Theme.accentSoft))
+        }
+        .buttonStyle(.borderless)
     }
 
     @ViewBuilder
@@ -349,7 +507,7 @@ struct StoryGraphView: View {
                     .font(Theme.metadata)
                     .foregroundStyle(.secondary)
             } else {
-                Text("后续关联：已是最新一幕")
+                Text("后续关联：已是当前分支末端")
                     .font(Theme.metadata)
                     .foregroundStyle(.secondary)
             }
@@ -362,23 +520,7 @@ struct StoryGraphView: View {
             settingsCorpusLibraries: store.settings.corpusLibraries
         )
         graph = workspace.storyGraph
-        layout = StoryGraphRailLayout.build(graph: graph)
-    }
-
-    private func addPlotBeat() {
-        let clean = newBeatSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
-        do {
-            try session.addPlotBeat(
-                summary: clean,
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            newBeatSummary = ""
-            reloadGraph()
-            store.toast = "已添加剧情"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        layout = StoryActivePathLayout.build(graph: graph)
     }
 
     private func checkoutNode(_ nodeID: String) {
@@ -416,128 +558,127 @@ struct StoryGraphView: View {
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
             reloadGraph()
-            store.toast = "已并入当前剧情线"
+            store.toast = "已并入当前分支"
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 }
 
-private struct StoryGraphRailSlot: View {
-    let row: StoryGraphRailLayout.Row
-    @ScaledMetric(relativeTo: .body) private var laneWidth: CGFloat = 14
+/// 规划下一幕弹窗：收拢输入体验，避免常驻占屏。
+private struct AddPlotBeatSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let session: ProjectSession
+    let parentNodeID: String?
 
-    var body: some View {
-        let count = max(1, row.laneCount)
-        let width = CGFloat(count) * laneWidth
-        Color.clear
-            .frame(width: width)
-            .background {
-                StoryGraphRailView(row: row)
-            }
+    @State private var summaryDraft = ""
+    @State private var errorMessage: String?
+
+    private var trimmedSummary: String {
+        summaryDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-}
-
-private struct StoryGraphRailView: View {
-    let row: StoryGraphRailLayout.Row
-
-    @ScaledMetric(relativeTo: .body) private var nodeRadius: CGFloat = 4
-
-    private let railColors: [Color] = [
-        .accentColor,
-        .orange,
-        .green,
-        .indigo,
-    ]
 
     var body: some View {
-        let count = max(1, row.laneCount)
-        Canvas { context, size in
-            let midY = size.height * 0.5
-            let xForLane: (Int) -> CGFloat = { lane in
-                (CGFloat(lane) + 0.5) * (size.width / CGFloat(count))
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("规划下一幕内容（如：码头当面拆穿假信）", text: $summaryDraft, axis: .vertical)
+                        .font(Theme.label)
+                        .lineLimit(2...6)
+                } header: {
+                    AppSectionHeader(title: "幕次纲要")
+                }
             }
-
-            for lane in row.passThroughLanes {
-                var path = Path()
-                let x = xForLane(lane)
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(color(for: lane).opacity(0.45)), lineWidth: 2)
+            .scrollContentBackground(.hidden)
+            .groupedPageBackground()
+            .navigationTitle("规划下一幕")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    SheetCloseButton(title: "取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    SheetConfirmButton(title: "添加", isEnabled: !trimmedSummary.isEmpty) {
+                        saveBeat()
+                    }
+                }
             }
-
-            for lane in row.incomingAboveLanes {
-                var path = Path()
-                let x = xForLane(lane)
-                path.move(to: CGPoint(x: x, y: 0))
-                path.addLine(to: CGPoint(x: x, y: midY))
-                context.stroke(path, with: .color(color(for: lane)), lineWidth: 2)
-            }
-
-            for lane in row.outgoingBelowLanes {
-                var path = Path()
-                let x = xForLane(lane)
-                path.move(to: CGPoint(x: x, y: midY))
-                path.addLine(to: CGPoint(x: x, y: size.height))
-                context.stroke(path, with: .color(color(for: lane)), lineWidth: 2)
-            }
-
-            let centerX = xForLane(row.lane)
-            if let parentLane = row.branchToParentLane {
-                let targetX = xForLane(parentLane)
-                var curve = Path()
-                curve.move(to: CGPoint(x: centerX, y: midY))
-                curve.addCurve(
-                    to: CGPoint(x: targetX, y: size.height),
-                    control1: CGPoint(x: centerX, y: size.height * 0.85),
-                    control2: CGPoint(x: targetX, y: midY)
-                )
-                context.stroke(curve, with: .color(color(for: row.lane)), lineWidth: 2)
-            }
-
-            for mergeLane in row.mergeParentLanes {
-                let targetX = xForLane(mergeLane)
-                var curve = Path()
-                curve.move(to: CGPoint(x: centerX, y: midY))
-                curve.addCurve(
-                    to: CGPoint(x: targetX, y: size.height),
-                    control1: CGPoint(x: centerX, y: size.height * 0.85),
-                    control2: CGPoint(x: targetX, y: midY)
-                )
-                context.stroke(
-                    curve,
-                    with: .color(color(for: mergeLane).opacity(0.75)),
-                    style: StrokeStyle(lineWidth: 2, dash: [4, 3])
-                )
-            }
-
-            let circleRect = CGRect(
-                x: centerX - nodeRadius,
-                y: midY - nodeRadius,
-                width: nodeRadius * 2,
-                height: nodeRadius * 2
-            )
-            let circle = Path(ellipseIn: circleRect)
-            let nodeColor = color(for: row.lane)
-            if row.isOnActiveLineage || row.isHead {
-                context.fill(circle, with: .color(nodeColor))
-            } else {
-                context.fill(circle, with: .color(Theme.groupedCard))
-                context.stroke(circle, with: .color(nodeColor), lineWidth: 2)
-            }
-
-            if row.isHead {
-                let ringRect = circleRect.insetBy(dx: -3, dy: -3)
-                context.stroke(
-                    Path(ellipseIn: ringRect),
-                    with: .color(nodeColor),
-                    lineWidth: 1.5
-                )
-            }
+            .narrativeErrorAlert($errorMessage)
         }
     }
 
-    private func color(for lane: Int) -> Color {
-        railColors[abs(lane) % railColors.count]
+    private func saveBeat() {
+        guard !trimmedSummary.isEmpty else { return }
+        do {
+            try session.addPlotBeat(
+                summary: trimmedSummary,
+                parentID: parentNodeID,
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已添加剧情"
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// 单轨时间轴节点绘制：展示当前路径顺序、HEAD 状态与分叉点提示，替代拥挤的多轨彩色网线。
+private struct StoryActiveTimelineSlot: View {
+    let isFirst: Bool
+    let isLast: Bool
+    let isHead: Bool
+    let hasFork: Bool
+
+    @ScaledMetric(relativeTo: .body) private var slotWidth: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) private var dotRadius: CGFloat = 4
+
+    var body: some View {
+        Color.clear
+            .frame(width: slotWidth)
+            .background {
+                Canvas { context, size in
+                    let centerX = size.width * 0.5
+                    let midY = size.height * 0.5
+
+                    if !isFirst {
+                        var topLine = Path()
+                        topLine.move(to: CGPoint(x: centerX, y: 0))
+                        topLine.addLine(to: CGPoint(x: centerX, y: midY))
+                        context.stroke(topLine, with: .color(Theme.separator), lineWidth: 2)
+                    }
+
+                    if !isLast {
+                        var bottomLine = Path()
+                        bottomLine.move(to: CGPoint(x: centerX, y: midY))
+                        bottomLine.addLine(to: CGPoint(x: centerX, y: size.height))
+                        context.stroke(bottomLine, with: .color(Theme.separator), lineWidth: 2)
+                    }
+
+                    let circleRect = CGRect(
+                        x: centerX - dotRadius,
+                        y: midY - dotRadius,
+                        width: dotRadius * 2,
+                        height: dotRadius * 2
+                    )
+                    let circle = Path(ellipseIn: circleRect)
+                    if isHead {
+                        context.fill(circle, with: .color(Theme.accent))
+                        let ringRect = circleRect.insetBy(dx: -3, dy: -3)
+                        context.stroke(
+                            Path(ellipseIn: ringRect),
+                            with: .color(Theme.accent),
+                            lineWidth: 1.5
+                        )
+                    } else if hasFork {
+                        context.fill(circle, with: .color(Theme.groupedCard))
+                        context.stroke(circle, with: .color(Theme.accent), lineWidth: 2)
+                    } else {
+                        context.fill(circle, with: .color(Theme.groupedCard))
+                        context.stroke(circle, with: .color(AppTone.neutral.color), lineWidth: 2)
+                    }
+                }
+            }
     }
 }

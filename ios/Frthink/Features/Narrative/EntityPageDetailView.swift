@@ -1,14 +1,21 @@
-// 设定详情页：提供冲突确认、已知事实与角色认知分离展示，以及纯文本预览。
+// 设定详情页：提供冲突确认、已知事实与角色认知分离展示，以及富文本档案预览。
 
 import Foundation
 import SwiftUI
+import UIKit
 
 struct EntityPageDetailView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     let session: ProjectSession
     let entityID: String
 
     @State private var showMarkdown = false
+    @State private var isEditingPage = false
+    @State private var showingDeleteConfirm = false
+    @State private var showingAddFact = false
+    @State private var newFactAttribute = ""
+    @State private var newFactValue = ""
     @State private var errorMessage: String?
 
     private struct WarningItem: Identifiable {
@@ -34,11 +41,13 @@ struct EntityPageDetailView: View {
                 factsSection
                 beliefsSection
                 markdownPreviewSection(for: page)
+                deleteSection(for: page)
             } else {
                 Section {
-                    Text("未找到该设定。")
-                        .font(Theme.labelSmall)
-                        .foregroundStyle(.secondary)
+                    InlineEmptyState(
+                        symbol: "person.2.crop.square.stack",
+                        message: "未找到该设定。"
+                    )
                 }
             }
         }
@@ -47,6 +56,47 @@ struct EntityPageDetailView: View {
         .groupedPageBackground()
         .navigationTitle(page?.name ?? "设定详情")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if page != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("编辑") {
+                        isEditingPage = true
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $isEditingPage) {
+            if let page {
+                EntityPageEditorSheet(
+                    session: session,
+                    existingPage: page,
+                    initialKind: page.kind
+                )
+            }
+        }
+        .alert("添加已知事实", isPresented: $showingAddFact) {
+            TextField("属性（如：所在地、持有物、状态）", text: $newFactAttribute)
+            TextField("事实内容（如：钟楼顶层）", text: $newFactValue)
+            Button("保存") {
+                addManualFact()
+            }
+            .disabled(
+                newFactAttribute.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || newFactValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
+            Button("取消", role: .cancel) {}
+        }
+        .deleteConfirmationDialog(
+            "删除设定「\(page?.name ?? "")」？",
+            isPresented: $showingDeleteConfirm
+        ) {
+            session.deleteEntityPage(
+                id: entityID,
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已删除设定"
+            dismiss()
+        }
         .task {
             _ = session.ensureNarrativeWorkspace(
                 settingsCorpusLibraries: store.settings.corpusLibraries
@@ -160,7 +210,18 @@ struct EntityPageDetailView: View {
                         }
                     }
                     .padding(.vertical, Theme.Spacing.xs)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("删除", role: .destructive) {
+                            retractFact(fact)
+                        }
+                    }
                 }
+            }
+
+            Button("添加事实") {
+                newFactAttribute = ""
+                newFactValue = ""
+                showingAddFact = true
             }
         } header: {
             AppSectionHeader(title: "已知事实（\(facts.count)）")
@@ -201,13 +262,25 @@ struct EntityPageDetailView: View {
     }
 
     private func markdownPreviewSection(for page: EntityPage) -> some View {
-        Section {
-            DisclosureGroup("查看纯文本", isExpanded: $showMarkdown) {
-                Text(page.renderedMarkdown(resolvedFacts: facts, beliefs: beliefs))
-                    .font(Theme.labelSmall)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+        let markdown = page.renderedMarkdown(resolvedFacts: facts, beliefs: beliefs)
+        return Section {
+            DisclosureGroup("档案预览", isExpanded: $showMarkdown) {
+                MarkdownDocumentView(markdown: markdown)
                     .padding(.vertical, Theme.Spacing.xs)
+
+                Button("复制 Markdown") {
+                    UIPasteboard.general.string = markdown
+                    store.toast = "已复制设定文本"
+                }
+                .font(Theme.labelSmall)
+            }
+        }
+    }
+
+    private func deleteSection(for page: EntityPage) -> some View {
+        Section {
+            DestructiveActionRow(title: "删除该设定") {
+                showingDeleteConfirm = true
             }
         }
     }
@@ -237,6 +310,53 @@ struct EntityPageDetailView: View {
         updated.conflictWarnings.removeAll()
         updated.updatedAt = Date()
         commitPageReplacement(updated, summary: "清空实体待确认告警")
+    }
+
+    private func addManualFact() {
+        let attr = newFactAttribute.trimmingCharacters(in: .whitespacesAndNewlines)
+        let val = newFactValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !attr.isEmpty, !val.isEmpty else { return }
+        let headID = session.narrativeWorkspace?.storyGraph.headNodeID ?? "root"
+        let event = WorldFactEvent(
+            entityID: entityID,
+            attribute: attr,
+            value: val,
+            nodeID: headID,
+            authority: .authorDirective
+        )
+        do {
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(factEvents: [event]),
+                summary: "添加设定事实：\(attr)",
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已添加事实"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func retractFact(_ fact: WorldFactEvent) {
+        let headID = session.narrativeWorkspace?.storyGraph.headNodeID ?? "root"
+        let event = WorldFactEvent(
+            entityID: entityID,
+            attribute: fact.attribute,
+            value: fact.value,
+            nodeID: headID,
+            authority: .authorDirective,
+            supersedesEventID: fact.id,
+            isRetracted: true
+        )
+        do {
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(factEvents: [event]),
+                summary: "删除设定事实：\(fact.attribute)",
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已删除事实"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func commitPageReplacement(_ updated: EntityPage, summary: String) {

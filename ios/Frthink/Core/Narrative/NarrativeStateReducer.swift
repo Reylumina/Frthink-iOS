@@ -277,13 +277,6 @@ struct MaterializedNarrativeState: Codable, Hashable {
             lines.append("- [伏笔:\(thread.state.rawValue)/\(thread.id)] \(thread.goal)")
         }
 
-        for volumeLine in pyramid.volumeOneLiners {
-            guard lines.count < maxLines else { return lines }
-            let clean = volumeLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !clean.isEmpty else { continue }
-            lines.append("- [卷纲] \(clean)")
-        }
-
         return Array(lines.prefix(maxLines))
     }
 }

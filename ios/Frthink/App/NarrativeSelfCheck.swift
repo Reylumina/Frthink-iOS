@@ -1413,16 +1413,19 @@ extension SelfCheck {
             NarrativeCommitCoordinator.undoCommit(commitReceipt, session: session)
             try expect(
                 session.narrativeWorkspace?.storyGraph.headNodeID == baselineHead
+                    && session.narrativeWorkspace?.storyGraph.nodes.count == baselineNodeCount
+                    && session.narrativeWorkspace?.storyGraph.nodes[commitReceipt.committedNodeID] == nil
                     && session.manuscript == initialPage0,
-                "撤销采纳提交后必须无损回退剧情图头节点与正文"
+                "撤销采纳提交后必须从剧情线修剪对应节拍并无损回退进度与正文"
             )
 
             let redoReceipt = session.insertIntoManuscript(appendReceipt.text, at: appendReceipt.location)
             NarrativeCommitCoordinator.redoCommit(commitReceipt, session: session)
             try expect(
                 redoReceipt.location == appendReceipt.location
-                    && session.narrativeWorkspace?.storyGraph.headNodeID == commitReceipt.committedNodeID,
-                "重做提交后应恢复对应剧情图头节点"
+                    && session.narrativeWorkspace?.storyGraph.headNodeID == commitReceipt.committedNodeID
+                    && session.narrativeWorkspace?.storyGraph.nodes.count == baselineNodeCount + 1,
+                "重做提交后应恢复对应剧情节拍与分支进度"
             )
             return "采纳保护 + 同页锚点保留 + 撤销重做 ok"
         }
@@ -1702,20 +1705,23 @@ extension SelfCheck {
                 "未变更的兄弟实体文件不应被增量写盘重新覆盖"
             )
 
-            let railLayout = StoryGraphRailLayout.build(graph: graph)
-            let visibleIDs = Set(railLayout.rows.map(\.id))
-            let sideRow = railLayout.rows.first { $0.id == "side_1" }
-            let mergeRow = railLayout.rows.first { $0.id == "merge_1" }
+            let activeLayout = StoryActivePathLayout.build(graph: graph)
+            let visibleIDs = Set(activeLayout.rows.map(\.id))
+            let main1Row = activeLayout.rows.first { $0.id == "main_1" }
+            let mergeRow = activeLayout.rows.first { $0.id == "merge_1" }
             try expect(
                 visibleIDs.contains("main_1")
                     && visibleIDs.contains("main_2")
-                    && visibleIDs.contains("side_1")
                     && visibleIDs.contains("merge_1")
-                    && (sideRow?.lane ?? 0) > 0
-                    && !(mergeRow?.mergeParentLanes.isEmpty ?? true),
-                "轨道图谱应准确渲染主线节拍并分配支线与汇合轨道"
+                    && !visibleIDs.contains("side_1")
+                    && activeLayout.totalNodeCount == 5
+                    && (main1Row?.alternateBranches.contains { $0.tipNode.id == "side_1" && $0.branchLabel == "支线" } ?? false)
+                    && activeLayout.otherBranchTips.contains { $0.tipNode.id == "side_1" }
+                    && mergeRow?.isHead == true
+                    && mergeRow?.node.secondaryCausalParentIDs == ["side_1"],
+                "激活主路径布局应线性展开当前分支，并在分叉节点汇总可用支线入口与汇合关系"
             )
-            return "增量脏写保护 + 轨道图谱拓扑 ok"
+            return "增量脏写保护 + 激活主路径布局 ok"
         }
 
         // 验证分支作用域写作规则注入、回退历史后 ReFold 存根清理及叙事工作区超预算重试裁剪收敛。
@@ -2129,6 +2135,627 @@ extension SelfCheck {
             )
 
             return "实时账本 + 纯因果图谱 + 多端工具请求 + BM25 回退 + 规划目标 + 同步联动 ok"
+        }
+
+        // 验证撤回对话关联剧情节拍级联修剪/撤销恢复、四类设定抽取合并及级联删除。
+        check("narrative.entityExtractionAndRollback") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-entity-rollback-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let session = ProjectSession(
+                project: Project(id: "rollback-book", title: "回退与设定测试"),
+                payload: ProjectPayload(),
+                source: "",
+                translations: [],
+                store: files,
+                readOnly: true
+            )
+            var ws = session.ensureNarrativeWorkspace()
+            let t0 = Date(timeIntervalSince1970: 1_796_000_000)
+
+            try ws.storyGraph.appendNode(
+                PlotNode(
+                    id: "c1",
+                    parentID: "root",
+                    branchLabel: "主线",
+                    summary: "第一幕",
+                    manuscriptAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 4, quote: "雨落石阶"),
+                    sourceMessageID: "msg_ai_1",
+                    delta: PlotNodeDelta(
+                        factEvents: [
+                            WorldFactEvent(
+                                entityID: "char_lin",
+                                attribute: WorldFactEvent.StandardAttribute.location,
+                                value: "青石巷",
+                                nodeID: "c1"
+                            )
+                        ]
+                    ),
+                    createdAt: t0.addingTimeInterval(10)
+                )
+            )
+            try ws.storyGraph.appendNode(
+                PlotNode(
+                    id: "c2",
+                    parentID: "c1",
+                    branchLabel: "主线",
+                    summary: "第二幕",
+                    manuscriptAnchor: TextSpanAnchor.make(utf16Start: 4, utf16Length: 4, quote: "推门入室"),
+                    sourceMessageID: "msg_ai_2",
+                    delta: PlotNodeDelta(
+                        factEvents: [
+                            WorldFactEvent(
+                                entityID: "char_lin",
+                                attribute: WorldFactEvent.StandardAttribute.location,
+                                value: "暗室",
+                                nodeID: "c2"
+                            )
+                        ],
+                        epistemicBeliefs: [
+                            EpistemicBelief(
+                                characterID: "char_lin",
+                                topic: "暗格",
+                                believedTruth: "已打开",
+                                knowsSecret: true,
+                                updatedAtNodeID: "c2"
+                            )
+                        ]
+                    ),
+                    createdAt: t0.addingTimeInterval(20)
+                )
+            )
+            try ws.synchronizeMaterializedHead()
+            session.noteNarrativeWorkspaceUpdated(ws)
+
+            guard let savedSnapshot = session.pruneStoryNodes(forMessageIDs: ["msg_ai_1"]) else {
+                try expect(false, "撤回绑定节拍的消息时必须剪除对应节拍及其下游子节拍")
+                return ""
+            }
+            try expect(
+                session.narrativeWorkspace?.storyGraph.nodes["c1"] == nil
+                    && session.narrativeWorkspace?.storyGraph.nodes["c2"] == nil
+                    && session.narrativeWorkspace?.storyGraph.headNodeID == "root"
+                    && session.narrativeWorkspace?.activeFacts.isEmpty == true
+                    && session.narrativeWorkspace?.epistemicBeliefs.isEmpty == true,
+                "撤回早期消息应级联修剪其引出的剧情子树并将头节点与支线账本同步退回根节拍"
+            )
+
+            session.restoreStoryRollback(savedSnapshot)
+            let restoredState = session.narrativeWorkspace?.currentState()
+            try expect(
+                session.narrativeWorkspace?.storyGraph.nodes["c1"] != nil
+                    && session.narrativeWorkspace?.storyGraph.nodes["c2"] != nil
+                    && session.narrativeWorkspace?.storyGraph.headNodeID == "c2"
+                    && restoredState?.facts(for: "char_lin").first?.value == "暗室"
+                    && restoredState?.beliefs(for: "char_lin").first?.believedTruth == "已打开",
+                "撤销撤回提示条后应完整恢复先前修剪的剧情线及对应的支线事实与认知"
+            )
+
+            try session.addPlotBeat(summary: "夜探：地窖试探")
+            _ = session.pruneStoryNodes(
+                forMessageIDs: ["msg_u_3"],
+                removedUserContents: ["夜探：地窖试探（触发伏笔）"]
+            )
+            try expect(
+                session.narrativeWorkspace?.storyGraph.headNodeID == "c2"
+                    && !(session.narrativeWorkspace?.storyGraph.nodes.values.contains {
+                        $0.summary == "夜探：地窖试探"
+                    } ?? false),
+                "撤回携带规划节拍指令的用户消息时应同步清理未动笔的同名规划节拍"
+            )
+
+            let existingChar = EntityPage(
+                id: "char_lin",
+                kind: .character,
+                name: "林昭",
+                aliases: ["阿昭"],
+                summary: "初入码头",
+                currentFactIDs: ["fact_1"],
+                conflictWarnings: ["待核对旧伤"],
+                enabled: true,
+                updatedAt: t0
+            )
+            let extractRaw = """
+            {"entities":[
+              {"id":"char_lin","kind":"character","name":"林昭","aliases":["林捕快"],"identity":"巡夜捕快","summary":"发现暗格铜匙","voice_profile":"言简意赅","hard_boundaries":["绝不留活口"]},
+              {"id":"","kind":"location","name":"旧书店","aliases":["沈记书铺"],"identity":"接头据点","summary":"地窖通往河道"},
+              {"id":"","kind":"artifact","name":"青铜短匙","aliases":[],"identity":"库房钥匙","summary":"齿痕缺角"},
+              {"id":"","kind":"lore","name":"宵禁律","aliases":[],"identity":"城防制度","summary":"亥时后禁行主街"}
+            ]}
+            """
+            let parsed = try NarrativeEntityExtractor.parseEntities(
+                from: extractRaw,
+                existingPages: [existingChar],
+                now: t0.addingTimeInterval(30)
+            )
+            let byKind = Dictionary(grouping: parsed.upserts, by: \.kind)
+            let mergedLin = parsed.upserts.first { $0.id == "char_lin" }
+            try expect(
+                parsed.added == 3
+                    && parsed.updated == 1
+                    && byKind[.character]?.count == 1
+                    && byKind[.location]?.count == 1
+                    && byKind[.artifact]?.count == 1
+                    && byKind[.lore]?.count == 1
+                    && mergedLin?.summary == "发现暗格铜匙"
+                    && mergedLin?.aliases.contains("阿昭") == true
+                    && mergedLin?.aliases.contains("林捕快") == true
+                    && mergedLin?.conflictWarnings == ["待核对旧伤"]
+                    && mergedLin?.currentFactIDs == ["fact_1"],
+                "设定提取器应覆盖四类设定并在更新已有设定时保留原告警、原别名与事实索引"
+            )
+
+            var delWorkspace = NarrativeWorkspace(storyGraph: StoryGraph.makeInitial(now: t0))
+            delWorkspace.applyLedgerDelta(
+                PlotNodeDelta(
+                    entityPageUpserts: [existingChar],
+                    factEvents: [
+                        WorldFactEvent(entityID: "char_lin", attribute: "所在地", value: "旧书店", nodeID: "root")
+                    ],
+                    epistemicBeliefs: [
+                        EpistemicBelief(characterID: "char_lin", topic: "密室", believedTruth: "未知", knowsSecret: false, updatedAtNodeID: "root")
+                    ]
+                )
+            )
+            let deleted = delWorkspace.deleteEntityPage(id: "char_lin")
+            try expect(
+                deleted
+                    && delWorkspace.entityPages["char_lin"] == nil
+                    && delWorkspace.activeFacts.isEmpty
+                    && delWorkspace.epistemicBeliefs.isEmpty,
+                "删除设定档案时应同步级联清除绑定到该设定的已知事实与角色认知"
+            )
+
+            return "撤回修剪恢复 + 四类设定提取合并 + 级联删除 ok"
+        }
+
+        // 验证五项记忆补强：分支账本隔离与全局保留、工具开启下轻量保底预检+金字塔/POV注入、
+        // 新实体自动发现去重、分层金字塔滚动汇总，以及 pendingSync/activePOV 持久化往返。
+        check("narrative.memorySystemUpgrades") {
+            let t0 = Date(timeIntervalSince1970: 1_795_900_000)
+            let lin = EntityPage(id: "c_lin", kind: .character, name: "林昭", aliases: ["阿昭"])
+            let shen = EntityPage(id: "c_shen", kind: .character, name: "沈砚")
+            let globalRule = AuthorDirective(
+                id: "d_global",
+                verbatimRule: "全文维持冷峻克制笔触。",
+                scope: .global,
+                createdAt: t0
+            )
+            let rootInit = PlotNode(
+                id: "root",
+                branchLabel: "主线",
+                summary: "开篇",
+                delta: PlotNodeDelta(
+                    directiveAdds: [globalRule],
+                    entityPageUpserts: [lin, shen]
+                ),
+                createdAt: t0
+            )
+            var graph = StoryGraph(rootNodeID: "root", headNodeID: "root", nodes: ["root": rootInit])
+            try graph.appendNode(
+                PlotNode(
+                    id: "main_1",
+                    parentID: "root",
+                    branchLabel: "主线",
+                    summary: "林昭独探码头",
+                    delta: PlotNodeDelta(
+                        factEvents: [
+                            WorldFactEvent(entityID: "c_lin", attribute: "location", value: "老码头", nodeID: "main_1", authority: .canonProseQuote)
+                        ],
+                        epistemicBeliefs: [
+                            EpistemicBelief(characterID: "c_lin", topic: "暗门", believedTruth: "通向江边", knowsSecret: true, authority: .canonProseQuote, updatedAtNodeID: "main_1"),
+                            EpistemicBelief(characterID: "c_shen", topic: "内鬼", believedTruth: "赵二才是叛徒", knowsSecret: true, authority: .canonProseQuote, updatedAtNodeID: "main_1"),
+                        ],
+                        threadEvents: [
+                            ProspectiveThreadEvent(threadID: "th_a", kind: .plant, goal: "归还铜匙", nodeID: "main_1")
+                        ]
+                    ),
+                    createdAt: t0.addingTimeInterval(10)
+                )
+            )
+            try graph.appendNode(
+                PlotNode(
+                    id: "branch_b",
+                    parentID: "root",
+                    branchLabel: "支线B",
+                    summary: "改走北门客栈",
+                    delta: PlotNodeDelta(
+                        factEvents: [
+                            WorldFactEvent(entityID: "c_lin", attribute: "location", value: "北门客栈", nodeID: "branch_b", authority: .canonProseQuote)
+                        ]
+                    ),
+                    createdAt: t0.addingTimeInterval(20)
+                ),
+                moveHead: false
+            )
+
+            var ws = NarrativeWorkspace(storyGraph: graph)
+            try ws.synchronizeMaterializedHead()
+            let manualLore = EntityPage(id: "lore_manual", kind: .lore, name: "海禁密令", identity: "子时闭港")
+            ws.applyLedgerDelta(PlotNodeDelta(entityPageUpserts: [manualLore]), sourceNodeID: "main_1")
+
+            let branchBState = try ws.checkoutBranch(to: "branch_b", now: t0.addingTimeInterval(30))
+            try expect(
+                branchBState.threads["th_a"] == nil
+                    && branchBState.epistemicBeliefs["c_lin\u{1F}暗门"] == nil
+                    && branchBState.activeFacts["c_lin\u{1F}location"]?.value == "北门客栈"
+                    && branchBState.directiveLedger.activeDirectives().contains { $0.id == "d_global" }
+                    && branchBState.entityPages["lore_manual"] != nil,
+                "切换支线后应隔离目标分支账本事件，同时保留全局规则与手动新增设定页"
+            )
+
+            let mainRestored = try ws.checkoutBranch(to: "main_1", now: t0.addingTimeInterval(40))
+            try expect(
+                mainRestored.threads["th_a"] != nil
+                    && mainRestored.activeFacts["c_lin\u{1F}location"]?.value == "老码头"
+                    && mainRestored.entityPages["lore_manual"] != nil,
+                "回切旧分支时应完整恢复该支线的缓存账本快照而不丢失增量"
+            )
+
+            ws.pyramid = NarrativePyramid(
+                volumeOneLiners: ["第一卷：雾港潮声下的暗线初现"],
+                closedPlotlines: ["林昭在旧书店识破伪造信函"],
+                recentSceneCards: ["雨夜潜行至老码头岸边"]
+            )
+            let p0 = "林昭记得老码头青石阶下压着半截铜钥匙，雨点打在石缝间发出闷响。"
+            let p1 = String(repeating: "夜色沉沉，潮声漫过堤岸。", count: 12) + "林昭与沈砚在廊下对视。"
+            let fullText = p0 + "\n\n" + p1
+            var bm25 = ManuscriptIndex.IncrementalBM25Index()
+            _ = bm25.updatePage(index: 0, text: p0, utf16Start: 0)
+            _ = bm25.updatePage(index: 1, text: p1, utf16Start: (p0 as NSString).length + 2)
+
+            var settings = AppSettings()
+            settings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-chat")]
+            settings.activeProviderID = settings.providers[0].id
+
+            let composed = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: fullText,
+                history: [],
+                userInstruction: "铜钥匙，老码头，留意沈砚神色",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailCodePointLimitOverride: 40,
+                inputBudget: 16_000,
+                enableTools: true,
+                povCharacterID: "c_lin",
+                bm25Index: bm25
+            )
+            let merged = composed.messages.map(\.content).joined(separator: "\n")
+            let volumeCount = composed.frozenSystemPrefix.components(separatedBy: "第一卷：雾港潮声下的暗线初现").count - 1
+            try expect(
+                !composed.usedFallbackBM25
+                    && volumeCount == 1
+                    && !composed.frozenSystemPrefix.contains("- [卷纲]")
+                    && merged.contains("第一卷：雾港潮声下的暗线初现")
+                    && merged.contains("林昭在旧书店识破伪造信函")
+                    && merged.contains("高关联早期细节预检")
+                    && merged.contains("老码头青石阶下压着半截铜钥匙")
+                    && !merged.contains("赵二才是叛徒"),
+                "开启工具时仍应注入轻量词法预检、单次去重卷/章级金字塔摘要与 POV 私有认知隔离，且保持 usedFallbackBM25 为 false"
+            )
+
+            var oneHopWS = ws
+            let zhaoOffStage = EntityPage(id: "c_zhao", kind: .character, name: "赵二", identity: "漕帮暗桩")
+            oneHopWS.applyLedgerDelta(
+                PlotNodeDelta(
+                    entityPageUpserts: [zhaoOffStage],
+                    factEvents: [
+                        WorldFactEvent(
+                            entityID: "c_lin",
+                            attribute: WorldFactEvent.StandardAttribute.relation,
+                            value: "暗中追查赵二行踪",
+                            nodeID: "main_1",
+                            authority: .canonProseQuote
+                        )
+                    ]
+                ),
+                sourceNodeID: "main_1"
+            )
+            let oneHopPrompt = NarrativeContextOrchestrator.compose(
+                workspace: oneHopWS,
+                manuscript: "林昭独自站在老码头石阶前。",
+                history: [],
+                userInstruction: "林昭查看码头潮水",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailCodePointLimitOverride: 40,
+                inputBudget: 16_000,
+                enableTools: false
+            )
+            let oneHopJoined = oneHopPrompt.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                oneHopPrompt.onStageEntityIDs.contains("c_lin")
+                    && !oneHopPrompt.onStageEntityIDs.contains("c_zhao")
+                    && oneHopJoined.contains("【关联离场实体（一跳）】")
+                    && oneHopJoined.contains("赵二")
+                    && oneHopJoined.contains("漕帮暗桩"),
+                "纯符号一跳关系扩展应将在场实体关系指向的离场启用实体轻量带入上下文"
+            )
+
+            var recencyBM25 = ManuscriptIndex.IncrementalBM25Index()
+            let rP0 = "青铜短匙静静躺在潮湿石缝里。"
+            let rP1 = String(repeating: "风吹过长廊暮色渐沉。", count: 3)
+            let rP2 = "青铜短匙静静躺在潮湿石缝里。"
+            _ = recencyBM25.updatePage(index: 0, text: rP0, utf16Start: 0)
+            _ = recencyBM25.updatePage(index: 1, text: rP1, utf16Start: (rP0 as NSString).length + 2)
+            _ = recencyBM25.updatePage(
+                index: 2,
+                text: rP2,
+                utf16Start: (rP0 as NSString).length + (rP1 as NSString).length + 4
+            )
+            let recencyHits = recencyBM25.recall(
+                queryTerms: ["青铜短匙"],
+                instructionText: "石缝",
+                excludeTrailingUTF16: 0,
+                maxResults: 1,
+                maxTokens: 500
+            )
+            try expect(
+                recencyHits.first?.index == 2 && recencyHits.first?.text == rP2,
+                "BM25 词法得分相近时应借助极轻加法近因决胜优先召回更近段落"
+            )
+
+            var deleteBranchWS = ws
+            _ = deleteBranchWS.deleteEntityPage(id: "c_lin")
+            let afterDeleteToB = try deleteBranchWS.checkoutBranch(to: "branch_b", now: t0.addingTimeInterval(50))
+            let afterDeleteToMain = try deleteBranchWS.checkoutBranch(to: "main_1", now: t0.addingTimeInterval(60))
+            try expect(
+                afterDeleteToB.entityPages["c_lin"] == nil
+                    && afterDeleteToB.facts(for: "c_lin").isEmpty
+                    && afterDeleteToMain.entityPages["c_lin"] == nil
+                    && afterDeleteToMain.facts(for: "c_lin").isEmpty,
+                "全局删除实体档案后跨分支切换不得在快照重放中复活该实体及其残留事实"
+            )
+
+            let excerpt = "沈清秋推开松鹤楼的后门，低声提起那只南诏秘匣。"
+            let discoveryJSON = """
+            {"new_entities":[
+              {"name":"林昭","kind":"character","identity":"重复实体"},
+              {"name":"松鹤楼","kind":"location","identity":"南城茶楼","quote":"松鹤楼的后门"},
+              {"name":"南诏秘匣","kind":"artifact","identity":"紫檀木盒","aliases":["秘匣"]},
+              {"name":"莫须有刺客","kind":"character","identity":"原文不存在"}
+            ],"facts":[]}
+            """
+            let discovered = try NarrativeDeltaExtractor.parseDelta(
+                from: discoveryJSON,
+                excerpt: excerpt,
+                nodeID: "main_1",
+                knownEntities: [lin]
+            )
+            try expect(
+                discovered.delta.entityPageUpserts.count == 2
+                    && Set(discovered.delta.entityPageUpserts.map(\.name)) == ["松鹤楼", "南诏秘匣"],
+                "增量解析应自动发现原文中出现的新实体，过滤已知实体与无原文依据的幻觉实体"
+            )
+
+            var pyramid = NarrativePyramid(
+                recentSceneCards: ["幕1", "幕2", "幕3", "幕4", "幕5", "幕6"]
+            )
+            try expect(NarrativePyramidConsolidator.needsSceneRollup(in: pyramid), "6 张场拍卡应触发阶段滚动汇总")
+            let cards = NarrativePyramidConsolidator.pendingSceneCardsForRollup(in: pyramid)
+            let sceneSummary = NarrativePyramidConsolidator.deterministicFallbackSummary(cards, maxChars: 120)
+            NarrativePyramidConsolidator.applySceneRollup(summary: sceneSummary, consumedCount: cards.count, to: &pyramid)
+            try expect(
+                pyramid.recentSceneCards == ["幕5", "幕6"] && pyramid.closedPlotlines.count == 1,
+                "阶段滚动汇总后应保留最近 2 张场拍卡并压入 closedPlotlines"
+            )
+
+            pyramid.closedPlotlines = (1...10).map { "阶段\($0)" }
+            try expect(NarrativePyramidConsolidator.needsVolumeRollup(in: pyramid), "10 条阶段摘要应触发卷纲滚动汇总")
+            let plots = NarrativePyramidConsolidator.pendingPlotlinesForRollup(in: pyramid)
+            let volSummary = NarrativePyramidConsolidator.deterministicFallbackSummary(plots, maxChars: 150)
+            NarrativePyramidConsolidator.applyVolumeRollup(summary: volSummary, consumedCount: plots.count, to: &pyramid)
+            try expect(
+                pyramid.closedPlotlines == ["阶段9", "阶段10"] && pyramid.volumeOneLiners.count == 1,
+                "卷纲滚动汇总后应保留最近 2 条阶段摘要并压入 volumeOneLiners"
+            )
+
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-mem-upgrade-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+            let files = FileStore(root: tempRoot)
+            ws.pendingSyncNodeIDs = ["main_1", "main_2"]
+            ws.activePOVCharacterID = "c_lin"
+            try files.narrative.saveWorkspace(ws, projectID: "mem_p1")
+            if case .loaded(let reloaded) = files.narrative.loadWorkspaceState(projectID: "mem_p1") {
+                try expect(
+                    reloaded.pendingSyncNodeIDs == ["main_1", "main_2"]
+                        && reloaded.activePOVCharacterID == "c_lin",
+                    "待补抽节点队列与激活 POV 视角必须经 manifest 加密往返持久化"
+                )
+            } else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+
+            return "分支账本隔离 + 混合预检 + 新实体自动发现 + 金字塔滚动 + POV/脏队列持久化 ok"
+        }
+
+        // 验证剧情图加密 WAL 追加写、尾帧崩溃容错、自动压实、检查点独立落盘与子域修订号 O(1) 判脏。
+        check("narrative.walAndCheckpointPersistence") {
+            let rootDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-wal-check-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: rootDir) }
+            let files = FileStore(root: rootDir)
+            let projectID = "wal_p1"
+            let t0 = Date(timeIntervalSince1970: 1_796_200_000)
+
+            var graph1 = StoryGraph.makeInitial(rootID: "root", branchLabel: "主线", summary: "开篇", now: t0)
+            try graph1.appendNode(
+                PlotNode(id: "n1", parentID: "root", summary: "入城", createdAt: t0.addingTimeInterval(10))
+            )
+            try graph1.recordCheckpoint(at: "root", now: t0.addingTimeInterval(5))
+            var ws1 = NarrativeWorkspace(storyGraph: graph1)
+            try ws1.synchronizeMaterializedHead()
+            ws1.entityPages["e_lin"] = EntityPage(id: "e_lin", kind: .character, name: "林昭", updatedAt: t0)
+            try files.narrative.saveWorkspace(ws1, previous: nil, projectID: projectID)
+
+            let storeDir = files.narrative.narrativeDirectory(projectID)
+            let graphURL = storeDir.appendingPathComponent("story_graph.json")
+            let manifestURL = storeDir.appendingPathComponent("manifest.json")
+            let cpURL = files.narrative.checkpointFileURL(nodeID: "root", projectID: projectID)
+            let walURL = files.narrative.storyGraphWALURL(projectID)
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let plainGraphData = try PayloadCipher.open(try Data(contentsOf: graphURL))
+            let decodedDiskGraph = try decoder.decode(StoryGraph.self, from: plainGraphData)
+            try expect(
+                decodedDiskGraph.checkpoints.isEmpty
+                    && FileManager.default.fileExists(atPath: cpURL.path)
+                    && PayloadCipher.isEncrypted(try Data(contentsOf: cpURL)),
+                "检查点必须从 story_graph.json 剥离并以独立密文文件存于 checkpoints/"
+            )
+
+            let pastDate = Date(timeIntervalSince1970: 1_700_000_000)
+            try FileManager.default.setAttributes([.modificationDate: pastDate], ofItemAtPath: graphURL.path)
+            try FileManager.default.setAttributes([.modificationDate: pastDate], ofItemAtPath: manifestURL.path)
+
+            var ws2 = ws1
+            try ws2.storyGraph.appendNode(
+                PlotNode(id: "n2", parentID: "n1", summary: "夜探码头", createdAt: t0.addingTimeInterval(20))
+            )
+            try expect(!ws2.hasSameRevision(as: ws1), "追加节拍后子域修订号必须判定为已变更")
+            try files.narrative.saveWorkspace(ws2, previous: ws1, projectID: projectID)
+
+            let graphMTime = (try FileManager.default.attributesOfItem(atPath: graphURL.path))[.modificationDate] as? Date
+            let manifestMTime = (try FileManager.default.attributesOfItem(atPath: manifestURL.path))[.modificationDate] as? Date
+            try expect(
+                FileManager.default.fileExists(atPath: walURL.path)
+                    && StoryGraphWAL.frameCount(at: walURL) == 2
+                    && graphMTime == pastDate
+                    && manifestMTime == pastDate,
+                "纯追加节拍时应走加密 WAL 追加写，不得重写 story_graph.json 与 manifest.json"
+            )
+
+            guard case .loaded(let loaded2) = files.narrative.loadWorkspaceState(projectID: projectID) else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+            try expect(
+                loaded2 == ws2 && loaded2.storyGraph.headNodeID == "n2" && loaded2.storyGraph.nodes.count == 3,
+                "重启重放 WAL 与检查点缓存后工作区应与内存语义完全一致"
+            )
+
+            // 模拟写半帧时崩溃，在 WAL 尾部写入截断尾帧，验证重放时就地截断残尾并支持继续追加。
+            let handle = try FileHandle(forWritingTo: walURL)
+            _ = try handle.seekToEnd()
+            try handle.write(contentsOf: Data([0x46, 0x52, 0x57, 0x4C, 0x00, 0x00, 0x00, 0x20, 0xDE, 0xAD]))
+            try handle.close()
+            guard case .loaded(let recoveredCrash) = files.narrative.loadWorkspaceState(projectID: projectID) else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+            try expect(
+                recoveredCrash.storyGraph.headNodeID == "n2"
+                    && recoveredCrash.storyGraph.nodes["n2"] != nil
+                    && !StoryGraphWAL.inspect(at: walURL).hasTrailingGarbage,
+                "WAL 尾部存在截断残留时应丢弃残帧并就地截断修复 WAL，完整恢复已提交节点"
+            )
+
+            var wsAfterCrash = recoveredCrash
+            try wsAfterCrash.storyGraph.appendNode(
+                PlotNode(id: "n3", parentID: "n2", summary: "残尾修复后续写", createdAt: t0.addingTimeInterval(25))
+            )
+            try files.narrative.saveWorkspace(wsAfterCrash, previous: recoveredCrash, projectID: projectID)
+            guard case .loaded(let reloadedAfterCrash) = files.narrative.loadWorkspaceState(projectID: projectID) else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+            try expect(
+                reloadedAfterCrash == wsAfterCrash
+                    && reloadedAfterCrash.storyGraph.headNodeID == "n3"
+                    && reloadedAfterCrash.storyGraph.nodes["n3"] != nil,
+                "崩溃残尾经截断修复后继续 WAL 追加写，重启重放仍必须无损恢复新节点"
+            )
+
+            // 剪枝删除节点触发基线重写并清理 WAL。
+            var ws3 = wsAfterCrash
+            _ = ws3.storyGraph.pruneSubtree { $0.id == "n2" }
+            try files.narrative.saveWorkspace(ws3, previous: wsAfterCrash, projectID: projectID)
+            try expect(!FileManager.default.fileExists(atPath: walURL.path), "节点被剪枝删除时应全量重写基线并清理 WAL")
+
+            // 连续追加达到 compactionThreshold (20 次 * 2 帧 = 40 帧)，验证自动压实回收 WAL。
+            var prevWS = ws3
+            for i in 1...20 {
+                var nextWS = prevWS
+                let nodeID = "m_\(i)"
+                let parent = i == 1 ? "n1" : "m_\(i - 1)"
+                try nextWS.storyGraph.appendNode(
+                    PlotNode(
+                        id: nodeID,
+                        parentID: parent,
+                        summary: "续写第\(i)幕",
+                        createdAt: t0.addingTimeInterval(Double(30 + i))
+                    )
+                )
+                try files.narrative.saveWorkspace(nextWS, previous: prevWS, projectID: projectID)
+                prevWS = nextWS
+            }
+            guard case .loaded(let compacted) = files.narrative.loadWorkspaceState(projectID: projectID) else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+            try expect(
+                !FileManager.default.fileExists(atPath: walURL.path) && compacted == prevWS,
+                "WAL 帧数达到阈值后应自动压实回 story_graph.json 并清空 WAL，重载结果无损"
+            )
+
+            // 验证检查点数量上限裁剪，确保保留头节点与分支尖端。
+            var cpGraph = StoryGraph.makeInitial(rootID: "root", branchLabel: "主线", summary: "开篇", now: t0)
+            try cpGraph.appendNode(PlotNode(id: "p1", parentID: "root", summary: "1", createdAt: t0.addingTimeInterval(1)))
+            try cpGraph.appendNode(PlotNode(id: "p2", parentID: "p1", summary: "2", createdAt: t0.addingTimeInterval(2)))
+            try cpGraph.appendNode(PlotNode(id: "p3", parentID: "p2", summary: "3", createdAt: t0.addingTimeInterval(3)))
+            try cpGraph.appendNode(
+                PlotNode(id: "s1", parentID: "p1", branchLabel: "支线", summary: "S1", createdAt: t0.addingTimeInterval(4)),
+                moveHead: false
+            )
+            for (idx, nid) in ["root", "p1", "p2", "p3", "s1"].enumerated() {
+                cpGraph.checkpoints[nid] = ReplayCheckpoint(
+                    nodeID: nid,
+                    state: try cpGraph.replay(to: nid),
+                    createdAt: t0.addingTimeInterval(Double(idx * 10))
+                )
+            }
+            cpGraph.pruneCheckpoints(maxRetained: 3)
+            try expect(
+                cpGraph.checkpoints.count == 3
+                    && cpGraph.checkpoints["p3"] != nil
+                    && cpGraph.checkpoints["s1"] != nil,
+                "检查点裁剪应严格遵守上限并优先保留头节点与支线尖端"
+            )
+
+            // 验证 O(1) 修订号判定对直接属性改写与检查点修改敏感。
+            let baseWS = prevWS
+            try expect(baseWS.hasSameRevision(as: baseWS), "同一修订号实例应满足 O(1) 快速判等")
+            var editedEntityWS = baseWS
+            editedEntityWS.entityPages["e_new"] = EntityPage(id: "e_new", kind: .lore, name: "海禁")
+            try expect(!editedEntityWS.hasSameRevision(as: baseWS), "直接改写 entityPages 属性应递增修订号")
+            var editedCPWS = baseWS
+            editedCPWS.storyGraph.checkpoints["n1"] = ReplayCheckpoint(
+                nodeID: "n1",
+                state: try editedCPWS.storyGraph.replay(to: "n1"),
+                createdAt: t0
+            )
+            try expect(!editedCPWS.hasSameRevision(as: baseWS), "单独修改检查点应递增 checkpointsRevision")
+
+            // 验证整图替换即使前后图谱修订号同为 0，也因 StoryGraph.lineageID 不同而触发变更判定与落盘。
+            var wsOrigZero = NarrativeWorkspace(
+                storyGraph: StoryGraph.makeInitial(rootID: "r0", summary: "原开篇", now: t0)
+            )
+            try wsOrigZero.synchronizeMaterializedHead()
+            try files.narrative.saveWorkspace(wsOrigZero, previous: nil, projectID: "wal_replace")
+            var wsReplacedZero = wsOrigZero
+            wsReplacedZero.storyGraph = StoryGraph.makeInitial(rootID: "r0", summary: "重置新开篇", now: t0)
+            try expect(!wsReplacedZero.hasSameRevision(as: wsOrigZero), "整图替换新实例必须刷新 StoryGraph.lineageID 避免判等漏写")
+            try files.narrative.saveWorkspace(wsReplacedZero, previous: wsOrigZero, projectID: "wal_replace")
+            if case .loaded(let reloadedReplaced) = files.narrative.loadWorkspaceState(projectID: "wal_replace") {
+                try expect(
+                    reloadedReplaced.storyGraph.nodes["r0"]?.summary == "重置新开篇",
+                    "整图替换同修订号 0 后必须真实覆盖落盘"
+                )
+            } else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+
+            return "加密 WAL 追加 + 截断修复后可续写 + 达阈值压实 + 检查点裁剪 + 整图替换与 O(1) 修订号 ok"
         }
     }
 

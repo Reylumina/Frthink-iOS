@@ -175,6 +175,9 @@ enum ManuscriptIndex {
                 }
 
                 if score > 0.5 {
+                    if candidates.count > 1 {
+                        score += 0.05 * (Double(item.globalIndex) / Double(candidates.count - 1))
+                    }
                     scored.append(Excerpt(index: item.globalIndex, text: item.text, score: score))
                 }
             }
@@ -265,6 +268,9 @@ enum ManuscriptIndex {
             }
 
             if score > 0.5 {
+                if windows.count > 1 {
+                    score += 0.05 * (Double(idx) / Double(windows.count - 1))
+                }
                 scored.append(Excerpt(index: idx, text: window, score: score))
             }
         }

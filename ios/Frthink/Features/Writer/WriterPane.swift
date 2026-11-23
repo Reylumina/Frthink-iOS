@@ -273,6 +273,9 @@ struct WriterPane: View {
     }
 
     private func handleAppear() {
+        _ = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
         if composer.text.isEmpty, !session.payload.composerDraft.isEmpty {
             composer.text = session.payload.composerDraft
         }
@@ -381,6 +384,19 @@ struct WriterPane: View {
             Label("剧情走向", systemImage: "sparkles")
         }
         .disabled(controller.isBusy)
+
+        Menu {
+            Picker("叙事视角", selection: activePOVBinding) {
+                Text("全知（不限）").tag(String?.none)
+                ForEach(povCharacterOptions) { character in
+                    Text(character.name).tag(String?.some(character.id))
+                }
+            }
+        } label: {
+            Label("叙事视角：\(activePOVLabel)", systemImage: "eye")
+        }
+        .disabled(controller.isBusy)
+
         Button {
             openSheet(.bodyRange)
         } label: {
@@ -436,6 +452,48 @@ struct WriterPane: View {
             }
             .disabled(controller.isBusy)
         }
+    }
+
+    private var povCharacterOptions: [EntityPage] {
+        _ = session.narrativeRevision
+        guard let state = session.narrativeWorkspace?.currentState() else { return [] }
+        return state.entityPages.values
+            .filter { $0.enabled && $0.kind == .character }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private var activePOVLabel: String {
+        _ = session.narrativeRevision
+        guard let povID = session.narrativeWorkspace?.activePOVCharacterID,
+              let page = session.narrativeWorkspace?.entityPages[povID],
+              page.enabled else {
+            return "全知"
+        }
+        return page.name
+    }
+
+    private var activePOVBinding: Binding<String?> {
+        Binding(
+            get: {
+                _ = session.narrativeRevision
+                guard let povID = session.narrativeWorkspace?.activePOVCharacterID,
+                      session.narrativeWorkspace?.entityPages[povID]?.enabled == true else {
+                    return nil
+                }
+                return povID
+            },
+            set: { newID in
+                session.setActivePOVCharacter(
+                    newID,
+                    settingsCorpusLibraries: store.settings.corpusLibraries
+                )
+                if let newID, let name = session.narrativeWorkspace?.entityPages[newID]?.name {
+                    store.toast = "已切换视角：\(name)"
+                } else {
+                    store.toast = "已切换为全知视角"
+                }
+            }
+        )
     }
 
     // MARK: - 对话

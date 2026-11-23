@@ -101,10 +101,29 @@ struct ReplayCheckpoint: Codable, Hashable {
 
 /// 分支剧情有向无环图：管理平行分支拓扑、强制因果无环并提供确定性状态重放。
 struct StoryGraph: Codable, Hashable {
-    var rootNodeID: String
-    var headNodeID: String
-    var nodes: [String: PlotNode]
-    var checkpoints: [String: ReplayCheckpoint]
+    private enum CodingKeys: String, CodingKey {
+        case rootNodeID
+        case headNodeID
+        case nodes
+        case checkpoints
+    }
+
+    var rootNodeID: String {
+        didSet { topologyRevision &+= 1 }
+    }
+    var headNodeID: String {
+        didSet { topologyRevision &+= 1 }
+    }
+    var nodes: [String: PlotNode] {
+        didSet { topologyRevision &+= 1 }
+    }
+    var checkpoints: [String: ReplayCheckpoint] {
+        didSet { checkpointsRevision &+= 1 }
+    }
+
+    private(set) var lineageID = UUID()
+    private(set) var topologyRevision: UInt64 = 0
+    private(set) var checkpointsRevision: UInt64 = 0
 
     init(
         rootNodeID: String,
@@ -124,6 +143,77 @@ struct StoryGraph: Codable, Hashable {
         headNodeID = (try? c.decode(String.self, forKey: .headNodeID)) ?? rootNodeID
         nodes = (try? c.decode([String: PlotNode].self, forKey: .nodes)) ?? [:]
         checkpoints = (try? c.decode([String: ReplayCheckpoint].self, forKey: .checkpoints)) ?? [:]
+    }
+
+    static func == (lhs: StoryGraph, rhs: StoryGraph) -> Bool {
+        lhs.rootNodeID == rhs.rootNodeID
+            && lhs.headNodeID == rhs.headNodeID
+            && lhs.nodes == rhs.nodes
+            && lhs.checkpoints == rhs.checkpoints
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(rootNodeID)
+        hasher.combine(headNodeID)
+        hasher.combine(nodes)
+        hasher.combine(checkpoints)
+    }
+
+    /// 返回剥离检查点缓存的纯拓扑视图，供 `story_graph.json` 轻量化持久化。
+    func withoutCheckpoints() -> StoryGraph {
+        StoryGraph(
+            rootNodeID: rootNodeID,
+            headNodeID: headNodeID,
+            nodes: nodes,
+            checkpoints: [:]
+        )
+    }
+
+    /// 裁剪失效及超限的重放检查点，优先保留当前头节点与各分支尖端节点。
+    mutating func pruneCheckpoints(maxRetained: Int = 12) {
+        for checkpointID in Array(checkpoints.keys) where nodes[checkpointID] == nil {
+            checkpoints.removeValue(forKey: checkpointID)
+        }
+        guard maxRetained > 0, checkpoints.count > maxRetained else { return }
+
+        var parentIDsWithChildren: Set<String> = []
+        for node in nodes.values {
+            for parentID in node.allParentIDs {
+                parentIDsWithChildren.insert(parentID)
+            }
+        }
+
+        var keepIDs: [String] = []
+        if checkpoints[headNodeID] != nil {
+            keepIDs.append(headNodeID)
+        }
+        let leafIDs = checkpoints.keys
+            .filter { $0 != headNodeID && !parentIDsWithChildren.contains($0) }
+            .sorted { lhs, rhs in
+                let lDate = checkpoints[lhs]?.createdAt ?? .distantPast
+                let rDate = checkpoints[rhs]?.createdAt ?? .distantPast
+                if lDate != rDate { return lDate > rDate }
+                return lhs > rhs
+            }
+        keepIDs.append(contentsOf: leafIDs)
+
+        if keepIDs.count < maxRetained {
+            let preview = Set(keepIDs)
+            let others = checkpoints.keys
+                .filter { !preview.contains($0) }
+                .sorted { lhs, rhs in
+                    let lDate = checkpoints[lhs]?.createdAt ?? .distantPast
+                    let rDate = checkpoints[rhs]?.createdAt ?? .distantPast
+                    if lDate != rDate { return lDate > rDate }
+                    return lhs > rhs
+                }
+            keepIDs.append(contentsOf: others.prefix(maxRetained - keepIDs.count))
+        }
+
+        let keepSet = Set(keepIDs.prefix(maxRetained))
+        for checkpointID in Array(checkpoints.keys) where !keepSet.contains(checkpointID) {
+            checkpoints.removeValue(forKey: checkpointID)
+        }
     }
 
     static func makeInitial(
@@ -249,6 +339,64 @@ struct StoryGraph: Codable, Hashable {
         headNodeID = nodeID
     }
 
+    /// 删除匹配谓词的节点及其全部主父子树 descendants，同步清理失效汇合边并把头指针退回最近存活祖先。
+    @discardableResult
+    mutating func pruneSubtree(matching predicate: (PlotNode) -> Bool) -> [PlotNode] {
+        var toRemove = Set(
+            nodes.values
+                .filter { $0.id != rootNodeID && predicate($0) }
+                .map(\.id)
+        )
+        guard !toRemove.isEmpty else { return [] }
+
+        var expanded = true
+        while expanded {
+            expanded = false
+            for node in nodes.values where node.id != rootNodeID && !toRemove.contains(node.id) {
+                if let parentID = node.parentID, toRemove.contains(parentID) {
+                    toRemove.insert(node.id)
+                    expanded = true
+                }
+            }
+        }
+
+        if toRemove.contains(headNodeID) {
+            var cursor: String? = nodes[headNodeID]?.parentID
+            var visited = Set<String>()
+            while let candidate = cursor, visited.insert(candidate).inserted {
+                if !toRemove.contains(candidate), nodes[candidate] != nil {
+                    break
+                }
+                cursor = nodes[candidate]?.parentID
+            }
+            if let surviving = cursor, !toRemove.contains(surviving), nodes[surviving] != nil {
+                headNodeID = surviving
+            } else {
+                headNodeID = rootNodeID
+            }
+        }
+
+        var removedNodes: [PlotNode] = []
+        removedNodes.reserveCapacity(toRemove.count)
+        for id in toRemove {
+            if let removed = nodes.removeValue(forKey: id) {
+                removedNodes.append(removed)
+            }
+            checkpoints.removeValue(forKey: id)
+        }
+        for id in nodes.keys {
+            guard var node = nodes[id], !node.secondaryCausalParentIDs.isEmpty else { continue }
+            let filtered = node.secondaryCausalParentIDs.filter { !toRemove.contains($0) }
+            if filtered.count != node.secondaryCausalParentIDs.count {
+                node.secondaryCausalParentIDs = filtered
+                nodes[id] = node
+            }
+        }
+
+        sortNodesDeterministically(&removedNodes)
+        return removedNodes
+    }
+
     /// 计算目标节点祖先闭包的确定性拓扑序列，仅扫描相关祖先链路并在入度校验中同步拦截断链与环。
     func lineage(to targetNodeID: String? = nil) throws -> [PlotNode] {
         guard nodes[rootNodeID] != nil else {
@@ -361,6 +509,7 @@ struct StoryGraph: Codable, Hashable {
         let state = try replay(to: targetID)
         let checkpoint = ReplayCheckpoint(nodeID: targetID, state: state, createdAt: now)
         checkpoints[targetID] = checkpoint
+        pruneCheckpoints()
         return checkpoint
     }
 

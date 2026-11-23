@@ -246,25 +246,26 @@ enum WorldMaterialWorkflow {
         return NotesOutcome(updated: true)
     }
 
-    /// 深度蒸馏：抽取全书代表性原著节选与「情境+技法重心」写入语料库做 Few-Shot 示范；
-    /// 仅在仿写模板为空时生成初版模板，已有模板保持不变以避免覆盖全书文风笔记结果。
+    /// 提炼文风：抽取全书代表性原著节选与「情境+技法重心」写入语料库做示范，
+    /// 并提炼或融合更新仿写模板。
     static func distillStyleProfile(
         session: ProjectSession,
-        store: AppStore
+        store: AppStore,
+        refreshTemplate: Bool = false
     ) async throws -> String {
         let manuscript = session.manuscript
         let trimmed = manuscript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw WorldRunError(message: "当前正文为空，无法深度蒸馏。")
+            throw WorldRunError(message: "当前正文为空，无法提炼文风。")
         }
         let context = try WorldRequestContext.make(store: store)
 
         let fingerprint = StyleDistiller.analyzeFingerprint(trimmed)
         let exemplars = StyleDistiller.selectExemplarPassages(from: trimmed)
         let existingTemplate = session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-        var generatedInitialTemplate = false
+        var updatedTemplate = false
 
-        if existingTemplate.isEmpty {
+        if existingTemplate.isEmpty || refreshTemplate {
             let budget = (try? PromptBudget.make(
                 settings: store.settings,
                 model: context.provider.resolvedModel
@@ -272,18 +273,18 @@ enum WorldMaterialWorkflow {
             let messages = StyleDistiller.distillMessages(
                 sampleText: trimmed,
                 fingerprint: fingerprint,
-                existingTemplate: "",
+                existingTemplate: refreshTemplate ? existingTemplate : "",
                 inputBudget: budget
             )
             let distilled = try await context.completeOrThrow(
                 messages,
-                errorPrefix: "深度蒸馏失败"
+                errorPrefix: "提炼文风失败"
             ).trimmingCharacters(in: .whitespacesAndNewlines)
 
             if !distilled.isEmpty {
                 session.payload.world.styleTemplate = distilled
                 session.scheduleSave()
-                generatedInitialTemplate = true
+                updatedTemplate = true
             }
         }
 
@@ -329,15 +330,17 @@ enum WorldMaterialWorkflow {
             store.settings.corpusLibraries = libraries
             store.settings.corpusEnabled = true
             store.saveSettings()
-            if generatedInitialTemplate {
-                summaryMessage = "已生成初版仿写模板，并写入 \(exemplars.count) 段 Few-Shot 节选到语料库"
+            if updatedTemplate {
+                summaryMessage = existingTemplate.isEmpty
+                    ? "已提炼仿写模板，并写入 \(exemplars.count) 段示例片段"
+                    : "已更新仿写模板与 \(exemplars.count) 段示例片段"
             } else {
-                summaryMessage = "已更新 \(exemplars.count) 段 Few-Shot 节选与技法示范到语料库（已有仿写模板保持不变）"
+                summaryMessage = "已更新 \(exemplars.count) 段示例片段（已有仿写模板保持不变）"
             }
         } else {
-            summaryMessage = generatedInitialTemplate
-                ? "已生成初版仿写模板（当前正文不足以抽取节选）"
-                : "已有仿写模板保持不变（当前正文不足以抽取节选）"
+            summaryMessage = updatedTemplate
+                ? "已提炼仿写模板（当前正文不足以抽取示例片段）"
+                : "已有仿写模板保持不变（当前正文不足以抽取示例片段）"
         }
 
         session.syncWorldChangesIntoNarrativeWorkspace(

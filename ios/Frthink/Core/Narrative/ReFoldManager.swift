@@ -48,6 +48,7 @@ enum ReFoldManager {
         var deduplicatedToolCount = 0
 
         // 对重复出现的工具返回内容仅保留首次原文，其余替换为指向首次步骤的存根。
+        nextBoundary.deduplicatedStubs = [:]
         var seenToolOutputs: [String: Int] = [:]
         for idx in working.indices where working[idx].role == "tool" {
             let normalized = working[idx].content.trimmingCharacters(in: .whitespacesAndNewlines)

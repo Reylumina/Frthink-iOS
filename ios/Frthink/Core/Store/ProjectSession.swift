@@ -69,6 +69,8 @@ final class ProjectSession {
     private var chapterScanTask: Task<Void, Never>?
     /// 章节扫描的代号。后发起的扫描结果才允许写回，避免慢任务覆盖新书。
     private var chapterScanGeneration = 0
+    /// 叙事工作区保存代号：`saveNarrativeWorkspaceNow` 或 `replaceLoadedState` 递增后，旧后台保存不得回写状态。
+    @ObservationIgnored private var narrativeSaveGeneration = 0
     /// 保存代号：replaceLoadedState 递增后，旧后台保存任务不得回写当前会话状态。
     @ObservationIgnored private var saveGeneration = 0
     /// 防抖窗口。正文是边打边存的，2 秒足够合并连续输入，也给背景编码留出空档。
@@ -297,10 +299,15 @@ final class ProjectSession {
 
     // MARK: - 叙事工作区
 
+    private var hasUnsavedNarrativeWorkspace: Bool {
+        guard let current = narrativeWorkspace else { return false }
+        return !current.hasSameRevision(as: lastSavedNarrativeWorkspace)
+    }
+
     var hasPendingNarrativeSave: Bool {
         narrativeSaveTask != nil
             || narrativeSaveInFlight
-            || narrativeWorkspace != lastSavedNarrativeWorkspace
+            || hasUnsavedNarrativeWorkspace
     }
 
     @discardableResult
@@ -353,7 +360,17 @@ final class ProjectSession {
         settingsCorpusLibraries: [CorpusLibrary] = []
     ) throws {
         var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
-        try workspace.storyGraph.checkout(nodeID: nodeID)
+        _ = try workspace.checkoutBranch(to: nodeID)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func setActivePOVCharacter(
+        _ entityID: String?,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        guard workspace.activePOVCharacterID != entityID else { return }
+        workspace.activePOVCharacterID = entityID
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
@@ -370,7 +387,8 @@ final class ProjectSession {
             branchLabel: cleanLabel,
             summary: "开辟分支：\(cleanLabel)"
         )
-        try workspace.storyGraph.appendNode(node)
+        try workspace.storyGraph.appendNode(node, moveHead: false)
+        _ = try workspace.checkoutBranch(to: node.id)
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
@@ -393,7 +411,8 @@ final class ProjectSession {
             branchLabel: (resolvedBranch?.isEmpty == false ? resolvedBranch : nil) ?? fallbackBranch,
             summary: cleanSummary
         )
-        try workspace.storyGraph.appendNode(node)
+        try workspace.storyGraph.appendNode(node, moveHead: false)
+        _ = try workspace.checkoutBranch(to: node.id)
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
@@ -404,6 +423,109 @@ final class ProjectSession {
     ) throws {
         var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
         try workspace.storyGraph.addCausalEdge(from: parentID, to: childID)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func saveEntityPage(
+        _ page: EntityPage,
+        isReplacement: Bool = true,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        let delta = isReplacement
+            ? PlotNodeDelta(entityPageReplacements: [page])
+            : PlotNodeDelta(entityPageUpserts: [page])
+        workspace.applyLedgerDelta(delta, sourceNodeID: workspace.storyGraph.headNodeID)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func deleteEntityPage(
+        id: String,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        if workspace.deleteEntityPage(id: id) {
+            noteNarrativeWorkspaceUpdated(workspace)
+        }
+    }
+
+    struct StoryRollbackSnapshot {
+        let storyGraph: StoryGraph
+        let directives: AuthorDirectiveLedger
+        let activeFacts: [String: WorldFactEvent]
+        let epistemicBeliefs: [String: EpistemicBelief]
+        let threads: [String: ProspectiveThread]
+        let conflictWarnings: [StateConflictWarning]
+        let pyramid: NarrativePyramid
+        let hasLiveLedgers: Bool
+        let pendingSyncNodeIDs: [String]
+    }
+
+    /// 随撤回或回退对话修剪关联剧情节拍与未绑定正文的同指令规划节拍，同步重对齐支线账本并保存完整快照供撤销恢复。
+    @discardableResult
+    func pruneStoryNodes(
+        forMessageIDs messageIDs: Set<String>,
+        removedUserContents: [String] = []
+    ) -> StoryRollbackSnapshot? {
+        guard var workspace = narrativeWorkspace,
+              !messageIDs.isEmpty || !removedUserContents.isEmpty else { return nil }
+        let previousSnapshot = StoryRollbackSnapshot(
+            storyGraph: workspace.storyGraph,
+            directives: workspace.directives,
+            activeFacts: workspace.activeFacts,
+            epistemicBeliefs: workspace.epistemicBeliefs,
+            threads: workspace.threads,
+            conflictWarnings: workspace.conflictWarnings,
+            pyramid: workspace.pyramid,
+            hasLiveLedgers: workspace.hasLiveLedgers,
+            pendingSyncNodeIDs: workspace.pendingSyncNodeIDs
+        )
+        let headID = previousSnapshot.storyGraph.headNodeID
+        let trimmedInstructions = removedUserContents
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let removed = workspace.storyGraph.pruneSubtree { node in
+            if let sourceID = node.sourceMessageID, messageIDs.contains(sourceID) {
+                return true
+            }
+            if node.id == headID, node.manuscriptAnchor == nil {
+                let summary = node.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !summary.isEmpty && trimmedInstructions.contains(where: { $0 == summary || $0.hasPrefix(summary) }) {
+                    return true
+                }
+            }
+            return false
+        }
+        guard !removed.isEmpty else { return nil }
+        workspace.pendingSyncNodeIDs.removeAll { workspace.storyGraph.nodes[$0] == nil }
+        workspace.realignBranchLedgersToHead()
+        noteNarrativeWorkspaceUpdated(workspace)
+        return previousSnapshot
+    }
+
+    /// 撤销撤回或回退时完整还原剧情图谱与支线三账本，并保留全局实体档案与全局规则的当前状态。
+    func restoreStoryRollback(_ snapshot: StoryRollbackSnapshot) {
+        var workspace = ensureNarrativeWorkspace()
+        let currentGlobalDirectives = workspace.directives.directives.filter { $0.scope == .global }
+        let snapshotNonGlobalDirectives = snapshot.directives.directives.filter { $0.scope != .global }
+
+        workspace.storyGraph = snapshot.storyGraph
+        workspace.directives = AuthorDirectiveLedger(directives: currentGlobalDirectives + snapshotNonGlobalDirectives)
+        workspace.activeFacts = snapshot.activeFacts
+        workspace.epistemicBeliefs = snapshot.epistemicBeliefs
+        workspace.threads = snapshot.threads
+        workspace.conflictWarnings = snapshot.conflictWarnings
+        workspace.pyramid = snapshot.pyramid
+        workspace.hasLiveLedgers = snapshot.hasLiveLedgers
+        workspace.pendingSyncNodeIDs = snapshot.pendingSyncNodeIDs
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func restoreStoryGraph(_ graph: StoryGraph) {
+        var workspace = ensureNarrativeWorkspace()
+        workspace.storyGraph = graph
+        workspace.realignBranchLedgersToHead()
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
@@ -511,16 +633,30 @@ final class ProjectSession {
     }
 
     func saveNarrativeWorkspaceNow() throws {
-        guard !isReadOnly, let narrativeWorkspace else { return }
+        guard !isReadOnly, !savesQuiesced, let narrativeWorkspace else { return }
         narrativeSaveTask?.cancel()
         narrativeSaveTask = nil
         narrativeSaveQueued = false
-        try store.narrative.saveWorkspace(
-            narrativeWorkspace,
-            previous: lastSavedNarrativeWorkspace,
-            projectID: project.id
-        )
-        lastSavedNarrativeWorkspace = narrativeWorkspace
+        let hadInFlight = narrativeSaveInFlight
+        NarrativeStore.advanceWriteToken(for: project.id)
+        narrativeSaveGeneration &+= 1
+        defer {
+            narrativeSaveInFlight = false
+            resumeNarrativeSaveWaiters()
+        }
+        do {
+            try store.narrative.saveWorkspace(
+                narrativeWorkspace,
+                previous: hadInFlight ? nil : lastSavedNarrativeWorkspace,
+                projectID: project.id
+            )
+            lastSavedNarrativeWorkspace = narrativeWorkspace
+        } catch {
+            if hadInFlight {
+                lastSavedNarrativeWorkspace = nil
+            }
+            throw error
+        }
     }
 
     func saveNarrativeWorkspaceAndWait() async {
@@ -532,8 +668,8 @@ final class ProjectSession {
         }
     }
 
-    private func flushNarrativeWorkspaceSave() {
-        guard !isReadOnly, !savesQuiesced, let snapshot = narrativeWorkspace else { return }
+    private func flushNarrativeWorkspaceSave(bypassQuiesce: Bool = false) {
+        guard !isReadOnly, (!savesQuiesced || bypassQuiesce), let snapshot = narrativeWorkspace else { return }
         narrativeSaveTask?.cancel()
         narrativeSaveTask = nil
 
@@ -541,7 +677,7 @@ final class ProjectSession {
             narrativeSaveQueued = true
             return
         }
-        guard snapshot != lastSavedNarrativeWorkspace else {
+        guard !snapshot.hasSameRevision(as: lastSavedNarrativeWorkspace) else {
             resumeNarrativeSaveWaiters()
             return
         }
@@ -551,6 +687,8 @@ final class ProjectSession {
         let projectID = project.id
         let store = self.store
         let generation = saveGeneration
+        let narrativeGen = narrativeSaveGeneration
+        let writeToken = NarrativeStore.currentWriteToken(for: projectID)
 
         Task { [weak self] in
             let writeError: Error? = await Task.detached(priority: .utility) {
@@ -558,7 +696,8 @@ final class ProjectSession {
                     try store.narrative.saveWorkspace(
                         snapshot,
                         previous: previous,
-                        projectID: projectID
+                        projectID: projectID,
+                        expectedWriteToken: writeToken
                     )
                     return nil
                 } catch {
@@ -568,7 +707,8 @@ final class ProjectSession {
             self?.finishNarrativeSave(
                 snapshot: snapshot,
                 error: writeError,
-                generation: generation
+                generation: generation,
+                narrativeGeneration: narrativeGen
             )
         }
     }
@@ -576,9 +716,10 @@ final class ProjectSession {
     private func finishNarrativeSave(
         snapshot: NarrativeWorkspace,
         error: Error?,
-        generation: Int
+        generation: Int,
+        narrativeGeneration: Int
     ) {
-        guard saveGeneration == generation else { return }
+        guard saveGeneration == generation, narrativeSaveGeneration == narrativeGeneration else { return }
         narrativeSaveInFlight = false
         resumeNarrativeSaveWaiters()
         if let error {
@@ -728,18 +869,24 @@ final class ProjectSession {
         sourceSaveTask = nil
         narrativeSaveTask?.cancel()
         narrativeSaveTask = nil
-        await waitForSaveCompletion()
-        await waitForNarrativeSaveCompletion()
-        if !isReadOnly, isDirty {
-            nextSaveKind = .all
-            flushSave()
+        queuedSaveKind = nil
+        narrativeSaveQueued = false
+        savesQuiesced = true
+        while saveInFlight || narrativeSaveInFlight {
             await waitForSaveCompletion()
-        }
-        if !isReadOnly, narrativeWorkspace != lastSavedNarrativeWorkspace {
-            flushNarrativeWorkspaceSave()
             await waitForNarrativeSaveCompletion()
         }
-        savesQuiesced = true
+        if !isReadOnly, isDirty {
+            nextSaveKind = .all
+            flushSave(bypassQuiesce: true)
+        }
+        if !isReadOnly, hasUnsavedNarrativeWorkspace {
+            flushNarrativeWorkspaceSave(bypassQuiesce: true)
+        }
+        while saveInFlight || narrativeSaveInFlight {
+            await waitForSaveCompletion()
+            await waitForNarrativeSaveCompletion()
+        }
         queuedSaveKind = nil
         narrativeSaveQueued = false
         nextSaveKind = .bodyOnly
@@ -788,8 +935,8 @@ final class ProjectSession {
         return index / FileStore.bodyPageSize
     }
 
-    private func flushSave() {
-        guard !isReadOnly, !savesQuiesced else { return }
+    private func flushSave(bypassQuiesce: Bool = false) {
+        guard !isReadOnly, (!savesQuiesced || bypassQuiesce) else { return }
         saveTask?.cancel()
         saveTask = nil
 
@@ -1324,6 +1471,8 @@ final class ProjectSession {
         chapterScanTask = nil
         chapterScanGeneration &+= 1
         saveGeneration &+= 1
+        narrativeSaveGeneration &+= 1
+        NarrativeStore.advanceWriteToken(for: project.id)
         saveInFlight = false
         narrativeSaveInFlight = false
         savesQuiesced = false

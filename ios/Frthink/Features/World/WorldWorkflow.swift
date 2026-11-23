@@ -408,55 +408,6 @@ enum WorldWorkflow {
         return (merged.added, merged.updated, deduped.outcome.note)
     }
 
-    /// 单条码字机气泡 → 一张人物卡（使用 `create_character_card` function calling）。
-    static func ingestCharacterFromBubble(
-        _ bubble: String,
-        session: ProjectSession,
-        store: AppStore
-    ) async throws -> (cardName: String, isNew: Bool) {
-        let trimmed = bubble.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw WorldRunError(message: "气泡内容为空，无法提取人物卡。")
-        }
-        let context = try WorldRequestContext.make(store: store)
-        let request = LLMRequest(
-            model: context.provider.resolvedModel,
-            messages: PromptComposer.characterIngestMessages(bubble: trimmed),
-            stream: false,
-            temperature: context.provider.temperature,
-            maxTokens: 8_192,
-            attemptId: UUID().uuidString,
-            failOnLength: true,
-            tools: [PromptComposer.createCharacterCardTool],
-            toolChoiceName: "create_character_card",
-            parallelToolCalls: false,
-            omitThinking: true
-        )
-        let calls: [LLMToolCall]
-        do {
-            calls = try await context.client.completeToolCall(request)
-        } catch {
-            if error.isLLMCancellation { throw CancellationError() }
-            throw WorldRunError(message: "人物卡提取失败：\(error.localizedDescription)")
-        }
-        guard let target = calls.first(where: { $0.functionName == "create_character_card" }) ?? calls.first,
-              let data = target.arguments.data(using: .utf8),
-              let card = WorldJSON.parseCharacter(from: data) else {
-            throw WorldRunError(message: "未能从气泡中识别出有效的人物卡内容。")
-        }
-
-        let merged = WorldMerge.mergeCharacters(
-            existing: session.payload.world.characters,
-            incoming: [card]
-        )
-        session.payload.world.characters = merged.cards
-        session.syncWorldChangesIntoNarrativeWorkspace(
-            settingsCorpusLibraries: store.settings.corpusLibraries
-        )
-        session.scheduleSave()
-        return (card.name, merged.added > 0)
-    }
-
     private static func filterTargetCharacter(
         _ cards: [CharacterCard],
         target: String?

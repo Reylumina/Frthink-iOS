@@ -1,11 +1,36 @@
-// 写作资料浮层：展示项目正文、人物卡与世界书体量，以及注入提示词的相关资料。
+// 写作资料浮层：展示项目正文、设定档案、剧情线与伏笔体量，以及注入提示词的相关资料。
 
 import SwiftUI
 
 struct WriterMaterialsSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
     let session: ProjectSession
 
-    @Environment(\.dismiss) private var dismiss
+    private var liveState: MaterializedNarrativeState? {
+        _ = session.narrativeRevision
+        return session.narrativeWorkspace?.currentState()
+    }
+
+    private var entityCount: Int {
+        liveState?.entityPages.count ?? 0
+    }
+
+    private var plotNodeCount: Int {
+        _ = session.narrativeRevision
+        return session.narrativeWorkspace?.storyGraph.nodes.count ?? 0
+    }
+
+    private var activeThreadCount: Int {
+        liveState?.threads.values.filter { !$0.state.isTerminal }.count ?? 0
+    }
+
+    private var activeDirectivesText: String {
+        let lines = (liveState?.directiveLedger.activeDirectives() ?? [])
+            .map(\.verbatimRule)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return lines.joined(separator: "\n")
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,6 +49,11 @@ struct WriterMaterialsSheet: View {
                     Button("完成") { dismiss() }
                 }
             }
+            .task {
+                _ = session.ensureNarrativeWorkspace(
+                    settingsCorpusLibraries: store.settings.corpusLibraries
+                )
+            }
         }
     }
 
@@ -38,16 +68,16 @@ struct WriterMaterialsSheet: View {
                 value: "\(session.payload.chapters.count) 章"
             )
             AppValueRow(
-                title: "人物卡",
-                value: "\(session.payload.world.characters.count) 张"
+                title: "设定档案",
+                value: "\(entityCount) 项"
             )
             AppValueRow(
-                title: "世界书",
-                value: "\(session.payload.world.worldbookEntries.count) 条"
+                title: "剧情线",
+                value: "\(plotNodeCount) 幕"
             )
             AppValueRow(
-                title: "事件卡",
-                value: "\(session.payload.world.events.count) 张"
+                title: "待回收伏笔",
+                value: "\(activeThreadCount) 条"
             )
             AppValueRow(
                 title: "原文",
@@ -61,31 +91,26 @@ struct WriterMaterialsSheet: View {
     }
 
     private var promptMaterialsSection: some View {
-        Section {
-            materialLink(
-                title: "世界状态",
-                symbol: "globe.asia.australia",
-                text: session.payload.world.currentState
-            )
+        let activeRuleCount = liveState?.directiveLedger.activeDirectives().count ?? 0
+        return Section {
             materialLink(
                 title: "仿写模板",
                 symbol: "doc.on.doc",
-                text: session.payload.world.styleTemplate
+                text: session.payload.world.styleTemplate,
+                detailOverride: materialDetail(session.payload.world.styleTemplate),
+                rendersMarkdown: true
             )
             materialLink(
-                title: "剧情梗概",
-                symbol: "list.bullet.rectangle",
-                text: session.payload.world.plotOutline
-            )
-            materialLink(
-                title: "长期写作规则",
-                symbol: "text.badge.checkmark",
-                text: session.payload.world.longTermRules
+                title: "写作规则",
+                symbol: "shield.lefthalf.filled",
+                text: activeDirectivesText,
+                detailOverride: activeRuleCount == 0 ? "未填写" : "\(activeRuleCount) 条"
             )
             materialLink(
                 title: "项目补充指令",
                 symbol: "text.append",
-                text: session.payload.assistantSupplement
+                text: session.payload.assistantSupplement,
+                detailOverride: materialDetail(session.payload.assistantSupplement)
             )
         } header: {
             AppSectionHeader(title: "会写进提示词")
@@ -117,15 +142,21 @@ struct WriterMaterialsSheet: View {
     private func materialLink(
         title: String,
         symbol: String,
-        text: String
+        text: String,
+        detailOverride: String,
+        rendersMarkdown: Bool = false
     ) -> some View {
         NavigationLink {
-            MaterialTextDetail(title: title, text: text)
+            MaterialTextDetail(
+                title: title,
+                text: text,
+                rendersMarkdown: rendersMarkdown
+            )
         } label: {
             AppSettingsRow(
                 title: title,
                 symbol: symbol,
-                detail: materialDetail(text)
+                detail: detailOverride
             )
         }
     }
@@ -141,6 +172,7 @@ struct WriterMaterialsSheet: View {
 private struct MaterialTextDetail: View {
     let title: String
     let text: String
+    var rendersMarkdown: Bool = false
 
     var body: some View {
         ScrollView {
@@ -150,6 +182,8 @@ private struct MaterialTextDetail: View {
                         .font(Font.subheadline)
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                } else if rendersMarkdown {
+                    MarkdownDocumentView(markdown: text)
                 } else {
                     Text(text)
                         .font(Theme.prose)

@@ -53,12 +53,13 @@ enum NarrativeDeltaExtractor {
         let systemPrompt = """
         你是一个冷静、只记录已发生事实的叙事状态抽取器。
         给定一段刚刚采纳落盘的小说正文，以及当前已知实体列表和未决伏笔列表，请只抽取这段正文里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
-        {"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"scene_card":""}
+        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"scene_card":""}
         硬性约束：
         1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化与伏笔状态迁移。
-        2. 每条 facts 和 beliefs 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
-        3. attribute 优先使用 location / possession / condition / relation / goal / personality / lore / status。
-        4. 若本段没有任何需要记录的状态变化，对应数组留空即可。
+        2. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确名字的重要实体（龙套路人无需收录）。
+        3. 每条 new_entities、facts 和 beliefs 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
+        4. attribute 优先使用 location / possession / condition / relation / goal / personality / lore / status。
+        5. 若本段没有任何需要记录的状态变化，对应数组留空即可。
         """
 
         var lines: [String] = []
@@ -92,6 +93,7 @@ enum NarrativeDeltaExtractor {
         nodeID: String,
         pageIndex: Int = 0,
         baseUTF16Offset: Int = 0,
+        knownEntities: [EntityPage] = [],
         now: Date = Date()
     ) throws -> NarrativeDeltaExtractionResult {
         guard let jsonString = NarrativeJSONScanner.extractFirstJSONObject(from: raw) else {
@@ -113,12 +115,22 @@ enum NarrativeDeltaExtractor {
         }
 
         let allowedTopKeys: Set<String> = [
+            "new_entities", "newEntities",
             "facts", "fact_events", "beliefs", "epistemic_beliefs",
             "threads", "thread_events", "scene_card", "sceneCard",
         ]
         if !object.keys.contains(where: { allowedTopKeys.contains($0) }) && droppedSpeculativeCount == 0 {
             throw NarrativeDeltaParseError.invalidStructure("缺少 facts / beliefs / threads / scene_card 字段")
         }
+
+        let newEntityPages = parseNewEntities(
+            from: object,
+            excerpt: excerpt,
+            pageIndex: pageIndex,
+            baseUTF16Offset: baseUTF16Offset,
+            knownEntities: knownEntities,
+            now: now
+        )
 
         var ungroundedCount = 0
         var factEvents: [WorldFactEvent] = []
@@ -252,6 +264,7 @@ enum NarrativeDeltaExtractor {
             : NarrativePyramidPatch(addedRecentSceneCards: [sceneCard])
 
         let delta = PlotNodeDelta(
+            entityPageUpserts: newEntityPages,
             factEvents: factEvents,
             epistemicBeliefs: epistemicBeliefs,
             threadEvents: threadEvents,
@@ -265,6 +278,77 @@ enum NarrativeDeltaExtractor {
     }
 
     // MARK: - 内部解析辅助
+
+    private static func parseNewEntities(
+        from object: [String: Any],
+        excerpt: String,
+        pageIndex: Int,
+        baseUTF16Offset: Int,
+        knownEntities: [EntityPage],
+        now: Date
+    ) -> [EntityPage] {
+        let rawEntities = (object["new_entities"] as? [[String: Any]])
+            ?? (object["newEntities"] as? [[String: Any]])
+            ?? []
+        guard !rawEntities.isEmpty else { return [] }
+
+        var knownNames = Set<String>()
+        var knownIDs = Set<String>()
+        for page in knownEntities {
+            knownIDs.insert(page.id)
+            let cleanName = page.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !cleanName.isEmpty { knownNames.insert(cleanName) }
+            for alias in page.aliases {
+                let cleanAlias = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !cleanAlias.isEmpty { knownNames.insert(cleanAlias) }
+            }
+        }
+
+        var result: [EntityPage] = []
+        for item in rawEntities {
+            let name = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["name", "title"])
+            guard !name.isEmpty else { continue }
+            let lowerName = name.lowercased()
+            guard !knownNames.contains(lowerName) else { continue }
+
+            let quote = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["quote", "evidence"])
+            let groundedByName = !excerpt.isEmpty && excerpt.localizedCaseInsensitiveContains(name)
+            let groundedByQuote = verifiedAnchor(
+                quote: quote,
+                in: excerpt,
+                pageIndex: pageIndex,
+                baseUTF16Offset: baseUTF16Offset
+            ) != nil
+            guard groundedByName || groundedByQuote else { continue }
+
+            let kindRaw = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["kind", "type"])
+            let kind = NarrativeEntityExtractor.parseKind(kindRaw) ?? .character
+            let identity = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["identity", "role", "summary"])
+            let aliases = NarrativeEntityExtractor.parseStringArray(item["aliases"])
+                .filter { $0.lowercased() != lowerName }
+
+            let entityID = "auto_\(kind.rawValue)_\(SummaryKey.sha256Hex(name).prefix(8))"
+            guard !knownIDs.contains(entityID) else { continue }
+            knownIDs.insert(entityID)
+            knownNames.insert(lowerName)
+            for alias in aliases {
+                knownNames.insert(alias.lowercased())
+            }
+
+            result.append(
+                EntityPage(
+                    id: entityID,
+                    kind: kind,
+                    name: name,
+                    aliases: aliases,
+                    identity: identity,
+                    enabled: true,
+                    updatedAt: now
+                )
+            )
+        }
+        return result
+    }
 
     private static func verifiedAnchor(
         quote: String,

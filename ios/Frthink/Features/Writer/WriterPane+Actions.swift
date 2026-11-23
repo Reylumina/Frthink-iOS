@@ -50,11 +50,11 @@ extension WriterPane {
         if !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             primary.append(
                 UIAction(
-                    title: "提取为人物卡",
-                    image: UIImage(systemName: "person.crop.rectangle.badge.plus"),
+                    title: "提取设定",
+                    image: UIImage(systemName: "person.text.rectangle"),
                     attributes: isBusy ? .disabled : []
                 ) { _ in
-                    ingestCharacter(from: message.content)
+                    extractEntities(from: message.content)
                 }
             )
         }
@@ -95,31 +95,43 @@ extension WriterPane {
 
     private func withdrawUserMessage(_ message: ChatMessage) {
         if controller.isBusy { controller.stop() }
+        NarrativeCommitCoordinator.cancelPendingSync(projectID: session.project.id)
         let previousDraft = composer.text
         let withdrawnText = message.content
         composer.text = withdrawnText
         session.payload.composerDraft = withdrawnText
         let index = session.payload.messages.firstIndex { $0.id == message.id }
         let removed = session.withdraw(from: message.id)
+        let removedIDs = Set(removed.map(\.id))
+        let removedUserContents = removed.filter { $0.role == .user }.map(\.content)
+        let previousSnapshot = session.pruneStoryNodes(
+            forMessageIDs: removedIDs,
+            removedUserContents: removedUserContents
+        )
         presentUndoPrompt("已撤销指令") {
             session.restore(removed, at: index)
+            if let previousSnapshot {
+                session.restoreStoryRollback(previousSnapshot)
+            }
             guard composer.text == withdrawnText else { return }
             composer.text = previousDraft
             session.payload.composerDraft = previousDraft
         }
     }
 
-    private func ingestCharacter(from text: String) {
+    private func extractEntities(from text: String) {
         Task { @MainActor in
             do {
-                let result = try await WorldWorkflow.ingestCharacterFromBubble(
+                let result = try await NarrativeViewSupport.refreshEntitiesFromText(
                     text,
                     session: session,
                     store: store
                 )
-                store.toast = result.isNew
-                    ? "已新建人物卡：\(result.cardName)"
-                    : "已更新人物卡：\(result.cardName)"
+                if result.added == 0 && result.updated == 0 {
+                    store.toast = "未发现可更新的新设定"
+                } else {
+                    store.toast = "已提取设定：新增 \(result.added) 项，更新 \(result.updated) 项"
+                }
             } catch {
                 guard !error.isLLMCancellation else { return }
                 store.errorMessage = error.localizedDescription
@@ -261,6 +273,9 @@ extension WriterPane {
         let messages = session.payload.messages
         guard let index = messages.firstIndex(where: { $0.id == target.id }) else { return }
 
+        if controller.isBusy { controller.stop() }
+        NarrativeCommitCoordinator.cancelPendingSync(projectID: session.project.id)
+
         var cutIndex = index
         var restoredInstruction = false
         if let userIndex = messages[..<index].lastIndex(where: { $0.role == .user }) {
@@ -270,7 +285,12 @@ extension WriterPane {
             cutIndex = userIndex
             restoredInstruction = true
         }
+        let removedSlice = Array(messages[cutIndex...])
         session.rollbackToMessage(messages[cutIndex].id)
+        _ = session.pruneStoryNodes(
+            forMessageIDs: Set(removedSlice.map(\.id)),
+            removedUserContents: removedSlice.filter { $0.role == .user }.map(\.content)
+        )
         store.toast = restoredInstruction
             ? "已回退指令，指令已放回输入框"
             : "已删除此气泡及后续对话"

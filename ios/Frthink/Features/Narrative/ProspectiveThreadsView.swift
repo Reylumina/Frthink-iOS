@@ -1,4 +1,4 @@
-// 伏笔管理页：分类展示待回收与已结束伏笔，支持新增伏笔与调整状态。
+// 伏笔管理页：分类展示待回收与已结束伏笔，支持通过「+」弹窗新增伏笔与调整状态。
 
 import Foundation
 import SwiftUI
@@ -7,9 +7,8 @@ struct ProspectiveThreadsView: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
 
-    @State private var goalDraft = ""
-    @State private var cueDraft = ""
-    @State private var recurrence: RecurrenceKind = .once
+    @State private var showingPlantSheet = false
+    @State private var showTerminal = false
     @State private var errorMessage: String?
 
     private var liveState: MaterializedNarrativeState? {
@@ -19,7 +18,6 @@ struct ProspectiveThreadsView: View {
 
     var body: some View {
         List {
-            plantThreadSection
             activeThreadsSection
             if !terminalThreads.isEmpty {
                 terminalThreadsSection
@@ -30,6 +28,19 @@ struct ProspectiveThreadsView: View {
         .groupedPageBackground()
         .navigationTitle("伏笔")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showingPlantSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("添加伏笔")
+            }
+        }
+        .sheet(isPresented: $showingPlantSheet) {
+            PlantThreadSheet(session: session)
+        }
         .task {
             _ = session.ensureNarrativeWorkspace(
                 settingsCorpusLibraries: store.settings.corpusLibraries
@@ -57,36 +68,14 @@ struct ProspectiveThreadsView: View {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    private var plantThreadSection: some View {
-        Section {
-            TextField("伏笔内容（如：交出地窖铜匙）", text: $goalDraft, axis: .vertical)
-                .font(Theme.label)
-                .lineLimit(1...3)
-
-            TextField("回收时机或线索（可选）", text: $cueDraft)
-                .font(Theme.labelSmall)
-
-            Picker("回收方式", selection: $recurrence) {
-                Text("一次性").tag(RecurrenceKind.once)
-                Text("多次呼应").tag(RecurrenceKind.recurring)
-            }
-            .pickerStyle(.segmented)
-
-            Button("添加伏笔") {
-                plantThread()
-            }
-            .disabled(goalDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        } header: {
-            AppSectionHeader(title: "新增伏笔")
-        }
-    }
-
     private var activeThreadsSection: some View {
         Section {
             if activeThreads.isEmpty {
                 InlineEmptyState(
                     symbol: "flag.2.crossed",
-                    message: "暂无待回收的伏笔。"
+                    message: "暂无待回收的伏笔。",
+                    actionTitle: "添加伏笔",
+                    action: { showingPlantSheet = true }
                 )
             } else {
                 ForEach(activeThreads) { thread in
@@ -100,11 +89,11 @@ struct ProspectiveThreadsView: View {
 
     private var terminalThreadsSection: some View {
         Section {
-            ForEach(terminalThreads) { thread in
-                threadRow(thread, allowTransitions: false)
+            DisclosureGroup("已结束（\(terminalThreads.count)）", isExpanded: $showTerminal) {
+                ForEach(terminalThreads) { thread in
+                    threadRow(thread, allowTransitions: false)
+                }
             }
-        } header: {
-            AppSectionHeader(title: "已结束（\(terminalThreads.count)）")
         }
     }
 
@@ -118,7 +107,7 @@ struct ProspectiveThreadsView: View {
                 )
                 Spacer(minLength: 0)
                 if allowTransitions {
-                    Menu("调整状态") {
+                    Menu {
                         if thread.state != .ready {
                             Button("标为可回收") {
                                 transition(thread: thread, kind: .promoteReady)
@@ -135,8 +124,13 @@ struct ProspectiveThreadsView: View {
                         Button("标为放弃", role: .destructive) {
                             transition(thread: thread, kind: .invalidate)
                         }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(Theme.label)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(Theme.labelSmall)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("调整伏笔状态")
                 }
             }
 
@@ -151,36 +145,6 @@ struct ProspectiveThreadsView: View {
             }
         }
         .padding(.vertical, Theme.Spacing.xs)
-    }
-
-    private func plantThread() {
-        let goal = goalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !goal.isEmpty else { return }
-        let cue = cueDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        let headID = session.narrativeWorkspace?.storyGraph.headNodeID ?? "root"
-        let threadID = "th_\(UUID().uuidString.prefix(8))"
-        let event = ProspectiveThreadEvent(
-            threadID: threadID,
-            kind: .plant,
-            goal: goal,
-            activationCue: cue.isEmpty ? nil : cue,
-            recurrence: recurrence,
-            authority: .authorDirective,
-            nodeID: headID
-        )
-        let delta = PlotNodeDelta(threadEvents: [event])
-        do {
-            _ = try session.commitNarrativeDelta(
-                delta,
-                summary: "埋设伏笔：\(String(goal.prefix(16)))",
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            goalDraft = ""
-            cueDraft = ""
-            store.toast = "已添加伏笔"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
     }
 
     private func transition(
@@ -234,6 +198,92 @@ struct ProspectiveThreadsView: View {
         case .enacted: return .warning
         case .satisfied: return .success
         case .invalidated: return .danger
+        }
+    }
+}
+
+/// 新建伏笔弹窗：由伏笔页或剧情工作台触发，避免常驻大表单占满首屏。
+struct PlantThreadSheet: View {
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    let session: ProjectSession
+
+    @State private var goalDraft = ""
+    @State private var cueDraft = ""
+    @State private var recurrence: RecurrenceKind = .once
+    @State private var errorMessage: String?
+
+    private var trimmedGoal: String {
+        goalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("伏笔内容（如：交出地窖铜匙）", text: $goalDraft, axis: .vertical)
+                        .font(Theme.label)
+                        .lineLimit(2...5)
+
+                    TextField("回收时机或线索（可选）", text: $cueDraft, axis: .vertical)
+                        .font(Theme.labelSmall)
+                        .lineLimit(1...3)
+                } header: {
+                    AppSectionHeader(title: "伏笔内容")
+                }
+
+                Section {
+                    Picker("回收方式", selection: $recurrence) {
+                        Text("一次性").tag(RecurrenceKind.once)
+                        Text("多次呼应").tag(RecurrenceKind.recurring)
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    AppSectionHeader(title: "回收方式")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .groupedPageBackground()
+            .navigationTitle("添加伏笔")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    SheetCloseButton(title: "取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    SheetConfirmButton(title: "添加", isEnabled: !trimmedGoal.isEmpty) {
+                        plantThread()
+                    }
+                }
+            }
+            .narrativeErrorAlert($errorMessage)
+        }
+    }
+
+    private func plantThread() {
+        guard !trimmedGoal.isEmpty else { return }
+        let cue = cueDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let headID = session.narrativeWorkspace?.storyGraph.headNodeID ?? "root"
+        let threadID = "th_\(UUID().uuidString.prefix(8))"
+        let event = ProspectiveThreadEvent(
+            threadID: threadID,
+            kind: .plant,
+            goal: trimmedGoal,
+            activationCue: cue.isEmpty ? nil : cue,
+            recurrence: recurrence,
+            authority: .authorDirective,
+            nodeID: headID
+        )
+        do {
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(threadEvents: [event]),
+                summary: "埋设伏笔：\(String(trimmedGoal.prefix(16)))",
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            store.toast = "已添加伏笔"
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
