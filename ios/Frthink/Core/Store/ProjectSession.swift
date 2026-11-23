@@ -289,7 +289,7 @@ final class ProjectSession {
         if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
             scanChaptersIfNeeded(payload.manuscript)
         }
-        if case .loaded(let workspace) = store.narrative.loadWorkspaceState(project.id) {
+        if case .loaded(let workspace) = store.narrative.loadWorkspaceState(projectID: project.id) {
             self.narrativeWorkspace = workspace
             self.lastSavedNarrativeWorkspace = workspace
         }
@@ -552,24 +552,24 @@ final class ProjectSession {
         let store = self.store
         let generation = saveGeneration
 
-        Task.detached(priority: .utility) { [weak self] in
-            var writeError: Error?
-            do {
-                try store.narrative.saveWorkspace(
-                    snapshot,
-                    previous: previous,
-                    projectID: projectID
-                )
-            } catch {
-                writeError = error
-            }
-            await MainActor.run {
-                self?.finishNarrativeSave(
-                    snapshot: snapshot,
-                    error: writeError,
-                    generation: generation
-                )
-            }
+        Task { [weak self] in
+            let writeError: Error? = await Task.detached(priority: .utility) {
+                do {
+                    try store.narrative.saveWorkspace(
+                        snapshot,
+                        previous: previous,
+                        projectID: projectID
+                    )
+                    return nil
+                } catch {
+                    return error
+                }
+            }.value
+            self?.finishNarrativeSave(
+                snapshot: snapshot,
+                error: writeError,
+                generation: generation
+            )
         }
     }
 
@@ -1344,7 +1344,7 @@ final class ProjectSession {
         sourceText = fileStore.loadSource(project.id)
         translations = fileStore.loadTranslations(project.id)
         incrementalBM25 = ManuscriptIndex.IncrementalBM25Index()
-        if case .loaded(let workspace) = fileStore.narrative.loadWorkspaceState(project.id) {
+        if case .loaded(let workspace) = fileStore.narrative.loadWorkspaceState(projectID: project.id) {
             self.narrativeWorkspace = workspace
             self.lastSavedNarrativeWorkspace = workspace
         } else {
