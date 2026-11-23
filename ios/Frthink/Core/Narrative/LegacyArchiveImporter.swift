@@ -32,12 +32,13 @@ enum LegacyArchiveImporter {
         now: Date = Date()
     ) -> (workspace: NarrativeWorkspace, report: LegacyImportReport) {
         let rootID = "root"
+        let cleanTitle = projectTitle.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 原封保留既有深度蒸馏仿写模板、文风笔记及代表性语料样本。
         let exemplars = collectExemplars(
             from: payload.world,
             projectID: projectID,
-            projectTitle: projectTitle,
+            projectTitle: cleanTitle,
             settingsCorpusLibraries: settingsCorpusLibraries
         )
         let preservedStyle = PreservedStyleDistillation(
