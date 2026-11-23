@@ -36,8 +36,8 @@
 
   <rect x="40" y="226" width="636" height="78" class="tier2"/>
   <text x="56" y="249" class="title">Tier 2 · 尾部动态场景工作区 (Query-Cone 按需装配)</text>
-  <text x="56" y="270" class="desc">① 逐字作者法则 (AuthorDirectiveLedger)  ② 在场实体 + 一跳关联离场实体 + POV 角色私有认知 + 就绪伏笔</text>
-  <text x="56" y="289" class="desc">③ 场景语域匹配文风样本 + 书末正文窗口 (2K / 6K / 12K 三档自适应)</text>
+  <text x="56" y="270" class="desc">• 逐字作者法则 (AuthorDirectiveLedger) + 在场实体与一跳关联离场实体 + POV 角色私有认知 + 就绪伏笔</text>
+  <text x="56" y="289" class="desc">• 场景语域匹配文风样本 + 书末正文窗口 (2K / 6K / 12K 三档自适应)</text>
 
   <!-- Right Panel: Read Tools & Fallback -->
   <rect x="716" y="18" width="384" height="304" class="panel"/>
