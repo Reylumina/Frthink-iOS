@@ -1,113 +1,103 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 400" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 356" width="100%" height="100%">
   <defs>
     <style>
-      .bg { fill: #FAFAFC; }
-      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 14; }
-      .panel-header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #0F172A; }
-      .panel-sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; font-weight: 500; fill: #64748B; }
-      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.5; rx: 10; }
-      .card-indigo { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.5; rx: 10; }
-      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.5; rx: 10; }
-      .card-amber { fill: #FFFBEB; stroke: #FDE68A; stroke-width: 1.5; rx: 10; }
-      .card-slate { fill: #F8FAFC; stroke: #CBD5E1; stroke-width: 1.5; rx: 10; }
-      .title { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 14px; font-weight: 600; fill: #1E293B; }
+      .bg { fill: #F8FAFC; }
+      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 12; }
+      .header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 600; fill: #0F172A; }
+      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.2; rx: 8; }
+      .card-indigo { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.2; rx: 8; }
+      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.2; rx: 8; }
+      .card-slate { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1.2; rx: 8; }
+      .title { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13.5px; font-weight: 600; fill: #1E293B; }
       .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #475569; }
-      .badge { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; font-weight: 600; fill: #2563EB; }
-      .arrow { stroke: #64748B; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
-      .arrow-dashed { stroke: #94A3B8; stroke-width: 1.5; stroke-dasharray: 5,4; fill: none; marker-end: url(#arrow); }
+      .arrow { stroke: #64748B; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
     </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748B"/>
     </marker>
   </defs>
 
-  <rect width="1120" height="400" rx="18" class="bg"/>
+  <rect width="1120" height="356" rx="16" class="bg"/>
 
   <!-- Column 1: 世界观与素材 -->
-  <rect x="24" y="24" width="248" height="352" class="panel"/>
-  <text x="44" y="54" class="panel-header">1. 世界观与素材层</text>
-  <text x="44" y="74" class="panel-sub">作品设定、角色、事件与长期规则</text>
+  <rect x="20" y="20" width="245" height="316" class="panel"/>
+  <text x="38" y="48" class="header">1. 世界观与素材</text>
 
-  <rect x="44" y="92" width="208" height="54" class="card-blue"/>
-  <text x="58" y="114" class="title">世界设定 &amp; 世界书</text>
-  <text x="58" y="133" class="desc">时代背景、核心设定、自定义词条</text>
+  <rect x="36" y="66" width="213" height="54" class="card-blue"/>
+  <text x="50" y="88" class="title">世界设定与世界书</text>
+  <text x="50" y="107" class="desc">背景设定、自定义词条、共享宇宙</text>
 
-  <rect x="44" y="158" width="208" height="54" class="card-blue"/>
-  <text x="58" y="180" class="title">人物卡 &amp; 群组关系</text>
-  <text x="58" y="199" class="desc">外貌、性格、目标、记忆与关系网</text>
+  <rect x="36" y="130" width="213" height="54" class="card-blue"/>
+  <text x="50" y="152" class="title">人物卡与群组</text>
+  <text x="50" y="171" class="desc">外貌、性格、目标、记忆与人物关系</text>
 
-  <rect x="44" y="224" width="208" height="54" class="card-blue"/>
-  <text x="58" y="246" class="title">事件卡脉络 [#N]</text>
-  <text x="58" y="265" class="desc">256 段分批抽取、连通分量消歧</text>
+  <rect x="36" y="194" width="213" height="54" class="card-blue"/>
+  <text x="50" y="216" class="title">事件卡</text>
+  <text x="50" y="235" class="desc">按时序归纳正文事件与关联角色</text>
 
-  <rect x="44" y="290" width="208" height="64" class="card-amber"/>
-  <text x="58" y="314" class="title">仿写模板 &amp; 长期写作规则</text>
-  <text x="58" y="334" class="desc">样章文风分析 · 规则历史版本管理</text>
+  <rect x="36" y="258" width="213" height="60" class="card-blue"/>
+  <text x="50" y="281" class="title">仿写模板与长期规则</text>
+  <text x="50" y="301" class="desc">样章文风归纳，长期规则版本记录</text>
 
   <!-- Column 2: 提示词拼装 -->
-  <rect x="304" y="24" width="256" height="352" class="panel"/>
-  <text x="324" y="54" class="panel-header">2. 14 槽位提示词拼装</text>
-  <text x="324" y="74" class="panel-sub">PromptComposer + Token 预算推导</text>
+  <rect x="295" y="20" width="250" height="316" class="panel"/>
+  <text x="313" y="48" class="header">2. 提示词拼装</text>
 
-  <rect x="324" y="92" width="216" height="72" class="card-indigo"/>
-  <text x="338" y="115" class="title">系统与设定槽位 (P01–P64)</text>
-  <text x="338" y="135" class="desc">按写作、改写、刷新、翻译任务</text>
-  <text x="338" y="151" class="desc">动态装配启用的人物、事件与规则</text>
+  <rect x="311" y="66" width="218" height="76" class="card-indigo"/>
+  <text x="325" y="90" class="title">任务模板装配</text>
+  <text x="325" y="110" class="desc">按续写、改写、刷新、翻译任务</text>
+  <text x="325" y="127" class="desc">拼装已启用的人物、事件与规则</text>
 
-  <rect x="324" y="178" width="216" height="72" class="card-indigo"/>
-  <text x="338" y="201" class="title">正文滑窗 &amp; 续写锚点</text>
-  <text x="338" y="221" class="desc">支持指定续写锚点 (Anchor)</text>
-  <text x="338" y="237" class="desc">按有效输入预算自动裁剪上下文</text>
+  <rect x="311" y="154" width="218" height="76" class="card-indigo"/>
+  <text x="325" y="178" class="title">正文滑窗与续写锚点</text>
+  <text x="325" y="198" class="desc">支持在任意段落设置续写锚点</text>
+  <text x="325" y="215" class="desc">按输入预算裁剪正文窗口</text>
 
-  <rect x="324" y="264" width="216" height="90" class="card-slate"/>
-  <text x="338" y="288" class="title">多轮对话与变体历史</text>
-  <text x="338" y="308" class="desc">保留只读前缀与当前激活变体分支</text>
-  <text x="338" y="326" class="desc">过滤思维链，仅将有效正文送入上下文</text>
+  <rect x="311" y="242" width="218" height="76" class="card-indigo"/>
+  <text x="325" y="266" class="title">对话与候选变体</text>
+  <text x="325" y="286" class="desc">保留当前选中的候选变体分支</text>
+  <text x="325" y="303" class="desc">剥离思考过程，仅将正文送入上下文</text>
 
-  <!-- Column 3: 模型协议与创作交互 -->
-  <rect x="592" y="24" width="248" height="352" class="panel"/>
-  <text x="612" y="54" class="panel-header">3. 原生协议与创作台</text>
-  <text x="612" y="74" class="panel-sub">流式输出 · 思考剥离 · 用量统计</text>
+  <!-- Column 3: 模型接口与功能 -->
+  <rect x="575" y="20" width="250" height="316" class="panel"/>
+  <text x="593" y="48" class="header">3. 模型接口与功能</text>
 
-  <rect x="612" y="92" width="208" height="84" class="card-emerald"/>
-  <text x="626" y="115" class="title">三大原生 LLM 客户端</text>
-  <text x="626" y="135" class="desc">OpenAI 兼容 (DeepSeek / 13 预设)</text>
-  <text x="626" y="152" class="desc">Anthropic (/v1/messages)</text>
-  <text x="626" y="168" class="desc">Google Gemini (/v1beta)</text>
+  <rect x="591" y="66" width="218" height="76" class="card-emerald"/>
+  <text x="605" y="90" class="title">模型协议客户端</text>
+  <text x="605" y="110" class="desc">DeepSeek / OpenRouter / OpenAI 兼容</text>
+  <text x="605" y="127" class="desc">Anthropic 与 Google Gemini 接口</text>
 
-  <rect x="612" y="190" width="208" height="72" class="card-emerald"/>
-  <text x="626" y="213" class="title">码字机 &amp; 选区改写</text>
-  <text x="626" y="233" class="desc">流式正文与可折叠思考卡片分离</text>
-  <text x="626" y="249" class="desc">一键插入/追加正文 · 系统级撤销</text>
+  <rect x="591" y="154" width="218" height="76" class="card-emerald"/>
+  <text x="605" y="178" class="title">码字机与选区改写</text>
+  <text x="605" y="198" class="desc">流式生成正文与可折叠思考卡片</text>
+  <text x="605" y="215" class="desc">插入或追加正文，支持撤销与重做</text>
 
-  <rect x="612" y="276" width="208" height="78" class="card-amber"/>
-  <text x="626" y="299" class="title">阅读器 &amp; 长篇分段翻译</text>
-  <text x="626" y="319" class="desc">章节目录识别 · 书签 · 全文检索</text>
-  <text x="626" y="335" class="desc">原文与译文双段对照及独立导出</text>
+  <rect x="591" y="242" width="218" height="76" class="card-emerald"/>
+  <text x="605" y="266" class="title">阅读器与分段翻译</text>
+  <text x="605" y="286" class="desc">章节目录识别、书签、全文搜索</text>
+  <text x="605" y="303" class="desc">原文与译文分段对照及导出</text>
 
-  <!-- Column 4: 加密存储与归档 -->
-  <rect x="872" y="24" width="224" height="352" class="panel"/>
-  <text x="892" y="54" class="panel-header">4. 本地加密与归档</text>
-  <text x="892" y="74" class="panel-sub">零云端依赖 · 兼容原版存档</text>
+  <!-- Column 4: 本地存储与备份 -->
+  <rect x="855" y="20" width="245" height="316" class="panel"/>
+  <text x="873" y="48" class="header">4. 本地存储与备份</text>
 
-  <rect x="892" y="92" width="184" height="76" class="card-slate"/>
-  <text x="906" y="115" class="title">分页正文存储</text>
-  <text x="906" y="135" class="desc">body.pages/*.bin 按块懒加载</text>
-  <text x="906" y="151" class="desc">编辑器仅读写书末活跃窗口</text>
+  <rect x="871" y="66" width="213" height="76" class="card-slate"/>
+  <text x="885" y="90" class="title">分页正文存储</text>
+  <text x="885" y="110" class="desc">阅读器按块分页读取</text>
+  <text x="885" y="127" class="desc">全屏编辑器按书末窗口加载与保存</text>
 
-  <rect x="892" y="182" width="184" height="76" class="card-slate"/>
-  <text x="906" y="205" class="title">AES-256-GCM &amp; Keychain</text>
-  <text x="906" y="225" class="desc">本地数据全盘密文落盘</text>
-  <text x="906" y="241" class="desc">API Key 与主密钥存系统钥匙串</text>
+  <rect x="871" y="154" width="213" height="76" class="card-slate"/>
+  <text x="885" y="178" class="title">本地加密与钥匙串</text>
+  <text x="885" y="198" class="desc">书稿与设定使用 AES-256-GCM 加密</text>
+  <text x="885" y="215" class="desc">API Key 与主密钥保存在 Keychain</text>
 
-  <rect x="892" y="272" width="184" height="82" class="card-blue"/>
-  <text x="906" y="295" class="title">.frthink 归档 &amp; 文本编解码</text>
-  <text x="906" y="315" class="desc">双向兼容 Android v0.8.213</text>
-  <text x="906" y="331" class="desc">UTF-8 / UTF-16 / GB18030 导入</text>
+  <rect x="871" y="242" width="213" height="76" class="card-slate"/>
+  <text x="885" y="266" class="title">存档与文本导入导出</text>
+  <text x="885" y="286" class="desc">兼容 .frthink 备份归档导入与导出</text>
+  <text x="885" y="303" class="desc">支持 UTF-8 / UTF-16 / GB18030 文本</text>
 
-  <!-- Arrows -->
-  <path d="M 272 195 L 300 195" class="arrow"/>
-  <path d="M 560 195 L 588 195" class="arrow"/>
-  <path d="M 840 195 L 868 195" class="arrow"/>
-  <path d="M 716 176 L 716 186" class="arrow"/>
+  <!-- Horizontal Arrows Between Panels -->
+  <path d="M 265 178 L 291 178" class="arrow"/>
+  <path d="M 545 178 L 571 178" class="arrow"/>
+  <path d="M 825 178 L 851 178" class="arrow"/>
 </svg>
