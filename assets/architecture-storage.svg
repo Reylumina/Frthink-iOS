@@ -1,50 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 330" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 316" width="100%" height="100%">
   <defs>
     <style>
-      .bg { fill: #FAFAFC; }
-      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 14; }
-      .panel-header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #0F172A; }
-      .panel-sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; font-weight: 500; fill: #64748B; }
-      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.5; rx: 10; }
-      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.5; rx: 10; }
-      .card-amber { fill: #FFFBEB; stroke: #FDE68A; stroke-width: 1.5; rx: 10; }
-      .card-slate { fill: #F8FAFC; stroke: #CBD5E1; stroke-width: 1.5; rx: 10; }
+      .bg { fill: #F8FAFC; }
+      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 12; }
+      .header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 600; fill: #0F172A; }
+      .sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #64748B; }
+      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.2; rx: 8; }
+      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.2; rx: 8; }
+      .card-indigo { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.2; rx: 8; }
+      .card-slate { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1.2; rx: 8; }
       .title { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13.5px; font-weight: 600; fill: #1E293B; }
-      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #334155; }
+      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #475569; }
     </style>
   </defs>
 
-  <rect width="1120" height="330" rx="18" class="bg"/>
+  <rect width="1120" height="316" rx="16" class="bg"/>
 
-  <rect x="20" y="18" width="1080" height="294" class="panel"/>
-  <text x="40" y="46" class="panel-header">事件溯源三账本、独立档案页与分支隔离存储</text>
-  <text x="364" y="46" class="panel-sub">（全书共享设定档案与全局法则；支线事实、认知、伏笔与摘要随分支头节点独立重放与回滚）</text>
+  <rect x="20" y="18" width="1080" height="280" class="panel"/>
+  <text x="38" y="45" class="header">世界工作台与分文件加密存储</text>
+  <text x="246" y="45" class="sub">全书共享设定档案与全局法则；支线事实、认知、伏笔与摘要随当前分支独立重放与回滚</text>
 
-  <!-- Card 1: StoryGraph & WAL -->
-  <rect x="40" y="64" width="504" height="104" class="card-emerald"/>
-  <text x="56" y="88" class="title">1. 分支剧情图谱 (StoryGraph DAG) &amp; 增量加密日志 (WAL)</text>
-  <text x="56" y="110" class="desc">• Focus + Context 单轨主路径呈现因果节拍，分叉点内联菜单切换平行支线</text>
-  <text x="56" y="129" class="desc">• 日常提交仅追加 story_graph.wal (FRWL + AES-256-GCM 帧)，满 40 帧自动压实</text>
-  <text x="56" y="148" class="desc">• 检查点独立拆分至 checkpoints/*.json (上限保留 12 份)，支持断电尾帧自愈</text>
+  <!-- Card 1 -->
+  <rect x="38" y="60" width="506" height="102" class="card-emerald"/>
+  <text x="54" y="84" class="title">1. 剧情图谱与增量加密日志</text>
+  <text x="54" y="106" class="desc">单轨主路径展示因果节拍，在分叉节点可通过菜单切换平行支线</text>
+  <text x="54" y="125" class="desc">节点变更追加写入 story_graph.wal 密文日志（满 40 帧自动压实）</text>
+  <text x="54" y="144" class="desc">重放检查点独立保存在 checkpoints/*.json（最多保留 12 份）</text>
 
-  <!-- Card 2: Three Ledgers -->
-  <rect x="576" y="64" width="504" height="104" class="card-blue"/>
-  <text x="592" y="88" class="title">2. 确定性状态机三账本 (事实 / 认知 / 五态伏笔)</text>
-  <text x="592" y="110" class="desc">• 事实与认知分离：区分客观事实与角色私有认知，三级权威 (手改 &gt; 正文 &gt; 推断)</text>
-  <text x="592" y="129" class="desc">• 五态伏笔流转：待埋设 → 就绪 → 已触发 (单次伏笔自动锁止) → 已回收 / 已废弃</text>
-  <text x="592" y="148" class="desc">• 四层叙事金字塔：滚动归纳近期场次卡 → 阶段剧情线 → 卷纲摘要</text>
+  <!-- Card 2 -->
+  <rect x="576" y="60" width="506" height="102" class="card-blue"/>
+  <text x="592" y="84" class="title">2. 叙事三账本（事实 / 认知 / 伏笔）</text>
+  <text x="592" y="106" class="desc">区分客观事实与角色已知信息，按“作者手改 &gt; 正文事实 &gt; 模型推断”校验优先级</text>
+  <text x="592" y="125" class="desc">伏笔按“待埋设 → 就绪 → 已触发 → 已回收 / 已废弃”五种状态流转</text>
+  <text x="592" y="144" class="desc">已发生节拍逐级归纳为近期场次卡、阶段剧情线与卷纲摘要</text>
 
-  <!-- Card 3: Entity Pages & Directives -->
-  <rect x="40" y="184" width="504" height="104" class="card-amber"/>
-  <text x="56" y="208" class="title">3. 每实体独立档案页 (EntityPage) &amp; 逐字作者法则</text>
-  <text x="56" y="230" class="desc">• 角色、组织、地点、物品各自拥有独立档案页，避免共享单表多次重写丢失设定</text>
-  <text x="56" y="249" class="desc">• 支持从正文/对话气泡提取设定、别名归并、关系一跳联想及设定冲突确认条</text>
-  <text x="56" y="268" class="desc">• 作者法则 (AuthorDirectiveLedger) 逐字保存写作要求与禁区，不经摘要压缩</text>
+  <!-- Card 3 -->
+  <rect x="38" y="176" width="506" height="102" class="card-indigo"/>
+  <text x="54" y="200" class="title">3. 设定档案页与作者法则</text>
+  <text x="54" y="222" class="desc">按角色、组织、地点、物品分类管理独立档案页</text>
+  <text x="54" y="241" class="desc">支持从正文或对话气泡提取设定、别名归并、关系一跳联想及冲突确认</text>
+  <text x="54" y="260" class="desc">作者法则逐字保存全局或分支范围的写作要求与禁忌，不经摘要改写</text>
 
-  <!-- Card 4: Search, Dreaming & Style -->
-  <rect x="576" y="184" width="504" height="104" class="card-slate"/>
-  <text x="592" y="208" class="title">4. 本地检索底座、文风提炼与记忆自审</text>
-  <text x="592" y="230" class="desc">• 按页增量 CJK Bigram BM25 (含近因加权) + 零模型机械锚点 (AnchorIndex)</text>
-  <text x="592" y="249" class="desc">• 六维文风提炼 (StyleDistiller)：静态模板锁入前缀，按场景语域路由动态范例</text>
-  <text x="592" y="268" class="desc">• 记忆自审 (Offline Dreaming) 核查陈旧认知与超期伏笔 + 旁白套话密度标红体检</text>
+  <!-- Card 4 -->
+  <rect x="576" y="176" width="506" height="102" class="card-slate"/>
+  <text x="592" y="200" class="title">4. 本地检索、文风提炼与记忆自审</text>
+  <text x="592" y="222" class="desc">按页增量更新本地 BM25 索引，自动提取人名、地点、物品与时间位置</text>
+  <text x="592" y="241" class="desc">从样章提炼文风模板，按当前场景类型（动作、对白、心理、景物）匹配范例</text>
+  <text x="592" y="260" class="desc">记忆自审检查陈旧认知与超期伏笔；散文体检在本地标出旁白高频套话</text>
 </svg>

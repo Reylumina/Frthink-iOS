@@ -1,61 +1,57 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 340" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 328" width="100%" height="100%">
   <defs>
     <style>
-      .bg { fill: #FAFAFC; }
-      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 14; }
-      .panel-header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #0F172A; }
-      .panel-sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; font-weight: 500; fill: #64748B; }
-      .tier0 { fill: #ECFDF5; stroke: #6EE7B7; stroke-width: 1.5; rx: 10; }
-      .tier1 { fill: #EFF6FF; stroke: #93C5FD; stroke-width: 1.5; rx: 10; }
-      .tier2 { fill: #FFFBEB; stroke: #FCD34D; stroke-width: 1.5; rx: 10; }
-      .tool-card { fill: #F8FAFC; stroke: #CBD5E1; stroke-width: 1.5; rx: 10; }
+      .bg { fill: #F8FAFC; }
+      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 12; }
+      .header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 600; fill: #0F172A; }
+      .sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #64748B; }
+      .tier0 { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.2; rx: 8; }
+      .tier1 { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.2; rx: 8; }
+      .tier2 { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.2; rx: 8; }
+      .tool-card { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1.2; rx: 8; }
       .title { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13.5px; font-weight: 600; fill: #1E293B; }
-      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #334155; }
+      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #475569; }
       .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; fill: #1D4ED8; }
-      .arrow { stroke: #64748B; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
     </style>
-    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748B"/>
-    </marker>
   </defs>
 
-  <rect width="1120" height="340" rx="18" class="bg"/>
+  <rect width="1120" height="328" rx="16" class="bg"/>
 
-  <!-- Left Panel: 3-Tier Context -->
-  <rect x="20" y="18" width="676" height="304" class="panel"/>
-  <text x="40" y="46" class="panel-header">三段式上下文窗口结构 (Cache-First 编排)</text>
-  <text x="330" y="46" class="panel-sub">固定前部缓存，把高频变更项收敛至末尾近端</text>
+  <!-- Left Panel: 三段式上下文窗口 -->
+  <rect x="20" y="18" width="664" height="292" class="panel"/>
+  <text x="38" y="45" class="header">三段式上下文窗口</text>
+  <text x="174" y="45" class="sub">固定前部内容以复用服务端缓存，将动态状态放在末尾</text>
 
-  <rect x="40" y="62" width="636" height="70" class="tier0"/>
-  <text x="56" y="85" class="title">Tier 0 · 静态冻结前缀 (System · 跨轮次字节恒定，复用服务端 KV 缓存)</text>
-  <text x="56" y="106" class="desc">系统指令 + 六维文风静态模板与全书质心样本 + 顶层目录索引 (BOOK_INDEX ≤ 200 行) + 只读工具定义</text>
+  <rect x="38" y="60" width="628" height="68" class="tier0"/>
+  <text x="54" y="83" class="title">Tier 0 · 静态前缀（System · 跨轮次保持不变）</text>
+  <text x="54" y="105" class="desc">系统指令、基础世界设定、文风静态模板、全书质心样本、顶层目录索引与只读工具定义</text>
 
-  <rect x="40" y="144" width="636" height="70" class="tier1"/>
-  <text x="56" y="167" class="title">Tier 1 · 可逆折叠对话流 (ReFold k=3 · Append-Only)</text>
-  <text x="56" y="188" class="desc">保留最近 3 轮完整对话与工具轨迹；早期轮次按 k=3 步长折叠为单行进展存根，重复工具输出自动去重</text>
+  <rect x="38" y="140" width="628" height="68" class="tier1"/>
+  <text x="54" y="163" class="title">Tier 1 · 可逆折叠对话流（每 3 轮推进一次折叠边界）</text>
+  <text x="54" y="185" class="desc">保留最近 3 轮完整对话与工具记录；早期对话折叠为单行进展摘要，重复工具输出自动去重</text>
 
-  <rect x="40" y="226" width="636" height="78" class="tier2"/>
-  <text x="56" y="249" class="title">Tier 2 · 尾部动态场景工作区 (Query-Cone 按需装配)</text>
-  <text x="56" y="270" class="desc">• 逐字作者法则 (AuthorDirectiveLedger) + 在场实体与一跳关联离场实体 + POV 角色私有认知 + 就绪伏笔</text>
-  <text x="56" y="289" class="desc">• 场景语域匹配文风样本 + 书末正文窗口 (2K / 6K / 12K 三档自适应)</text>
+  <rect x="38" y="220" width="628" height="72" class="tier2"/>
+  <text x="54" y="243" class="title">Tier 2 · 尾部动态工作区（紧贴最新指令）</text>
+  <text x="54" y="264" class="desc">逐字作者法则 + 在场实体与一跳关联离场实体 + 视角角色已知信息 + 就绪伏笔</text>
+  <text x="54" y="281" class="desc">当前场景类型匹配的文风范例 + 书末正文窗口（2K / 6K / 12K 三档）</text>
 
-  <!-- Right Panel: Read Tools & Fallback -->
-  <rect x="716" y="18" width="384" height="304" class="panel"/>
-  <text x="736" y="46" class="panel-header">按需只读工具与本地检索回退</text>
-  <text x="736" y="66" class="panel-sub">支持 Tool Calling 默认开启 · 无工具端自动降级</text>
+  <!-- Right Panel: 只读工具与本地回退 -->
+  <rect x="704" y="18" width="396" height="292" class="panel"/>
+  <text x="722" y="45" class="header">只读工具与本地检索回退</text>
+  <text x="898" y="45" class="sub">无工具接口自动切换本地检索</text>
 
-  <rect x="736" y="82" width="344" height="66" class="tool-card"/>
-  <text x="752" y="104" class="code">grep_manuscript(pattern, regex)</text>
-  <text x="752" y="124" class="desc">检索全书分页原稿，受续写锚点因果截断保护</text>
-  <text x="752" y="140" class="desc">（锚点之后的未来章节不可见，防止剧透）</text>
+  <rect x="722" y="60" width="360" height="68" class="tool-card"/>
+  <text x="738" y="82" class="code">grep_manuscript(pattern, regex)</text>
+  <text x="738" y="102" class="desc">检索全书分页原稿，受续写锚点因果截断限制</text>
+  <text x="738" y="118" class="desc">（续写锚点之后的章节不可见）</text>
 
-  <rect x="736" y="158" width="344" height="66" class="tool-card"/>
-  <text x="752" y="180" class="code">read_entity_page(entityId, section)</text>
-  <text x="752" y="200" class="desc">按需查阅未在场的角色、组织、地点或物品</text>
-  <text x="752" y="216" class="desc">独立档案页全文及原文引文证据</text>
+  <rect x="722" y="140" width="360" height="68" class="tool-card"/>
+  <text x="738" y="162" class="code">read_entity_page(entityId, section)</text>
+  <text x="738" y="182" class="desc">按需读取未在场的角色、组织、地点或物品</text>
+  <text x="738" y="198" class="desc">独立档案页全文及原文引文位置</text>
 
-  <rect x="736" y="234" width="344" height="70" class="tool-card"/>
-  <text x="752" y="256" class="code">restore_turn(stepRange) / 本地 BM25 回退</text>
-  <text x="752" y="276" class="desc">将早期折叠对话追加至末尾复原，不改动历史前缀；</text>
-  <text x="752" y="292" class="desc">无工具接口自动切换按页增量 BM25 + 机械锚点预检索</text>
+  <rect x="722" y="220" width="360" height="72" class="tool-card"/>
+  <text x="738" y="242" class="code">restore_turn(stepRange)</text>
+  <text x="738" y="262" class="desc">将早期折叠的对话追加到上下文末尾展开；</text>
+  <text x="738" y="278" class="desc">不支持工具的接口自动回退至本地 BM25 与专名锚点检索</text>
 </svg>

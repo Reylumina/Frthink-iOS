@@ -1,111 +1,107 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 420" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 400" width="100%" height="100%">
   <defs>
     <style>
-      .bg { fill: #FAFAFC; }
-      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 14; }
-      .panel-header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 700; fill: #0F172A; }
-      .panel-sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; font-weight: 500; fill: #64748B; }
-      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.5; rx: 10; }
-      .card-indigo { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.5; rx: 10; }
-      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.5; rx: 10; }
-      .card-amber { fill: #FFFBEB; stroke: #FDE68A; stroke-width: 1.5; rx: 10; }
-      .card-rose { fill: #FFF1F2; stroke: #FECDD3; stroke-width: 1.5; rx: 10; }
-      .card-slate { fill: #F8FAFC; stroke: #CBD5E1; stroke-width: 1.5; rx: 10; }
+      .bg { fill: #F8FAFC; }
+      .panel { fill: #FFFFFF; stroke: #E2E8F0; stroke-width: 1.5; rx: 12; }
+      .header { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 15px; font-weight: 600; fill: #0F172A; }
+      .sub { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #64748B; }
+      .card-blue { fill: #EFF6FF; stroke: #BFDBFE; stroke-width: 1.2; rx: 8; }
+      .card-indigo { fill: #EEF2FF; stroke: #C7D2FE; stroke-width: 1.2; rx: 8; }
+      .card-emerald { fill: #ECFDF5; stroke: #A7F3D0; stroke-width: 1.2; rx: 8; }
+      .card-slate { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1.2; rx: 8; }
       .title { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13.5px; font-weight: 600; fill: #1E293B; }
-      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 11.5px; fill: #475569; }
-      .tag { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 11px; font-weight: 600; fill: #0F172A; }
-      .arrow { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
-      .arrow-loop { stroke: #059669; stroke-width: 1.8; fill: none; marker-end: url(#arrow-green); }
+      .desc { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 12px; fill: #475569; }
+      .tag { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 11.5px; font-weight: 600; fill: #0F172A; }
+      .arrow { stroke: #64748B; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+      .arrow-loop { stroke: #059669; stroke-width: 1.6; fill: none; marker-end: url(#arrow-green); }
     </style>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#475569"/>
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748B"/>
     </marker>
     <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#059669"/>
     </marker>
   </defs>
 
-  <rect width="1120" height="420" rx="18" class="bg"/>
+  <rect width="1120" height="400" rx="16" class="bg"/>
 
-  <!-- Top Row: Hot Path (1 -> 2 -> 3 -> 4) -->
-  <rect x="20" y="18" width="1080" height="178" class="panel"/>
-  <text x="40" y="46" class="panel-header">热路径 · 读时上下文编排与纯文本流式生成</text>
-  <text x="348" y="46" class="panel-sub">（日常续写直出正文，未采纳变体不改写任何世界设定）</text>
+  <!-- Top Row: 生成流程 (1 -> 2 -> 3 -> 4) -->
+  <rect x="20" y="18" width="1080" height="168" class="panel"/>
+  <text x="38" y="45" class="header">生成流程（读时上下文拼装与流式续写）</text>
+  <text x="315" y="45" class="sub">未采纳的候选变体不写入世界设定</text>
 
   <!-- Step 1 -->
-  <rect x="40" y="64" width="232" height="112" class="card-blue"/>
-  <text x="54" y="88" class="title">1. 写作指令 / 分支走向入口</text>
-  <text x="54" y="110" class="desc">• 手写指令或选定分支推演项</text>
-  <text x="54" y="128" class="desc">• 设定当前章节 POV 视角角色</text>
-  <text x="54" y="146" class="desc">• 选定续写锚点或正文改写选区</text>
+  <rect x="38" y="62" width="234" height="106" class="card-blue"/>
+  <text x="52" y="86" class="title">1. 指令与视角入口</text>
+  <text x="52" y="108" class="desc">手写指令或选择分支走向</text>
+  <text x="52" y="126" class="desc">选择当前章节视角角色 (POV)</text>
+  <text x="52" y="144" class="desc">设置续写锚点或改写选区</text>
 
   <!-- Step 2 -->
-  <rect x="304" y="64" width="248" height="112" class="card-indigo"/>
-  <text x="318" y="88" class="title">2. 三段式上下文装配</text>
-  <text x="318" y="110" class="desc">• Tier 0: 冻结前缀 + 目录 + 静态文风</text>
-  <text x="318" y="128" class="desc">• Tier 1: ReFold (k=3) 可逆折叠对话</text>
-  <text x="318" y="146" class="desc">• Tier 2: 逐字法则 + 在场状态 + 正文尾窗</text>
+  <rect x="302" y="62" width="246" height="106" class="card-indigo"/>
+  <text x="316" y="86" class="title">2. 三段式上下文拼装</text>
+  <text x="316" y="108" class="desc">静态前缀：系统指令、目录与文风模板</text>
+  <text x="316" y="126" class="desc">对话历史：保留近期对话，早期折叠</text>
+  <text x="316" y="144" class="desc">尾部工作区：作者法则、在场状态与尾窗</text>
 
   <!-- Step 3 -->
-  <rect x="584" y="64" width="248" height="112" class="card-blue"/>
-  <text x="598" y="88" class="title">3. 流式主写手 + 按需只读工具</text>
-  <text x="598" y="110" class="desc">• 纯文本流式输出 + 独立折叠思考卡片</text>
-  <text x="598" y="128" class="desc">• 存疑时调用 grep / 读档案 / 展开历史</text>
-  <text x="598" y="146" class="desc">• 无工具接口自动回退本地 BM25 检索</text>
+  <rect x="578" y="62" width="246" height="106" class="card-blue"/>
+  <text x="592" y="86" class="title">3. 流式续写与只读工具</text>
+  <text x="592" y="108" class="desc">流式输出正文与可折叠思考卡片</text>
+  <text x="592" y="126" class="desc">按需调用全文检索、读档案、展开对话</text>
+  <text x="592" y="144" class="desc">无工具接口自动使用本地 BM25 检索</text>
 
   <!-- Step 4 -->
-  <rect x="864" y="64" width="216" height="112" class="card-emerald"/>
-  <text x="878" y="88" class="title">4. 散文体检 &amp; 采纳边界</text>
-  <text x="878" y="110" class="desc">• 本地检测旁白套话密度 (豁免对白)</text>
-  <text x="878" y="128" class="desc">• 多变体左右切换对比</text>
-  <text x="878" y="146" class="desc">• 点击「插入/追加」才触发状态入库</text>
+  <rect x="854" y="62" width="228" height="106" class="card-emerald"/>
+  <text x="868" y="86" class="title">4. 散文体检与采纳提交</text>
+  <text x="868" y="108" class="desc">本地检测旁白套话密度（跳过对白）</text>
+  <text x="868" y="126" class="desc">多变体左右切换对比</text>
+  <text x="868" y="144" class="desc">点击插入或追加正文才触发状态更新</text>
 
-  <!-- Arrows Top Row -->
-  <path d="M 272 120 L 300 120" class="arrow"/>
-  <path d="M 552 120 L 580 120" class="arrow"/>
-  <path d="M 832 120 L 860 120" class="arrow"/>
+  <path d="M 272 115 L 298 115" class="arrow"/>
+  <path d="M 548 115 L 574 115" class="arrow"/>
+  <path d="M 824 115 L 850 115" class="arrow"/>
 
-  <!-- Bottom Row: Cold Path (8 <- 7 <- 6 <- 5) -->
-  <rect x="20" y="224" width="1080" height="178" class="panel"/>
-  <text x="40" y="252" class="panel-header">冷路径 · 写时事件溯源入库与闲时记忆自审</text>
-  <text x="348" y="252" class="panel-sub">（仅在采纳正文后异步执行，支持系统撤销/重做与支线切换一键回滚）</text>
+  <!-- Bottom Row: 采纳后更新 (8 <- 7 <- 6 <- 5) -->
+  <rect x="20" y="214" width="1080" height="168" class="panel"/>
+  <text x="38" y="241" class="header">入库流程（写时状态更新与记忆自审）</text>
+  <text x="300" y="241" class="sub">采纳正文后后台运行，支持随撤销、重做或支线切换同步回滚</text>
 
-  <!-- Step 8 (Leftmost bottom) -->
-  <rect x="40" y="270" width="232" height="112" class="card-amber"/>
-  <text x="54" y="294" class="title">8. 分支推演 &amp; 记忆自审</text>
-  <text x="54" y="316" class="desc">• 按需推演下一拍候选剧情走向</text>
-  <text x="54" y="334" class="desc">• 对照正文审查陈旧认知与超期伏笔</text>
-  <text x="54" y="352" class="desc">• 滚动归纳场次卡 → 阶段 → 卷纲</text>
+  <!-- Step 8 -->
+  <rect x="38" y="258" width="234" height="106" class="card-slate"/>
+  <text x="52" y="282" class="title">8. 分支推演与记忆自审</text>
+  <text x="52" y="304" class="desc">按需推演 2–3 条后续剧情走向</text>
+  <text x="52" y="322" class="desc">核对正文审查陈旧认知与超期伏笔</text>
+  <text x="52" y="340" class="desc">逐级归纳场次卡、阶段剧情线与卷纲</text>
 
   <!-- Step 7 -->
-  <rect x="304" y="270" width="248" height="112" class="card-emerald"/>
-  <text x="318" y="294" class="title">7. 确定性状态机 (Reducer)</text>
-  <text x="318" y="316" class="desc">• 三级权威校验 (手改 &gt; 正文 &gt; 推断)</text>
-  <text x="318" y="334" class="desc">• 更新每实体独立档案页与五态伏笔</text>
-  <text x="318" y="352" class="desc">• 支线账本严格隔离，全书设定共享</text>
+  <rect x="302" y="258" width="246" height="106" class="card-emerald"/>
+  <text x="316" y="282" class="title">7. 状态机更新</text>
+  <text x="316" y="304" class="desc">按权威等级更新事实、认知与伏笔</text>
+  <text x="316" y="322" class="desc">更新对应角色、地点、物品档案页</text>
+  <text x="316" y="340" class="desc">隔离支线状态，共享全书通用设定</text>
 
   <!-- Step 6 -->
-  <rect x="584" y="270" width="248" height="112" class="card-rose"/>
-  <text x="598" y="294" class="title">6. 单步增量抽取 (Typed Delta)</text>
-  <text x="598" y="316" class="desc">• 低温度 (T=0.15) 提取单步变更</text>
-  <text x="598" y="334" class="desc">• 强制校验原文 quote 引文锚点</text>
-  <text x="598" y="352" class="desc">• 自动识别新出场实体建档去重</text>
+  <rect x="578" y="258" width="246" height="106" class="card-indigo"/>
+  <text x="592" y="282" class="title">6. 单步增量抽取</text>
+  <text x="592" y="304" class="desc">后台抽取本段新增事实与状态变化</text>
+  <text x="592" y="322" class="desc">校验原文引文位置，过滤无依据推断</text>
+  <text x="592" y="340" class="desc">自动识别新出场角色与地点并建档</text>
 
-  <!-- Step 5 (Rightmost bottom) -->
-  <rect x="864" y="270" width="216" height="112" class="card-slate"/>
-  <text x="878" y="294" class="title">5. 增量加密 WAL &amp; 机械锚点</text>
-  <text x="878" y="316" class="desc">• 追加 story_graph.wal 密文日志帧</text>
-  <text x="878" y="334" class="desc">• 零模型提取专名/地点/时间锚点</text>
-  <text x="878" y="352" class="desc">• 按页增量更新 CJK Bigram BM25</text>
+  <!-- Step 5 -->
+  <rect x="854" y="258" width="228" height="106" class="card-slate"/>
+  <text x="868" y="282" class="title">5. 增量日志与本地索引</text>
+  <text x="868" y="304" class="desc">追加剧情图谱增量加密日志 (WAL)</text>
+  <text x="868" y="322" class="desc">提取人名、地点、物品与时间锚点</text>
+  <text x="868" y="340" class="desc">按页增量更新本地 BM25 索引</text>
 
-  <!-- Transition arrows 4 -> 5, 5 -> 6 -> 7 -> 8, 8 -> 1 -->
-  <path d="M 972 176 L 972 266" class="arrow-loop"/>
-  <text x="982" y="214" class="tag">采纳落盘</text>
+  <path d="M 968 168 L 968 254" class="arrow-loop"/>
+  <text x="978" y="204" class="tag">采纳正文</text>
 
-  <path d="M 864 326 L 836 326" class="arrow"/>
-  <path d="M 584 326 L 556 326" class="arrow"/>
-  <path d="M 304 326 L 276 326" class="arrow"/>
+  <path d="M 854 311 L 828 311" class="arrow"/>
+  <path d="M 578 311 L 552 311" class="arrow"/>
+  <path d="M 302 311 L 276 311" class="arrow"/>
 
-  <path d="M 156 270 L 156 180" class="arrow-loop"/>
-  <text x="166" y="214" class="tag">状态就绪</text>
+  <path d="M 155 258 L 155 172" class="arrow-loop"/>
+  <text x="165" y="204" class="tag">下一轮续写</text>
 </svg>
