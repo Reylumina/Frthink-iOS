@@ -4,7 +4,7 @@
 [![Swift](https://img.shields.io/badge/Swift-5.10%2B-F05138?style=flat-square&logo=swift&logoColor=white)](https://swift.org)
 [![iOS Build](https://github.com/Reylumina/Frthink-iOS/actions/workflows/ios.yml/badge.svg)](https://github.com/Reylumina/Frthink-iOS/actions/workflows/ios.yml)
 
-Frthink for iOS 是 Android 应用 Frthink v0.8.213 的 SwiftUI 移植。原应用由 Fr33 开发，包名为 `com.frthink.app`。本仓库为非官方移植，与原作者无隶属关系。原应用及其提示词版权归原作者所有。
+Frthink for iOS（下称 **Frthink**）是基于 Android 应用 Frthink v0.8.213（由 Fr33 开发，包名 `com.frthink.app`）开发的非官方 SwiftUI 移植版，与原作者无隶属关系；原应用及其提示词的版权均归原作者所有。
 
 Frthink 面向中文长篇小说写作，提供码字机流式续写、世界书、人物卡、事件卡、仿写模板、长期写作规则、语料收集库、阅读器与原文翻译。
 
@@ -12,7 +12,7 @@ Frthink 面向中文长篇小说写作，提供码字机流式续写、世界书
 
 ![Frthink 系统架构](assets/architecture-main.svg)
 
-应用按图中四级流水线工作：
+Frthink 按图中四级流水线工作：
 
 ### 1. 世界观与素材层
 - **世界设定与世界书**：管理作品时代背景、核心设定及自定义世界书词条；支持通过“共享宇宙”跨书稿复用通用设定。
@@ -71,4 +71,4 @@ GitHub Actions 工作流（[`.github/workflows/ios.yml`](.github/workflows/ios.y
 | 原应用 | Frthink v0.8.213（Android，`com.frthink.app`） |
 | 原版署名 | `Power by Fr33` |
 
-原版设置页中的版本行和 `Power by Fr33` 署名行在本移植版中原样保留。
+原版设置页中的版本行和 `Power by Fr33` 署名行在 Frthink 中原样保留。
