@@ -9,6 +9,7 @@ final class OpenAICompatibleClient: LLMClient {
     private let baseURL: String
     private let apiKey: String
     private let provider: ProviderSetting
+    private let onUsage: (@Sendable (Int) -> Void)?
 
     /// 全应用共享一条 URLSession。
     ///
@@ -30,10 +31,16 @@ final class OpenAICompatibleClient: LLMClient {
 
     private var session: URLSession { Self.sharedSession }
 
-    init(baseURL: String, apiKey: String, provider: ProviderSetting) {
+    init(
+        baseURL: String,
+        apiKey: String,
+        provider: ProviderSetting,
+        onUsage: (@Sendable (Int) -> Void)? = nil
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.provider = provider
+        self.onUsage = onUsage
     }
 
     // MARK: - URL
@@ -115,7 +122,7 @@ final class OpenAICompatibleClient: LLMClient {
                         let retryBody = try await Self.drain(retryBytes)
                         throw LLMError.http(status: retryHTTP.statusCode, body: retryBody)
                     }
-                    try await consumeStream(retryBytes, continuation: continuation)
+                    try await consumeStream(retryBytes, request: req, continuation: continuation)
                     return
                 }
                 throw LLMError.http(status: http.statusCode, body: body)
@@ -124,7 +131,7 @@ final class OpenAICompatibleClient: LLMClient {
                 let body = try await Self.drain(bytes)
                 throw LLMError.http(status: http.statusCode, body: body)
             }
-            try await consumeStream(bytes, continuation: continuation)
+            try await consumeStream(bytes, request: req, continuation: continuation)
         } catch is CancellationError {
             continuation.finish(throwing: LLMError.cancelled)
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -167,12 +174,35 @@ final class OpenAICompatibleClient: LLMClient {
 
     private func consumeStream(
         _ bytes: URLSession.AsyncBytes,
+        request: LLMRequest,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation
     ) async throws {
         var finishReason: String?
         var emittedAnything = false
         var sawDone = false
         var undecodableLines = 0
+        var reportedPromptTokens = 0
+        var reportedCompletionTokens = 0
+        var reportedTotalTokens = 0
+        var accumulatedOutput = ""
+        var accumulatedReasoning = ""
+        defer {
+            let tokens = LLMTokenUsage.resolveTotal(
+                reportedPrompt: reportedPromptTokens,
+                reportedCompletion: reportedCompletionTokens,
+                reportedTotal: reportedTotalTokens,
+                request: request,
+                outputText: accumulatedOutput,
+                reasoningText: accumulatedReasoning,
+                emittedAnything: emittedAnything
+                    || reportedTotalTokens > 0
+                    || reportedPromptTokens > 0
+                    || reportedCompletionTokens > 0
+            )
+            if tokens > 0 {
+                onUsage?(tokens)
+            }
+        }
         // 记录接收到的原始 SSE 行数据。在判定「空响应」时附带输出，
         // 便于区分鉴权失效、参数错误或模型名称不匹配等问题。
         var rawLog: [String] = []
@@ -213,12 +243,25 @@ final class OpenAICompatibleClient: LLMClient {
                 splitter: &splitter,
                 continuation: continuation,
                 finishReason: &finishReason,
-                emittedAnything: &emittedAnything
+                emittedAnything: &emittedAnything,
+                reportedPromptTokens: &reportedPromptTokens,
+                reportedCompletionTokens: &reportedCompletionTokens,
+                reportedTotalTokens: &reportedTotalTokens,
+                accumulatedOutput: &accumulatedOutput,
+                accumulatedReasoning: &accumulatedReasoning
             )
         }
 
         for event in splitter.finish() {
             emittedAnything = true
+            switch event {
+            case .delta(let deltaText):
+                accumulatedOutput += deltaText
+            case .reasoning(let deltaReasoning):
+                accumulatedReasoning += deltaReasoning
+            case .finished:
+                break
+            }
             continuation.yield(event)
         }
 
@@ -246,12 +289,29 @@ final class OpenAICompatibleClient: LLMClient {
         splitter: inout ThinkTagStreamSplitter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
         finishReason: inout String?,
-        emittedAnything: inout Bool
+        emittedAnything: inout Bool,
+        reportedPromptTokens: inout Int,
+        reportedCompletionTokens: inout Int,
+        reportedTotalTokens: inout Int,
+        accumulatedOutput: inout String,
+        accumulatedReasoning: inout String
     ) throws {
         // 状态码 200 的流式响应中亦可能下发错误信息（如限流、内容审核、上下文溢出），
         // 必须捕获处理，防止不完整正文被误判为正常结束。
         if let streamError = chunk.error {
             throw LLMError.streamError(detail: streamError.detail)
+        }
+
+        if let usage = chunk.usage ?? chunk.response?.usage {
+            if let p = usage.resolvedPromptTokens, p > 0 {
+                reportedPromptTokens = p
+            }
+            if let c = usage.resolvedCompletionTokens, c > 0 {
+                reportedCompletionTokens = c
+            }
+            if let t = usage.resolvedTotalTokens, t > 0 {
+                reportedTotalTokens = t
+            }
         }
 
         if let choice = chunk.choices?.first {
@@ -266,11 +326,20 @@ final class OpenAICompatibleClient: LLMClient {
 
             if let reasoning, !reasoning.isEmpty {
                 emittedAnything = true
+                accumulatedReasoning += reasoning
                 continuation.yield(.reasoning(reasoning))
             }
             if let content, !content.isEmpty {
                 emittedAnything = true
                 for event in splitter.push(content) {
+                    switch event {
+                    case .delta(let deltaText):
+                        accumulatedOutput += deltaText
+                    case .reasoning(let deltaReasoning):
+                        accumulatedReasoning += deltaReasoning
+                    case .finished:
+                        break
+                    }
                     continuation.yield(event)
                 }
             }
@@ -281,10 +350,19 @@ final class OpenAICompatibleClient: LLMClient {
         if let content = chunk.contentText, !content.isEmpty {
             emittedAnything = true
             for event in splitter.push(content) {
+                switch event {
+                case .delta(let deltaText):
+                    accumulatedOutput += deltaText
+                case .reasoning(let deltaReasoning):
+                    accumulatedReasoning += deltaReasoning
+                case .finished:
+                    break
+                }
                 continuation.yield(event)
             }
         } else if let reasoning = chunk.reasoningText, !reasoning.isEmpty {
             emittedAnything = true
+            accumulatedReasoning += reasoning
             continuation.yield(.reasoning(reasoning))
         }
     }
@@ -324,6 +402,43 @@ final class OpenAICompatibleClient: LLMClient {
         }
         if let streamError = decoded.error {
             throw LLMError.streamError(detail: streamError.detail)
+        }
+        let usage = decoded.usage ?? decoded.response?.usage
+        let message = decoded.choices?.first?.message
+        let outputText = message?.content ?? message?.text ?? message?.output_text ?? ""
+        let reasoningText = [
+            message?.reasoning_content,
+            message?.reasoning,
+            message?.analysis,
+            message?.thinking,
+            message?.thought,
+        ].compactMap { $0 }.first ?? ""
+        let toolCalls: [LLMToolCall] = (message?.tool_calls ?? []).compactMap { tc in
+            guard let name = tc.function?.name, !name.isEmpty else { return nil }
+            return LLMToolCall(
+                id: tc.id ?? "",
+                functionName: name,
+                arguments: tc.function?.arguments ?? "{}"
+            )
+        }
+        let hasPayload = !outputText.isEmpty
+            || !reasoningText.isEmpty
+            || !toolCalls.isEmpty
+            || (usage?.resolvedTotalTokens ?? 0) > 0
+            || (usage?.resolvedPromptTokens ?? 0) > 0
+            || (usage?.resolvedCompletionTokens ?? 0) > 0
+        let tokens = LLMTokenUsage.resolveTotal(
+            reportedPrompt: usage?.resolvedPromptTokens,
+            reportedCompletion: usage?.resolvedCompletionTokens,
+            reportedTotal: usage?.resolvedTotalTokens,
+            request: req,
+            outputText: outputText,
+            reasoningText: reasoningText,
+            toolCalls: toolCalls,
+            emittedAnything: hasPayload
+        )
+        if tokens > 0 {
+            onUsage?(tokens)
         }
         return (decoded, raw)
     }
@@ -511,6 +626,8 @@ final class OpenAICompatibleClient: LLMClient {
         let thinking: String?
         let thought: String?
         let stop_reason: String?
+        let usage: UsagePayload?
+        let response: WrappedResponseUsage?
         let error: StreamError?
 
         var contentText: String? {
@@ -522,6 +639,27 @@ final class OpenAICompatibleClient: LLMClient {
                 .compactMap { $0 }
                 .first
         }
+    }
+
+    private struct UsagePayload: Decodable {
+        let prompt_tokens: Int?
+        let completion_tokens: Int?
+        let total_tokens: Int?
+        let input_tokens: Int?
+        let output_tokens: Int?
+
+        var resolvedPromptTokens: Int? { prompt_tokens ?? input_tokens }
+        var resolvedCompletionTokens: Int? { completion_tokens ?? output_tokens }
+        var resolvedTotalTokens: Int? {
+            if let total_tokens, total_tokens > 0 { return total_tokens }
+            let p = resolvedPromptTokens ?? 0
+            let c = resolvedCompletionTokens ?? 0
+            return (p + c) > 0 ? (p + c) : nil
+        }
+    }
+
+    private struct WrappedResponseUsage: Decodable {
+        let usage: UsagePayload?
     }
 
     /// 200 响应里也可能以 `{"error":{...}}` 返回限流、过滤等错误。
@@ -565,6 +703,8 @@ final class OpenAICompatibleClient: LLMClient {
             let finish_reason: String?
         }
         let choices: [Choice]?
+        let usage: UsagePayload?
+        let response: WrappedResponseUsage?
         let error: StreamError?
     }
 
