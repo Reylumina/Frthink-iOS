@@ -1,8 +1,11 @@
-# 反编译产物，不进仓库（体积 + 版权）
+# 本地开发与内部参考文档，不进仓库
 out/
 out-*/
 tools/
 script/
+docs/
+.ryugi/
+.archify/
 
 # Xcode
 build/

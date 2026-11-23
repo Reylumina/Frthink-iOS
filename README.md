@@ -1,8 +1,66 @@
 # Frthink for iOS
 
+[![Platform](https://img.shields.io/badge/Platform-iOS_17.0%2B-black?style=flat-square&logo=apple)](https://developer.apple.com/ios/)
+[![Swift](https://img.shields.io/badge/Swift-5.10%2B-F05138?style=flat-square&logo=swift&logoColor=white)](https://swift.org)
+[![iOS Build](https://github.com/Reylumina/Frthink-iOS/actions/workflows/ios.yml/badge.svg)](https://github.com/Reylumina/Frthink-iOS/actions/workflows/ios.yml)
+
 Frthink for iOS 是 Android 应用 Frthink v0.8.213 的 SwiftUI 移植。原应用由 Fr33 开发，包名为 `com.frthink.app`。本仓库为非官方移植，与原作者无隶属关系。原应用及其提示词版权归原作者所有。
 
-Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世界书、人物卡、事件卡、仿写模板、长期写作规则、语料收集库与原文翻译。原版采用 Kotlin 与 Jetpack Compose，本仓库提供 SwiftUI 实现，不包含反编译产物和原始 APK。
+Frthink 面向中文长篇小说写作，提供码字机流式续写、世界书、人物卡、事件卡、仿写模板、长期写作规则、语料收集库、阅读器与原文翻译。
+
+## 功能
+
+### 创作与码字机
+- **流式续写与思维链**：支持流式生成正文与独立折叠的思考过程卡片；同一轮指令可多次重生成并左右切换候选变体。
+- **选区改写与正文编辑**：支持选中正文片段按指令局部改写、一键插入或追加至正文，支持系统级撤销/重做（`UndoManager`）。
+- **素材面板**：在写作台随时开关参与本轮提示词组装的世界设定、人物卡、事件卡、仿写模板与长期规则。
+
+### 世界观管理
+- **世界设定与世界书**：管理作品时代背景、核心设定及自定义世界书词条。
+- **人物卡与群组**：支持从正文或对话自动抽取人物卡、分批刷新与关系合并，也可手动编辑角色外貌、性格、目标与记忆。
+- **事件卡**：按时序归纳正文剧情事件，支持从正文增量刷新事件脉络。
+- **仿写模板与长期规则**：支持从样章分析生成仿写模板，或整理作品长期写作规则并保存历史版本。
+
+### 阅读、翻译与共享宇宙
+- **阅读器**：支持章节目录自动识别、全文搜索、书签管理及字号、行高、段距调节。
+- **长篇翻译**：支持导入外文或古文原稿，按分段上下文对照翻译并独立导出译文。
+- **共享宇宙**：跨书稿共享通用世界观设定与词条。
+- **语料收集库**：随时收藏佳句与描写片段，按分类检索复用。
+
+## 模型供应方
+
+在设置页配置服务地址与模型。API Key 保存在 iOS 系统 Keychain 中，不写入普通文件或备份存档。
+
+| 供应方 | 默认地址 | 说明 |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com` | 支持 `deepseek-chat` / `deepseek-reasoner` 与思维链分流 |
+| Anthropic | `https://api.anthropic.com` | 原生 `/v1/messages` 协议，支持 Extended Thinking |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | 原生 REST 协议，支持 `thinkingConfig` |
+| OpenRouter | `https://openrouter.ai/api/v1` | 支持统一 `reasoning` 参数与多模型路由 |
+| OpenAI 兼容 | 自定义或内置预设 | 内置 Kimi、GLM、Qwen、豆包、混元、MiniMax、OpenCode Go、Ollama Cloud、Grok、Mistral 等预设 |
+
+## 数据与存储
+
+- **本地加密**：本地书稿正文、世界设定、翻译原文与译文均使用 `AES-256-GCM` 加密存储，主密钥保存在系统 Keychain。
+- **导入与导出**：兼容原版 `.frthink` 归档导入与导出；正文与译文支持 UTF-8、UTF-16、GB18030 编码文本导入及 `.txt` 导出。
+
+## 构建与安装
+
+### 环境要求
+- iOS 17.0 及以上（iOS 26 及以上启用原生 Liquid Glass 材质，iOS 17–25 使用系统毛玻璃材质）
+- Xcode 16.0 及以上，无第三方依赖
+
+### 编译
+
+```bash
+git clone https://github.com/Reylumina/Frthink-iOS.git
+cd Frthink-iOS
+
+xcodebuild -project ios/Frthink.xcodeproj -scheme Frthink \
+  -destination 'generic/platform=iOS Simulator' build
+```
+
+GitHub Actions 工作流（[`.github/workflows/ios.yml`](.github/workflows/ios.yml)）可直接构建未签名安装包 `Frthink-unsigned.ipa`，通过 AltStore、SideStore、Sideloadly 或 TrollStore 安装至设备。
 
 ## 署名
 
@@ -12,128 +70,4 @@ Frthink 面向中文长篇小说写作，功能包括码字机流式续写、世
 | 原应用 | Frthink v0.8.213（Android，`com.frthink.app`） |
 | 原版署名 | `Power by Fr33` |
 
-原版设置页中的版本行和署名行在本移植版中原样保留。v0.8.213 拆解总览见 [`docs/APK-NOTES.md`](docs/APK-NOTES.md)。
-
-## 状态
-
-| 项目 | 状态 |
-|---|---|
-| 编译与打包 | 通过。`main` 与 `feat/context-distill` 均由 `iOS Build` 编译并生成未签名 IPA |
-| 运行时自检 | 代码内置 `SelfCheck` 逻辑校验（`main` 为原版基线，`feat/context-distill` 含上下文引擎校验）；当前环境无 macOS 模拟器，运行时未验证 |
-| 联网功能 | 未在真机验证，详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-| 界面与交互 | 按 [docs/DESIGN.md](docs/DESIGN.md) 实现（iOS 26.2 基线）：用户气泡实底填充、书封单色占位、系统 `UndoManager` 撤销重做、浮层玻璃「回到最新」、玻璃输入条。真机及 iPad 宽度未验证 |
-| 加密存储 | `payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 落盘 AES-256-GCM，主密钥在 Keychain，导出保持原版明文 |
-| 正文分页与导入导出 | 后台生成已实现；阅读器按块分页读取；全屏编辑器只载入书末窗口，保存只写窗口页；支持 UTF-8 / UTF-16 / GB18030 正文导入与纯文本 `.txt` 正文导出，详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 世界设定与规则 | `worldbook:setting` 伪词条已移除；支持长期写作规则手动整理、P54、历史版本与 `sourceHash` 门控 |
-
-## 环境要求
-
-| 项目 | 版本 |
-|---|---|
-| 最低系统 | iOS 17.0 |
-| 构建 SDK | iOS 26.2（CI 使用 Xcode 26.3 与 iPhoneSimulator26.2.sdk；Liquid Glass 通过 `#available(iOS 26.0, *)` 判断，17 至 25 回落材质） |
-| 构建环境 | Xcode 26.3，Swift 5 语言模式 |
-| 第三方依赖 | 无 |
-
-## AI 服务商图标
-
-设置页使用服务商各自的品牌标，不用通用 SF Symbol：
-
-| 服务商 | 图标来源 |
-|---|---|
-| DeepSeek | [Simple Icons](https://simpleicons.org/?q=deepseek)（CC0），填充官方蓝 `#4D6BFE` |
-| OpenRouter | [官方品牌页](https://openrouter.ai/brand) glyph，浅色 Grape / 深色 Volt |
-| Anthropic (Claude) | 内置 Claude 官方品牌 SVG（`ProviderAnthropic`） |
-| Gemini | 内置高清 PNG（`@2x` / `@3x`） |
-| OpenAI 兼容 | 内置厂商 SVG（DeepSeek、Kimi、Zai/GLM、混元、Qwen、豆包、MiniMax、OpenCode、Command Code、OpenDesign、Ollama、OpenAI、Claude、Gemini、Grok、Mistral），按服务地址自动匹配并默认回落 OpenAI |
-
-品牌标只用于标识对应服务商，不拉伸、不改色。商标归各自所有者。
-
-## 构建
-
-使用 Xcode 打开 `ios/Frthink.xcodeproj`，或在项目根目录执行：
-
-```bash
-xcodebuild -project ios/Frthink.xcodeproj -scheme Frthink \
-  -destination 'generic/platform=iOS Simulator' build
-```
-
-`.github/workflows/ios.yml` 在 GitHub Actions 上完成编译，并生成未签名 IPA。未签名 IPA 需经 Sideloadly、AltStore 等工具自签，或安装至越狱设备。
-
-## 目录结构
-
-Git 跟踪的部分：
-
-```
-ios/
-  Frthink.xcodeproj/           文件同步分组，新增 .swift 无需修改工程文件
-  Frthink/
-    App/                       入口与五个一级 Tab
-    Core/
-      Archive*.swift             .frthink 存档模型、快照导出与恢复导入、RFC1952 gzip
-      Models/                  Project、WorldBook、CharacterCard、EventCard、Universe
-      Store/                   文件持久化、正文编解码（TextFileCodec）、Keychain、@Observable 状态
-      LLM/                     OpenAI 兼容、Anthropic 与 Gemini 原生客户端、LLMHTTPTransport、ThinkTagStreamSplitter、token 估算
-      Prompts/                 提示词与拼装逻辑
-      Design/                  主题、通用容器与表单组件、TextKit 两端对齐排版
-    Features/
-      Library/                 书架与回收站
-      Writer/                  创作、码字机（WriterPane+Actions）、正文编辑器
-      World/                   世界、世界书、人物卡、事件卡、WorldJSON / WorldProseNormalizer、模板与规则
-      Translation/             阅读、章节目录、搜索、书签、原文与译文对照
-      Universe/                跨项目共享设定
-      Settings/                供应方、密钥、提示词、语料与存档管理
-docs/spec/                     反编译还原的四份规格
-.github/workflows/              编译与自检流水线
-```
-
-本机参考材料（`.gitignore` 排除，不随仓库分发）：
-
-```
-out/               原版 APK 反编译产物：apktool、jadx、dex 字符串表
-tools/             JDK 21、jadx、apktool、cfr
-script/            本地校验脚本与一次性迁移脚本
-```
-
-仓库不包含 APK 或 IPA：原版 APK 只在本机 `Downloads/Frthink.apk`，未签名 IPA 由 CI 生成。
-
-## 文档
-
-| 文件 | 内容 |
-|---|---|
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 开发环境、验证命令、CI、未验证项与约定 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构、边界、权衡与风险 |
-| [docs/DESIGN.md](docs/DESIGN.md) | 视觉、交互、文案与评审清单 |
-| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | 性能、硬件利用与流式实现的依据和做法 |
-| [docs/APK-NOTES.md](docs/APK-NOTES.md) | 原版 v0.8.213 行为拆解与规格索引 |
-| [docs/spec/](docs/spec/) | 与原版的逐条协议比对 |
-| [docs/skills/ios-taste/](docs/skills/ios-taste/) | 界面设计方法参考（vendored，MIT） |
-
-## 模型供应方
-
-供应方在设置页配置。API Key 存储在 Keychain，不写入文件。
-
-| 供应方 | 默认地址 |
-|---|---|
-| DeepSeek | `https://api.deepseek.com` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
-| Anthropic | `https://api.anthropic.com` |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta` |
-| OpenAI 兼容 | 由用户填写，提供 OpenCode Go / Ollama Cloud 等预设 |
-
-应用不内置凭据，不上报数据。
-
-## 数据存储
-
-数据位于 `Application Support/Frthink/`：
-
-```
-settings.json
-projects/<id>/project.json       元数据
-projects/<id>/payload.json       世界书、对话等元数据（密文）
-projects/<id>/body.pages/         正文分页（每页密文）
-projects/<id>/body.json          旧版单文件正文（仅迁移）
-projects/<id>/body.meta.json     字数、UTF-16 长度与章节（密文）
-projects/<id>/source.json        翻译原文（密文）
-projects/<id>/translations.json  译文分段（密文）
-```
+原版设置页中的版本行和 `Power by Fr33` 署名行在本移植版中原样保留。
