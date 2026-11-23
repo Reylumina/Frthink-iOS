@@ -65,13 +65,66 @@ final class AnthropicClient: LLMClient {
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
 
-        // Anthropic 要求非 system 消息从 user 开始且角色交替；连续同角色合并。
+        // Anthropic 要求非 system 消息从 user 开始且角色交替；连续同角色合并，同时支持工具调用与结果块。
         var chatMessages: [[String: Any]] = []
         for msg in request.messages where msg.role != "system" {
+            if msg.role == "tool" {
+                let toolResultBlock: [String: Any] = [
+                    "type": "tool_result",
+                    "tool_use_id": msg.toolCallID ?? "",
+                    "content": msg.content,
+                ]
+                if let lastRole = chatMessages.last?["role"] as? String, lastRole == "user" {
+                    var blocks: [[String: Any]]
+                    if let existingBlocks = chatMessages.last?["content"] as? [[String: Any]] {
+                        blocks = existingBlocks
+                    } else if let prev = chatMessages.last?["content"] as? String {
+                        blocks = prev.isEmpty ? [] : [["type": "text", "text": prev]]
+                    } else {
+                        blocks = []
+                    }
+                    blocks.append(toolResultBlock)
+                    chatMessages[chatMessages.count - 1]["content"] = blocks
+                } else {
+                    chatMessages.append(["role": "user", "content": [toolResultBlock]])
+                }
+                continue
+            }
+
+            if msg.role == "assistant", let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                var blocks: [[String: Any]] = []
+                if !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blocks.append(["type": "text", "text": msg.content])
+                }
+                for call in toolCalls {
+                    let parsedInput: Any
+                    if let data = call.arguments.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) {
+                        parsedInput = obj
+                    } else {
+                        parsedInput = [String: Any]()
+                    }
+                    blocks.append([
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.functionName,
+                        "input": parsedInput,
+                    ])
+                }
+                chatMessages.append(["role": "assistant", "content": blocks])
+                continue
+            }
+
             let role = msg.role == "assistant" ? "assistant" : "user"
             if let lastRole = chatMessages.last?["role"] as? String, lastRole == role,
                let prev = chatMessages.last?["content"] as? String {
                 chatMessages[chatMessages.count - 1]["content"] = prev + "\n\n" + msg.content
+            } else if let lastRole = chatMessages.last?["role"] as? String, lastRole == role,
+                      var blocks = chatMessages.last?["content"] as? [[String: Any]] {
+                if !msg.content.isEmpty {
+                    blocks.append(["type": "text", "text": msg.content])
+                }
+                chatMessages[chatMessages.count - 1]["content"] = blocks
             } else {
                 chatMessages.append(["role": role, "content": msg.content])
             }
@@ -234,6 +287,7 @@ final class AnthropicClient: LLMClient {
         var rawLog: [String] = []
         let decoder = JSONDecoder()
         var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
+        var pendingToolCalls: [Int: (id: String, name: String, json: String)] = [:]
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -256,6 +310,14 @@ final class AnthropicClient: LLMClient {
                 throw LLMError.streamError(detail: error.detail)
             }
             switch event.type {
+            case "content_block_start":
+                if event.content_block?.type == "tool_use" {
+                    let idx = event.index ?? pendingToolCalls.count
+                    let id = event.content_block?.id ?? UUID().uuidString
+                    let name = event.content_block?.name ?? ""
+                    pendingToolCalls[idx] = (id: id, name: name, json: "")
+                    emittedAnything = true
+                }
             case "content_block_delta":
                 if let thinking = event.delta?.thinking, !thinking.isEmpty {
                     emittedAnything = true
@@ -266,6 +328,14 @@ final class AnthropicClient: LLMClient {
                     for splitEvent in splitter.push(text) {
                         continuation.yield(splitEvent)
                     }
+                }
+                if let partial = event.delta?.partial_json, !partial.isEmpty {
+                    let idx = event.index ?? 0
+                    if var current = pendingToolCalls[idx] {
+                        current.json += partial
+                        pendingToolCalls[idx] = current
+                    }
+                    emittedAnything = true
                 }
             case "message_delta":
                 if let reason = event.delta?.stop_reason, !reason.isEmpty {
@@ -281,6 +351,22 @@ final class AnthropicClient: LLMClient {
         for splitEvent in splitter.finish() {
             emittedAnything = true
             continuation.yield(splitEvent)
+        }
+
+        if !pendingToolCalls.isEmpty {
+            let calls: [LLMToolCall] = pendingToolCalls.keys.sorted().compactMap { idx in
+                guard let item = pendingToolCalls[idx], !item.name.isEmpty else { return nil }
+                let trimmed = item.json.trimmingCharacters(in: .whitespacesAndNewlines)
+                return LLMToolCall(
+                    id: item.id,
+                    functionName: item.name,
+                    arguments: trimmed.isEmpty ? "{}" : item.json
+                )
+            }
+            if !calls.isEmpty {
+                emittedAnything = true
+                continuation.yield(.toolCalls(calls))
+            }
         }
 
         if emittedAnything, undecodableLines > 0, stopReason == nil, !sawStop {
@@ -431,13 +517,21 @@ final class AnthropicClient: LLMClient {
     }
 
     private struct StreamEvent: Decodable {
+        struct ContentBlock: Decodable {
+            let type: String?
+            let id: String?
+            let name: String?
+        }
         struct Delta: Decodable {
             let type: String?
             let text: String?
             let thinking: String?
+            let partial_json: String?
             let stop_reason: String?
         }
         let type: String?
+        let index: Int?
+        let content_block: ContentBlock?
         let delta: Delta?
         let error: APIError?
     }

@@ -135,6 +135,9 @@ enum WorldRulesWorkflow {
             return RulesOutcome(updated: false)
         case .updated:
             session.payload.world = world
+            session.syncWorldChangesIntoNarrativeWorkspace(
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
             session.scheduleSave()
             return RulesOutcome(updated: true)
         }

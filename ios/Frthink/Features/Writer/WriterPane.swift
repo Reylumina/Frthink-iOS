@@ -75,6 +75,9 @@ struct WriterPane: View {
         case materials
         case snapshots
         case bodyRange
+        case styleLint
+        case storyGraph
+        case storyChoices
 
         var id: String { rawValue }
     }
@@ -178,12 +181,15 @@ struct WriterPane: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                bottomBar
-                    .onGeometryChange(for: CGFloat.self) { proxy in
-                        proxy.size.height
-                    } action: { height in
-                        updateBottomBarHeight(height)
-                    }
+                VStack(spacing: Theme.Spacing.xs) {
+                    WriterToolStatusLine(controller: controller)
+                    bottomBar
+                }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { height in
+                    updateBottomBarHeight(height)
+                }
             }
             // 撤销提示条以浮层展示于输入条上方，不影响对话内容高度。
             .overlay(alignment: .bottom) {
@@ -359,6 +365,22 @@ struct WriterPane: View {
         } label: {
             Label("写作资料", systemImage: "book.closed")
         }
+        Button {
+            openSheet(.styleLint)
+        } label: {
+            Label("文风检查", systemImage: "wand.and.stars")
+        }
+        Button {
+            openSheet(.storyGraph)
+        } label: {
+            Label("剧情线", systemImage: "arrow.triangle.branch")
+        }
+        Button {
+            openSheet(.storyChoices)
+        } label: {
+            Label("剧情走向", systemImage: "sparkles")
+        }
+        .disabled(controller.isBusy)
         Button {
             openSheet(.bodyRange)
         } label: {
@@ -954,6 +976,36 @@ struct WriterPane: View {
             RequestSnapshotsSheet(session: session)
         case .bodyRange:
             WriterBodyRangeSheet(session: session)
+        case .styleLint:
+            NavigationStack {
+                StyleLintCardView(session: session)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { activeSheet = nil }
+                        }
+                    }
+            }
+        case .storyGraph:
+            NavigationStack {
+                StoryGraphView(session: session)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { activeSheet = nil }
+                        }
+                    }
+            }
+        case .storyChoices:
+            StoryChoicesSheet(
+                session: session,
+                onFillInstruction: { instruction in
+                    composer.text = instruction
+                    session.payload.composerDraft = instruction
+                },
+                onSendInstruction: { instruction in
+                    dismissKeyboard()
+                    _ = controller.send(instruction, session: session, store: store)
+                }
+            )
         }
     }
 
@@ -991,5 +1043,16 @@ struct WriterPane: View {
             get: { messageAction != nil },
             set: { if !$0 { messageAction = nil } }
         )
+    }
+}
+
+private struct WriterToolStatusLine: View {
+    let controller: WriterController
+
+    var body: some View {
+        if let status = controller.activeToolStatus, !status.isEmpty {
+            AppStatusLine(kind: .progress, text: status)
+                .padding(.horizontal, Theme.Spacing.l)
+        }
     }
 }

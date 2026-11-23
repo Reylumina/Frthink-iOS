@@ -12,6 +12,194 @@ enum ManuscriptIndex {
         let score: Double
     }
 
+    struct SentenceWindow: Equatable {
+        let text: String
+        let utf16Start: Int
+        let utf16Length: Int
+    }
+
+    struct GrepMatch: Equatable {
+        let pageIndex: Int
+        let lineNumber: Int
+        let utf16Start: Int
+        let utf16Length: Int
+        let matchedText: String
+        let contextSnippet: String
+    }
+
+    /// 按页缓存分词、句窗与文档频率的增量 BM25 索引：正文尾页改动时仅重算受影响页，其余页直接命中缓存。
+    struct IncrementalBM25Index {
+        private struct CachedPage {
+            let pageIndex: Int
+            let contentHash: String
+            let utf16Start: Int
+            let utf16Length: Int
+            let windows: [SentenceWindow]
+            let windowTokens: [[String]]
+            let pageDF: [String: Int]
+        }
+
+        private var cachedPages: [Int: CachedPage] = [:]
+
+        var cachedPageCount: Int { cachedPages.count }
+
+        /// 返回 `true` 表示该页内容或偏移发生变更并已重算；返回 `false` 表示命中缓存跳过重分词。
+        @discardableResult
+        mutating func updatePage(index: Int, text: String, utf16Start: Int) -> Bool {
+            let hash = SummaryKey.sha256Hex(text)
+            if let existing = cachedPages[index],
+               existing.contentHash == hash,
+               existing.utf16Start == utf16Start {
+                return false
+            }
+
+            let rawWindows = ManuscriptIndex.buildSentenceWindows(from: text)
+            let windows = rawWindows.map {
+                SentenceWindow(text: $0.text, utf16Start: $0.utf16Start, utf16Length: $0.utf16Length)
+            }
+            let windowTokens = windows.map { ManuscriptIndex.tokenize($0.text) }
+            var pageDF: [String: Int] = [:]
+            for tokens in windowTokens {
+                for token in Set(tokens) {
+                    pageDF[token, default: 0] += 1
+                }
+            }
+
+            cachedPages[index] = CachedPage(
+                pageIndex: index,
+                contentHash: hash,
+                utf16Start: utf16Start,
+                utf16Length: (text as NSString).length,
+                windows: windows,
+                windowTokens: windowTokens,
+                pageDF: pageDF
+            )
+            return true
+        }
+
+        mutating func removePages(from startIndex: Int) {
+            for key in cachedPages.keys where key >= startIndex {
+                cachedPages.removeValue(forKey: key)
+            }
+        }
+
+        func recall(
+            queryTerms: [String],
+            instructionText: String = "",
+            causalLimit: Int? = nil,
+            excludeTrailingUTF16: Int = 0,
+            maxResults: Int = 3,
+            maxTokens: Int = 600
+        ) -> [Excerpt] {
+            guard !cachedPages.isEmpty else { return [] }
+            let sortedPages = cachedPages.keys.sorted().compactMap { cachedPages[$0] }
+            let maxIndexedEnd = sortedPages.map { $0.utf16Start + $0.utf16Length }.max() ?? 0
+            let upperBound = causalLimit.map { min($0, maxIndexedEnd) } ?? maxIndexedEnd
+            let effectiveLimit: Int?
+            if excludeTrailingUTF16 > 0 {
+                effectiveLimit = max(0, upperBound - excludeTrailingUTF16)
+            } else {
+                effectiveLimit = causalLimit
+            }
+
+            let cleanedTerms = ManuscriptIndex.normalizedQueryTerms(
+                terms: queryTerms,
+                instructionText: instructionText
+            )
+            let queryTokens = ManuscriptIndex.tokenize(cleanedTerms.joined(separator: " "))
+            guard !queryTokens.isEmpty || !cleanedTerms.isEmpty else { return [] }
+            let uniqueQueryTokens = Array(Set(queryTokens))
+
+            var candidates: [(globalIndex: Int, text: String, tokens: [String])] = []
+            var globalDF: [String: Int] = [:]
+            var totalTokenCount = 0
+            var idxCounter = 0
+
+            for page in sortedPages {
+                if let limit = effectiveLimit, page.utf16Start >= limit { break }
+                let pageEnd = page.utf16Start + page.utf16Length
+                let fullPageIncluded = effectiveLimit == nil || pageEnd <= (effectiveLimit ?? pageEnd)
+
+                if fullPageIncluded {
+                    for (token, count) in page.pageDF {
+                        globalDF[token, default: 0] += count
+                    }
+                    for (localIdx, window) in page.windows.enumerated() {
+                        let tokens = page.windowTokens[localIdx]
+                        totalTokenCount += tokens.count
+                        candidates.append((globalIndex: idxCounter, text: window.text, tokens: tokens))
+                        idxCounter += 1
+                    }
+                } else {
+                    for (localIdx, window) in page.windows.enumerated() {
+                        let globalWindowEnd = page.utf16Start + window.utf16Start + window.utf16Length
+                        if let limit = effectiveLimit, globalWindowEnd > limit { continue }
+                        let tokens = page.windowTokens[localIdx]
+                        totalTokenCount += tokens.count
+                        for token in Set(tokens) {
+                            globalDF[token, default: 0] += 1
+                        }
+                        candidates.append((globalIndex: idxCounter, text: window.text, tokens: tokens))
+                        idxCounter += 1
+                    }
+                }
+            }
+
+            guard !candidates.isEmpty else { return [] }
+            let docCount = Double(candidates.count)
+            let avgLen = max(1.0, Double(totalTokenCount) / docCount)
+            let k1 = 1.5
+            let b = 0.75
+
+            var scored: [Excerpt] = []
+            for item in candidates {
+                guard !item.tokens.isEmpty else { continue }
+                var tf: [String: Int] = [:]
+                for t in item.tokens { tf[t, default: 0] += 1 }
+                let docLen = Double(item.tokens.count)
+
+                var score = 0.0
+                for q in uniqueQueryTokens {
+                    guard let freq = tf[q], freq > 0 else { continue }
+                    let n = Double(globalDF[q, default: 0])
+                    let idf = log((docCount - n + 0.5) / (n + 0.5) + 1.0)
+                    let f = Double(freq)
+                    let denom = f + k1 * (1.0 - b + b * (docLen / avgLen))
+                    score += idf * ((f * (k1 + 1.0)) / denom)
+                }
+
+                for term in cleanedTerms where term.count >= 2 {
+                    if item.text.localizedCaseInsensitiveContains(term) {
+                        score += 2.5
+                    }
+                }
+
+                if score > 0.5 {
+                    scored.append(Excerpt(index: item.globalIndex, text: item.text, score: score))
+                }
+            }
+
+            guard !scored.isEmpty else { return [] }
+            let top = scored
+                .sorted {
+                    if $0.score != $1.score { return $0.score > $1.score }
+                    return $0.index < $1.index
+                }
+                .prefix(maxResults)
+                .sorted { $0.index < $1.index }
+
+            var selected: [Excerpt] = []
+            var usedTokens = 0
+            for item in top {
+                let cost = TokenEstimator.estimate(item.text)
+                if !selected.isEmpty && usedTokens + cost > maxTokens { continue }
+                usedTokens += cost
+                selected.append(item)
+            }
+            return selected
+        }
+    }
+
     /// 从完整正文中扣除已被 `activeWindowText` 覆盖的末尾部分，并遵循 `causalLimit` 截断未来剧情，检索最相关的早期句窗。
     static func recallHistoricalExcerpts(
         fullManuscript: String,
@@ -99,6 +287,242 @@ enum ManuscriptIndex {
             selected.append(item)
         }
         return selected
+    }
+
+    /// 将正文切分为重叠的 3 句滑动窗口并记录精确 UTF-16 起止范围；无句读长段回退为定长字符窗口。
+    static func buildSentenceWindows(
+        from text: String,
+        windowSentences: Int = 3,
+        stride: Int = 2
+    ) -> [(text: String, utf16Start: Int, utf16Length: Int)] {
+        let nsText = text as NSString
+        guard nsText.length > 0 else { return [] }
+
+        var rawSpans: [NSRange] = []
+        var currentStart = 0
+        var idx = 0
+
+        func flushSpan(upTo end: Int) {
+            guard end > currentStart else { return }
+            let span = NSRange(location: currentStart, length: end - currentStart)
+            let trimmed = nsText.substring(with: span).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                rawSpans.append(span)
+            }
+            currentStart = end
+        }
+
+        let terminators: Set<unichar> = [0x3002, 0xFF01, 0xFF1F, 0x0021, 0x003F] // 。！？!?
+        let closingQuotes: Set<unichar> = [0x201D, 0x300D, 0x300F, 0x0022]
+
+        while idx < nsText.length {
+            let ch = nsText.character(at: idx)
+            if ch == 0x000A {
+                flushSpan(upTo: idx)
+                currentStart = idx + 1
+                idx += 1
+                continue
+            }
+            if terminators.contains(ch) {
+                var end = idx + 1
+                while end < nsText.length, closingQuotes.contains(nsText.character(at: end)) {
+                    end += 1
+                }
+                flushSpan(upTo: end)
+                idx = end
+                continue
+            }
+            idx += 1
+        }
+        flushSpan(upTo: nsText.length)
+
+        // 展平过长无标点段落，避免单个窗口过大挤占上下文预算。
+        var normalizedSpans: [NSRange] = []
+        for span in rawSpans {
+            if span.length <= 420 {
+                normalizedSpans.append(span)
+            } else {
+                var offset = span.location
+                let endLimit = span.location + span.length
+                while offset < endLimit {
+                    var sliceLen = min(280, endLimit - offset)
+                    if offset + sliceLen < endLimit, sliceLen > 1 {
+                        let ch = nsText.character(at: offset + sliceLen)
+                        if ch >= 0xDC00, ch <= 0xDFFF { sliceLen -= 1 }
+                    }
+                    normalizedSpans.append(NSRange(location: offset, length: sliceLen))
+                    if offset + sliceLen >= endLimit { break }
+                    offset += max(1, sliceLen - 40)
+                }
+            }
+        }
+
+        guard !normalizedSpans.isEmpty else { return [] }
+        let winSize = max(1, windowSentences)
+        let step = max(1, stride)
+        var windows: [(text: String, utf16Start: Int, utf16Length: Int)] = []
+
+        if normalizedSpans.count <= winSize {
+            let start = normalizedSpans[0].location
+            let end = normalizedSpans[normalizedSpans.count - 1].location
+                + normalizedSpans[normalizedSpans.count - 1].length
+            let combined = NSRange(location: start, length: max(0, end - start))
+            let slice = nsText.substring(with: combined).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !slice.isEmpty {
+                windows.append((text: slice, utf16Start: combined.location, utf16Length: combined.length))
+            }
+            return windows
+        }
+
+        var cursor = 0
+        while cursor < normalizedSpans.count {
+            let endIdx = min(normalizedSpans.count - 1, cursor + winSize - 1)
+            let start = normalizedSpans[cursor].location
+            let end = normalizedSpans[endIdx].location + normalizedSpans[endIdx].length
+            let combined = NSRange(location: start, length: max(0, end - start))
+            let slice = nsText.substring(with: combined).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !slice.isEmpty {
+                windows.append((text: slice, utf16Start: combined.location, utf16Length: combined.length))
+            }
+            if endIdx == normalizedSpans.count - 1 { break }
+            cursor += step
+        }
+        return windows
+    }
+
+    /// 无索引直查分页原稿：严格在匹配与提取上下文之前按 `causalLimit` 截断，杜绝后续章节剧透泄露。
+    static func grepManuscript(
+        pages: [String],
+        pattern: String,
+        contextLines: Int = 1,
+        regex: Bool = false,
+        causalLimit: Int? = nil,
+        maxMatches: Int = 12,
+        pageSize: Int = FileStore.bodyPageSize
+    ) -> [GrepMatch] {
+        let query = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, maxMatches > 0 else { return [] }
+
+        let compiledRegex: NSRegularExpression?
+        if regex {
+            guard let compiled = try? NSRegularExpression(pattern: query) else {
+                return []
+            }
+            compiledRegex = compiled
+        } else {
+            compiledRegex = nil
+        }
+
+        var matches: [GrepMatch] = []
+        var pageStartUTF16 = 0
+        let safeContext = max(0, contextLines)
+
+        for (pageIdx, rawPage) in pages.enumerated() {
+            let rawLength = (rawPage as NSString).length
+            defer {
+                pageStartUTF16 += rawLength
+            }
+
+            if let limit = causalLimit, pageStartUTF16 >= limit {
+                break
+            }
+
+            let visiblePage: String
+            if let limit = causalLimit, pageStartUTF16 + rawLength > limit {
+                let cutoffLength = max(0, limit - pageStartUTF16)
+                visiblePage = (rawPage as NSString).substring(to: cutoffLength)
+            } else {
+                visiblePage = rawPage
+            }
+
+            guard !visiblePage.isEmpty else { continue }
+            let lines = splitLinesWithUTF16Offsets(visiblePage)
+            for (lineArrayIdx, lineInfo) in lines.enumerated() {
+                let nsLine = lineInfo.text as NSString
+                var matchRange = NSRange(location: NSNotFound, length: 0)
+
+                if let compiledRegex {
+                    if let first = compiledRegex.firstMatch(
+                        in: lineInfo.text,
+                        range: NSRange(location: 0, length: nsLine.length)
+                    ) {
+                        matchRange = first.range
+                    }
+                } else {
+                    matchRange = nsLine.range(of: query, options: [.caseInsensitive])
+                }
+
+                guard matchRange.location != NSNotFound else { continue }
+                let matchedText = nsLine.substring(with: matchRange)
+                let ctxStart = max(0, lineArrayIdx - safeContext)
+                let ctxEnd = min(lines.count - 1, lineArrayIdx + safeContext)
+                let contextSnippet = (ctxStart...ctxEnd)
+                    .map { lines[$0].text }
+                    .joined(separator: "\n")
+
+                matches.append(
+                    GrepMatch(
+                        pageIndex: pageIdx,
+                        lineNumber: lineArrayIdx + 1,
+                        utf16Start: pageStartUTF16 + lineInfo.utf16Start + matchRange.location,
+                        utf16Length: matchRange.length,
+                        matchedText: matchedText,
+                        contextSnippet: contextSnippet
+                    )
+                )
+                if matches.count >= maxMatches {
+                    return matches
+                }
+            }
+        }
+
+        return matches
+    }
+
+    static func grepManuscript(
+        fullManuscript: String,
+        pattern: String,
+        contextLines: Int = 1,
+        regex: Bool = false,
+        causalLimit: Int? = nil,
+        maxMatches: Int = 12
+    ) -> [GrepMatch] {
+        grepManuscript(
+            pages: [fullManuscript],
+            pattern: pattern,
+            contextLines: contextLines,
+            regex: regex,
+            causalLimit: causalLimit,
+            maxMatches: maxMatches
+        )
+    }
+
+    private static func splitLinesWithUTF16Offsets(
+        _ text: String
+    ) -> [(text: String, utf16Start: Int)] {
+        let nsText = text as NSString
+        guard nsText.length > 0 else { return [] }
+        var lines: [(text: String, utf16Start: Int)] = []
+        var lineStart = 0
+        var idx = 0
+
+        while idx < nsText.length {
+            if nsText.character(at: idx) == 0x000A {
+                let len = idx - lineStart
+                let line = nsText.substring(with: NSRange(location: lineStart, length: len))
+                lines.append((text: line, utf16Start: lineStart))
+                lineStart = idx + 1
+            }
+            idx += 1
+        }
+        if lineStart <= nsText.length {
+            let len = nsText.length - lineStart
+            if len > 0 || lines.isEmpty {
+                let line = nsText.substring(with: NSRange(location: lineStart, length: len))
+                lines.append((text: line, utf16Start: lineStart))
+            }
+        }
+        return lines
     }
 
     // MARK: - 内部切分与分词

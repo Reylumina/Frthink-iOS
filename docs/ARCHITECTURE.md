@@ -31,13 +31,14 @@ iOS 版需复现这些流程，并满足三项约束：提示词、协议、存�
 ### 4.1 分层
 
 ```
-App/            入口、根导航、演示数据、运行时自检（`SelfCheck` + `ContextEngineSelfCheck`）
-Features/       按业务域切的界面层：Writer（`WriterPane+Actions`、增强分支含 `SceneMemoryBuilder`）、World（`WorldJSON` + `WorldProseNormalizer`）、Translation（Reader）、Library、Universe、Settings
+App/            入口、根导航、演示数据、运行时自检（`SelfCheck` + `ContextEngineSelfCheck` + `NarrativeSelfCheck`）
+Features/       按业务域切的界面层：Writer（`WriterPane` / `WriterPane+Actions`、`NarrativeCommitCoordinator` 采纳落盘、`WriterController` 接通流式只读工具 2 轮闭环、`WriterToolStatusLine` 与增量 BM25 本地回退、增强分支含 `SceneMemoryBuilder`）、Narrative（`AuthorDirectivesView` 写作规则、`EntityPagesView`/`EntityPageDetailView` 独立档案与冲突确认、`ProspectiveThreadsView` 五态伏笔、`StyleLintCardView` 异步文风体检、`StoryGraphView` 纯剧情因果轨道图与节拍规划、`DreamingAuditView` 异步离线记忆审计与原位清理、`StoryChoicesSheet` 走向推演）、World（`WorldSettingSection` 置顶「叙事中枢与图谱」并折叠传统档案、`WorldJSON` + `WorldProseNormalizer`、`ConsistencyCheckWorkflow` 审校与离线记忆审计）、Translation（Reader）、Library、Universe、Settings
 Core/
   Models/       值类型：Project、World、Chat、Settings（含 `ProviderKind.gemini` 与规则表）、Universe
-  Store/        AppStore（全局）、ProjectSession（单书）、FileStore（加密落盘）、ManuscriptIndex（端侧 BM25 因果回查，增强分支）、TextFileCodec（正文编解码与导出）、Keychain
+  Narrative/    单源实时叙事状态与因果图谱层：`NarrativeWorkspace`（O(1) 实时三账本直写与快照恢复）、`StoryGraph`（纯剧情因果 DAG、祖先脉络摘要 `causalAncestorSummaries`、下游影响检索 `downstreamImpactedNodes` 与检查点重放）、`NarrativeStateReducer`（权威仲裁、事实/认知分离与整页替换）、`NarrativeModels`（逐字规则账本、每实体独立页、五态伏笔、机械索引与保留蒸馏资产）、`NarrativeDeltaExtractor`（单步引用鉴权增量解析）、`NarrativeDreamingAuditor`（离线记忆漂移/膨胀/超期伏笔审计与账本直接清理）、`StoryChoicePlanner`（分支剧情走向推演）、`NarrativeJSONScanner`（共用稳健 JSON 扫描）、`MechanicalAnchorExtractor`（零请求实体/时间/物件定位）、`ProseStyleLinter`（旁白去 AI 味密度检查与对白豁免）、`NarrativeContextOrchestrator`（冻结前缀、因果脉络注入与本地 BM25 回退三段式编排）、`ReFoldManager`（分块可逆折叠）、`NarrativeReadTools`（只读工具契约与后台执行）、`NarrativeStore`（含 `ledgers.json` 的增量脏文件分文件加密落盘与缺失回填）、`LegacyArchiveImporter`
+  Store/        AppStore（全局）、ProjectSession（单书；维护 `incrementalBM25` 按页增量索引与叙事写命令）、FileStore（加密落盘）、ManuscriptIndex（按页缓存增量 BM25 与因果截断无索引 `grepManuscript`）、TextFileCodec（正文编解码与导出）、Keychain
   Prompts/      PromptLibrary（模板）、PromptComposer（装配，按世界/素材/语料拆到 extension）、DynamicContextSelector / StyleDistiller（增强分支）
-  LLM/          协议抽象（`ReasoningDialect`）、`LLMHTTPTransport`、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、token 估算
+  LLM/          协议抽象（`ReasoningDialect`、`LLMStreamEvent.toolCalls`）、`LLMHTTPTransport`、`ThinkTagStreamSplitter`、`OpenAICompatibleClient`、`AnthropicClient`、`GeminiClient`（原生 `/v1beta`）、三端流式工具解析与多轮工具消息序列化、token 估算
   Archive*.swift Archive.swift（模型与入口）、ArchiveSnapshot.swift（快照构建与导出）、ArchiveRestore.swift（`WritableKeyPath` 合并策略、恢复校验与导入）；gzip 在 FrthinkGzip.swift，错误在 FrthinkArchiveError.swift
   Design/       Theme、AppComponents、AppFormComponents、JustifiedText、DocumentPickerView（原生 `asCopy` 文件选择器）等
 ```
@@ -78,6 +79,7 @@ Core/
 Library/<projectID>/
   project.json     元信息
   payload.json     消息、世界、草稿、快照（AES-256-GCM 密文；正文在 body.pages/）
+  narrative/       单源实时叙事工作区（AES-256-GCM 分文件密文：`manifest.json`、`ledgers.json`、`story_graph.json`、`directives.json`、`pyramid.json`、`entities/*.json`）
 Archive/<name>.frthink
   信封 JSON（format/version/compression/createdAt/payload）
     payload = base64(gzip(全量 JSON))
@@ -87,7 +89,7 @@ gzip 是独立实现的 RFC1952 规范（`FrthinkGzip`）。Foundation 的 `COMP
 
 世界刷新、素材归纳、长期规则分别由 `WorldWorkflow`、`WorldMaterialWorkflow`、`WorldRulesWorkflow` 承担，共用 `WorldRequestContext`（当前服务商、客户端与一次性请求参数）；增强分支另设 `StateSyncWorkflow`（采纳正文后后台防抖同步动态快照与伏笔）与 `ConsistencyCheckWorkflow`（按需五维证据审校），各 workflow 只保留业务逻辑。
 
-`payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 用 AES-256-GCM 加密，文件头 `FRTHENC1`，主密钥 32 字节存 Keychain。读取时按文件头判断：旧版本的明文文件解码后立即加密写回。导出不加密——原版密钥在 AndroidKeyStore，跨平台环境下密钥并不共享，导出保持明文才能实现双端互通。
+`payload.json`、`body.pages/*.bin`、`body.meta.json`、`source.json`、`translations.json` 以及 `narrative/` 下全部工作区与独立实体页文件用 AES-256-GCM 加密，文件头 `FRTHENC1`，主密钥 32 字节存 Keychain。读取时按文件头判断：旧版本的明文文件解码后立即加密写回。导出不加密——原版密钥在 AndroidKeyStore，跨平台环境下密钥并不共享，导出保持明文才能实现双端互通。
 
 ### 4.5 提示词流水线
 

@@ -54,7 +54,7 @@ struct SettingsPromptPage: View {
         Section {
             Toggle("启用语料收集库", isOn: settingsBinding(store, \.corpusEnabled))
             Toggle("默认流式输出", isOn: settingsBinding(store, \.streamByDefault))
-            Toggle("采纳正文后静默同步状态与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
+            Toggle("采纳正文后自动更新设定与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
             Toggle("动态按需激活人物与事件卡", isOn: settingsBinding(store, \.dynamicContextActivation))
             Toggle("预填充卡 CoT（DeepSeek / 兼容推理网关）", isOn: settingsBinding(store, \.prefillCoT))
             Picker("历史思维链回灌", selection: settingsBinding(store, \.reasoningContextPolicy)) {

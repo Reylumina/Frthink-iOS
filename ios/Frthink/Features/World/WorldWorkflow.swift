@@ -133,7 +133,11 @@ enum WorldWorkflow {
                 completed: session.payload.world.completedAnalysisSegments,
                 total: allSegments.count
             ), !session.payload.world.analysisMergedCards.isEmpty {
-                let finalized = try await finalizeAnalysis(session: session, context: context)
+                let finalized = try await finalizeAnalysis(
+                    session: session,
+                    context: context,
+                    settingsCorpusLibraries: store.settings.corpusLibraries
+                )
                 return RefreshOutcome(
                     addedCharacters: finalized.added,
                     updatedCharacters: finalized.updated,
@@ -214,7 +218,11 @@ enum WorldWorkflow {
             completed: session.payload.world.completedAnalysisSegments,
             total: allSegments.count
         ) {
-            let finalized = try await finalizeAnalysis(session: session, context: context)
+            let finalized = try await finalizeAnalysis(
+                session: session,
+                context: context,
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
             addedCharacters = finalized.added
             updatedCharacters = finalized.updated
             dedupeNote = finalized.note
@@ -358,6 +366,9 @@ enum WorldWorkflow {
         session.payload.world.lastRefreshedAt = Date()
         let complete = endCodePoint >= totalCodePoints
         session.payload.world.analysisWorldRefreshComplete = complete
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
         session.scheduleSave()
 
         return RefreshOutcome(
@@ -439,6 +450,9 @@ enum WorldWorkflow {
             incoming: [card]
         )
         session.payload.world.characters = merged.cards
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
         session.scheduleSave()
         return (card.name, merged.added > 0)
     }
@@ -460,10 +474,14 @@ enum WorldWorkflow {
     /// 全部段抽完后统一去重并写库；候选来自 checkpoint 的 `mergedCards`。
     private static func finalizeAnalysis(
         session: ProjectSession,
-        context: WorldRequestContext
+        context: WorldRequestContext,
+        settingsCorpusLibraries: [CorpusLibrary] = []
     ) async throws -> (added: Int, updated: Int, note: String?) {
         let result = try await commitCandidates(session: session, context: context)
         session.payload.world.analysisWorldRefreshComplete = true
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: settingsCorpusLibraries
+        )
         session.scheduleSave()
         return result
     }

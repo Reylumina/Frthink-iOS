@@ -24,6 +24,8 @@ final class WriterBodyUndoAction {
     private let session: ProjectSession
     private let store: AppStore
     private let actionName: String
+    private let onUndo: (() -> Void)?
+    private let onRedo: (() -> Void)?
 
     /// 当前仍在正文里的那一次插入。重做成功后会换成新回执。
     private var receipt: BodyAppendReceipt
@@ -35,13 +37,17 @@ final class WriterBodyUndoAction {
         actionName: String,
         undoManager: UndoManager,
         session: ProjectSession,
-        store: AppStore
+        store: AppStore,
+        onUndo: (() -> Void)? = nil,
+        onRedo: (() -> Void)? = nil
     ) {
         self.receipt = receipt
         self.actionName = actionName
         self.undoManager = undoManager
         self.session = session
         self.store = store
+        self.onUndo = onUndo
+        self.onRedo = onRedo
     }
 
     /// 把这次插入的撤销动作登记进系统栈（窗口栈或兜底栈，一定有）。
@@ -83,6 +89,7 @@ final class WriterBodyUndoAction {
         guard let undone = undoneReceipt else { return }
         receipt = session.insertIntoManuscript(undone.text, at: undone.location)
         undoneReceipt = nil
+        onRedo?()
         store.toast = "已重做"
         // 重做过程中登记的 registerUndo 回到撤销栈。
         undoManager.registerUndo(withTarget: self) { target in
@@ -105,6 +112,7 @@ final class WriterBodyUndoAction {
             return nil
         }
         undoneReceipt = undone
+        onUndo?()
         store.toast = "已撤销"
         return undone
     }

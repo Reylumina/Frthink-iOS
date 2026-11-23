@@ -239,6 +239,9 @@ enum WorldMaterialWorkflow {
             session.payload.world.styleTemplate = templateAfter
         }
         session.payload.world.materialSourceProgress[key] = progress
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
         session.scheduleSave()
         return NotesOutcome(updated: true)
     }
@@ -284,6 +287,7 @@ enum WorldMaterialWorkflow {
             }
         }
 
+        let summaryMessage: String
         if !exemplars.isEmpty {
             let promptMsgs = StyleDistiller.exemplarPromptsMessages(
                 for: exemplars,
@@ -326,14 +330,20 @@ enum WorldMaterialWorkflow {
             store.settings.corpusEnabled = true
             store.saveSettings()
             if generatedInitialTemplate {
-                return "已生成初版仿写模板，并写入 \(exemplars.count) 段 Few-Shot 节选到语料库"
+                summaryMessage = "已生成初版仿写模板，并写入 \(exemplars.count) 段 Few-Shot 节选到语料库"
+            } else {
+                summaryMessage = "已更新 \(exemplars.count) 段 Few-Shot 节选与技法示范到语料库（已有仿写模板保持不变）"
             }
-            return "已更新 \(exemplars.count) 段 Few-Shot 节选与技法示范到语料库（已有仿写模板保持不变）"
+        } else {
+            summaryMessage = generatedInitialTemplate
+                ? "已生成初版仿写模板（当前正文不足以抽取节选）"
+                : "已有仿写模板保持不变（当前正文不足以抽取节选）"
         }
 
-        return generatedInitialTemplate
-            ? "已生成初版仿写模板（当前正文不足以抽取节选）"
-            : "已有仿写模板保持不变（当前正文不足以抽取节选）"
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        return summaryMessage
     }
 
     // MARK: - 公共

@@ -80,7 +80,7 @@ final class AppStore {
     /// iOS 切入后台可能立即终止进程，2 秒防抖延迟可能导致未落盘内容丢失。
     /// 此处等待写盘完成后再行返回，确保数据完整持久化。
     func flushDirtySessions() async {
-        for session in sessions.values where session.isDirty {
+        for session in sessions.values where session.isDirty || session.hasPendingNarrativeSave {
             await session.saveNowAndWait()
         }
     }
@@ -114,7 +114,7 @@ final class AppStore {
         let evicted = sessions.keys.filter { !keepIDs.contains($0) }
         for id in evicted {
             guard let session = sessions[id] else { continue }
-            if session.isDirty {
+            if session.isDirty || session.hasPendingNarrativeSave {
                 await session.saveNowAndWait()
             }
             sessions.removeValue(forKey: id)

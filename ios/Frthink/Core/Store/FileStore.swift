@@ -154,13 +154,13 @@ struct FileStore {
 
     // MARK: - 加密读写
 
-    private enum EncryptedReadResult {
+    enum EncryptedReadResult {
         case missing
         case loaded(Data)
         case unreadable
     }
 
-    private func readEncryptedResult(_ url: URL) -> EncryptedReadResult {
+    func readEncryptedResult(_ url: URL) -> EncryptedReadResult {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return .missing
         }
@@ -182,14 +182,14 @@ struct FileStore {
     /// 读取加密文件；若为缺少魔数的旧明文数据，则原样返回并迁移写回加密格式。
     ///
     /// 返回 nil 表示文件不存在或密文损坏，调用方按空值处理。
-    private func readEncrypted(_ url: URL) -> Data? {
+    func readEncrypted(_ url: URL) -> Data? {
         if case .loaded(let data) = readEncryptedResult(url) {
             return data
         }
         return nil
     }
 
-    private func writeEncrypted(_ data: Data, to url: URL) throws {
+    func writeEncrypted(_ data: Data, to url: URL) throws {
         try write(try PayloadCipher.seal(data), to: url)
     }
 

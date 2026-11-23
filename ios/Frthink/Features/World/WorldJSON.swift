@@ -25,14 +25,15 @@ enum WorldJSON {
 
     /// 从模型响应里截出首个有效闭合的 JSON 对象或对象数组；空数组作回退候选。
     static func extractJSON(from raw: String) -> String? {
+        let openBrace = Character(UnicodeScalar(0x7B))
         var emptyArrayFallback: String?
         var attempts = 0
         var searchStart = raw.startIndex
 
         while attempts < maxStartAttempts,
-              let start = raw[searchStart...].firstIndex(where: { $0 == "{" || $0 == "[" }) {
+              let start = raw[searchStart...].firstIndex(where: { $0 == openBrace || $0 == "[" }) {
             attempts += 1
-            if let candidate = balancedJSON(in: raw, from: start),
+            if let candidate = NarrativeJSONScanner.balancedJSONSlice(in: raw, from: start),
                let data = candidate.data(using: .utf8),
                let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
                 switch value {
@@ -49,44 +50,6 @@ enum WorldJSON {
             searchStart = raw.index(after: start)
         }
         return emptyArrayFallback
-    }
-
-    /// 从 `start` 起做括号配对，返回第一个完整的对象/数组；括号不配对返回 nil。
-    private static func balancedJSON(in raw: String, from start: String.Index) -> String? {
-        var expectedClosers: [Character] = []
-        var inString = false
-        var escaping = false
-
-        for index in raw[start...].indices {
-            let character = raw[index]
-            if inString {
-                if escaping {
-                    escaping = false
-                } else if character == "\\" {
-                    escaping = true
-                } else if character == "\"" {
-                    inString = false
-                }
-                continue
-            }
-            switch character {
-            case "\"":
-                inString = true
-            case "{":
-                expectedClosers.append("}")
-            case "[":
-                expectedClosers.append("]")
-            case "}", "]":
-                guard expectedClosers.last == character else { return nil }
-                expectedClosers.removeLast()
-                if expectedClosers.isEmpty {
-                    return String(raw[start...index])
-                }
-            default:
-                break
-            }
-        }
-        return nil
     }
 
     private static func decodeRoot(_ raw: String) throws -> JSONValue {

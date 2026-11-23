@@ -2378,6 +2378,7 @@ enum SelfCheck {
         }
 
         runContextEngineChecks()
+        runNarrativeChecks()
 
         // 世界刷新协议：原版 APK 刷新入口传递增量参数 true（C0592r0.java:35），
         // 世界创建入口传递 false（M1/D1.java:60）；两个调用分支不可混用。

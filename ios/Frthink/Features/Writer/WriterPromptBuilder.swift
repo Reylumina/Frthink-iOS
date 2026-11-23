@@ -32,6 +32,12 @@ struct WriterPromptSnapshot {
     var stickyCharacterIDs: Set<String> = []
     var stickyEventIDs: Set<String> = []
     var stickyWorldbookIDs: Set<String> = []
+    /// 叙事工作区；非 nil 时优先走缓存优先与按需状态装配管线。
+    var narrativeWorkspace: NarrativeWorkspace? = nil
+    /// 显式覆写只读工具开关；nil 时依据当前服务商协议自动决定。
+    var enableReadOnlyTools: Bool? = nil
+    /// 增量分页 BM25 索引快照，供无工具通道复用按页缓存检索。
+    var bm25Index: ManuscriptIndex.IncrementalBM25Index? = nil
 }
 
 struct WriterPreparedPrompt {
@@ -42,6 +48,10 @@ struct WriterPreparedPrompt {
     var matchedCharacterIDs: Set<String> = []
     var matchedEventIDs: Set<String> = []
     var matchedWorldbookIDs: Set<String> = []
+    var tools: [LLMToolDefinition] = []
+    var updatedReFoldBoundary: ReFoldBoundary? = nil
+    /// 与 `ReFoldManager` 折叠序号严格对齐的完整历史快照，供流式 `restore_turn` 工具无失真回查。
+    var toolHistory: [LLMMessage] = []
 }
 
 /// 预算重试的三种结果。
@@ -75,6 +85,13 @@ enum WriterPromptBuilder {
         checkpoint: () throws -> Void
     ) rethrows -> WriterPreparedPrompt {
         try checkpoint()
+        if let workspace = snapshot.narrativeWorkspace {
+            return try buildWithNarrativeOrchestrator(
+                snapshot,
+                workspace: workspace,
+                checkpoint: checkpoint
+            )
+        }
         let effective = effectiveBody(snapshot)
         try checkpoint()
         var assembly = PromptAssembly.from(
@@ -244,6 +261,108 @@ enum WriterPromptBuilder {
         )
     }
 
+    private static func buildWithNarrativeOrchestrator(
+        _ snapshot: WriterPromptSnapshot,
+        workspace: NarrativeWorkspace,
+        checkpoint: () throws -> Void
+    ) rethrows -> WriterPreparedPrompt {
+        try checkpoint()
+        let reasoningPolicy = snapshot.settings.reasoningContextPolicy
+        let tailTier: ManuscriptTailTier = snapshot.bodyPromptSendWhole
+            ? .long
+            : ManuscriptTailTier.from(codePoints: snapshot.bodyPromptTailCodePoints)
+        let tailCodePointOverride: Int?
+        if case .tail(let explicitCount) = snapshot.explicitBodyRange {
+            tailCodePointOverride = max(256, explicitCount)
+        } else {
+            tailCodePointOverride = nil
+        }
+        let enableTools = snapshot.enableReadOnlyTools
+            ?? NarrativeReadTools.supportsNativeTools(provider: snapshot.settings.activeProvider)
+
+        var history: [LLMMessage]
+        let userInstruction: String?
+        var continuationFragment: String?
+
+        switch snapshot.action {
+        case .send(let instruction):
+            history = PromptComposer.llmMessages(
+                from: snapshot.messages,
+                reasoningPolicy: reasoningPolicy
+            )
+            userInstruction = instruction
+        case .continueWriting:
+            if let last = snapshot.messages.last, last.role == .assistant {
+                history = PromptComposer.llmMessages(
+                    from: snapshot.messages.dropLast(),
+                    reasoningPolicy: reasoningPolicy
+                )
+                continuationFragment = last.content
+                userInstruction = nil
+            } else {
+                history = PromptComposer.llmMessages(
+                    from: snapshot.messages,
+                    reasoningPolicy: reasoningPolicy
+                )
+                userInstruction = PromptLibrary.continueLatestBubbleInstruction
+            }
+        case .regenerate(let index):
+            let prefix = index > 0
+                ? Array(snapshot.messages[..<min(index, snapshot.messages.count)])
+                : []
+            var regenHistory = PromptComposer.llmMessages(
+                from: prefix,
+                reasoningPolicy: reasoningPolicy
+            )
+            if let last = regenHistory.last, last.role == "assistant" {
+                regenHistory.removeLast()
+                continuationFragment = last.content
+            }
+            history = regenHistory
+            userInstruction = nil
+        }
+
+        try checkpoint()
+        let orchestrated = NarrativeContextOrchestrator.compose(
+            workspace: workspace,
+            manuscript: snapshot.manuscript,
+            history: history,
+            userInstruction: userInstruction,
+            settings: snapshot.settings,
+            enabledUniverseEntryIDs: snapshot.enabledUniverseEntryIDs,
+            continuationAnchor: snapshot.continuationAnchor,
+            tailTier: tailTier,
+            tailCodePointLimitOverride: tailCodePointOverride,
+            inputBudget: snapshot.inputBudget,
+            enableTools: enableTools,
+            bm25Index: snapshot.bm25Index
+        )
+        try checkpoint()
+
+        var finalMessages = orchestrated.messages
+        if let fragment = continuationFragment, !fragment.isEmpty {
+            finalMessages.append(.assistant(PromptComposer.codePointTail(fragment, limit: 2_000)))
+            finalMessages.append(.user(PromptLibrary.continueLastFragmentInstruction))
+        }
+
+        var sourceIDs = ["narrative:frozen-prefix", "narrative:query-cone"]
+        if orchestrated.usedFallbackBM25 {
+            sourceIDs.append("narrative:fallback-bm25")
+        }
+        return WriterPreparedPrompt(
+            messages: finalMessages,
+            sourceIds: sourceIDs,
+            omittedHistoryMessages: 0,
+            estimatedInputTokens: TokenEstimator.estimate(messages: finalMessages),
+            matchedCharacterIDs: orchestrated.onStageEntityIDs,
+            matchedEventIDs: [],
+            matchedWorldbookIDs: [],
+            tools: orchestrated.tools,
+            updatedReFoldBoundary: orchestrated.updatedReFoldBoundary,
+            toolHistory: orchestrated.tools.isEmpty ? [] : history
+        )
+    }
+
     /// 预算超限时裁剪正文尾部并重新组装，支持异步取消。
     static func retryAfterTrimming(_ snapshot: WriterPromptSnapshot) throws -> WriterPromptRetryResult {
         try Task.checkCancellation()
@@ -253,23 +372,46 @@ enum WriterPromptBuilder {
         try Task.checkCancellation()
 
         // 预算基数基于实际待发送正文片段计算，避免全量正文干扰裁剪口径。
-        let body = effectiveBody(snapshot)
+        let baselineTailText: String
+        if snapshot.narrativeWorkspace != nil {
+            let tailTier: ManuscriptTailTier = snapshot.bodyPromptSendWhole
+                ? .long
+                : ManuscriptTailTier.from(codePoints: snapshot.bodyPromptTailCodePoints)
+            let overrideCount: Int?
+            if case .tail(let explicitCount) = snapshot.explicitBodyRange {
+                overrideCount = max(256, explicitCount)
+            } else {
+                overrideCount = nil
+            }
+            baselineTailText = NarrativeContextOrchestrator.effectiveTailText(
+                manuscript: snapshot.manuscript,
+                continuationAnchor: snapshot.continuationAnchor,
+                tailTier: tailTier,
+                tailCodePointLimitOverride: overrideCount
+            ).tailText
+        } else {
+            baselineTailText = effectiveBody(snapshot).text
+        }
+
         let excess = preparedFull.estimatedInputTokens - snapshot.inputBudget
         let manuscriptBudget = max(
-            512,
-            TokenEstimator.estimate(body.text) - max(excess, 0)
+            256,
+            TokenEstimator.estimate(baselineTailText) - max(excess, 0)
         )
         let trimmed = try WriterBudgeting.trimTail(
-            body.text,
+            baselineTailText,
             toTokens: manuscriptBudget
         )
         try Task.checkCancellation()
-        guard !trimmed.isEmpty, trimmed != body.text else {
+        guard !trimmed.isEmpty, trimmed != baselineTailText else {
             return .cannotTrim
         }
 
         var next = snapshot
         next.manuscript = trimmed
+        if next.narrativeWorkspace != nil {
+            next.continuationAnchor = nil
+        }
         next.explicitBodyRange = .tail(count: trimmed.unicodeScalars.count)
         let prepared = try prepareCancellable(next)
         try Task.checkCancellation()

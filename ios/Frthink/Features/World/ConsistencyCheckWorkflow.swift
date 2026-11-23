@@ -117,4 +117,79 @@ enum ConsistencyCheckWorkflow {
 
         return [.system(system), .user(user)]
     }
+
+    // MARK: - 离线记忆审计
+
+    static func runOfflineDreamingAsync(
+        session: ProjectSession,
+        store: AppStore
+    ) async throws -> DreamingAuditReport {
+        let workspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let projectID = session.project.id
+        let fileStore = store.fileStore
+        let canReadByPage = session.canReadByPage
+        let pageCount = session.bodyPageCount
+        let fallbackManuscript: String
+        if canReadByPage {
+            fallbackManuscript = ""
+        } else {
+            fallbackManuscript = session.manuscript
+        }
+
+        return try await Task.detached(priority: .userInitiated) {
+            let pages: [String]
+            if canReadByPage {
+                pages = (0..<pageCount).compactMap { fileStore.loadBodyPage(projectID, index: $0) }
+            } else {
+                pages = fallbackManuscript
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty ? [] : [fallbackManuscript]
+            }
+            return try NarrativeDreamingAuditor.audit(
+                workspace: workspace,
+                manuscriptPages: pages
+            )
+        }.value
+    }
+
+    static func runOfflineDreaming(
+        session: ProjectSession,
+        store: AppStore
+    ) throws -> DreamingAuditReport {
+        let workspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let pages: [String]
+        if session.canReadByPage {
+            pages = (0..<session.bodyPageCount).compactMap { session.bodyPage($0) }
+        } else {
+            let full = session.manuscript
+            pages = full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [full]
+        }
+        return try NarrativeDreamingAuditor.audit(
+            workspace: workspace,
+            manuscriptPages: pages
+        )
+    }
+
+    @discardableResult
+    static func applyDreamingCleanup(
+        findings: [DreamingFinding],
+        session: ProjectSession,
+        store: AppStore
+    ) throws -> Int {
+        var workspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let cleaned = try NarrativeDreamingAuditor.applyCleanup(
+            findings: findings,
+            workspace: &workspace
+        )
+        if cleaned > 0 {
+            session.noteNarrativeWorkspaceUpdated(workspace)
+        }
+        return cleaned
+    }
 }

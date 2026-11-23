@@ -41,7 +41,7 @@ extension WriterPane {
                 copyToClipboard(message.content)
             },
             UIAction(title: "插入到光标处", image: UIImage(systemName: "text.insert")) { _ in
-                insertIntoManuscript(message.content)
+                insertIntoManuscript(message.content, sourceMessageID: message.id)
             },
             UIAction(title: "追加到正文末尾", image: UIImage(systemName: "text.append")) { _ in
                 messageAction = .append(message)
@@ -140,7 +140,7 @@ extension WriterPane {
         store.toast = "已复制"
     }
 
-    func insertIntoManuscript(_ text: String) {
+    func insertIntoManuscript(_ text: String, sourceMessageID: String? = nil) {
         guard !text.isEmpty else { return }
         dismissKeyboard()
         let length = session.manuscriptLength
@@ -150,34 +150,69 @@ extension WriterPane {
         let receipt = session.insertIntoManuscript(block, at: base)
         cursorOffset = base + (block as NSString).length
         cursorPlaced = true
-        StateSyncWorkflow.scheduleSleepTimeSync(
-            excerpt: block,
-            session: session,
-            store: store
+        registerCommittedBodyUndo(
+            receipt: receipt,
+            committedText: block,
+            sourceMessageID: sourceMessageID,
+            actionName: "插入正文",
+            toastTitle: "已插入正文"
         )
-        let action = registerBodyUndo(receipt, actionName: "插入正文")
-        presentUndoPrompt("已插入正文") {
-            StateSyncWorkflow.cancelSleepTimeSync(projectID: session.project.id)
-            action.undoViaButton()
-        }
     }
 
     /// 应用级动作登记进窗口的 UndoManager（§5.8）。
+    @discardableResult
     func registerBodyUndo(
         _ receipt: BodyAppendReceipt,
-        actionName: String
+        actionName: String,
+        onUndo: (() -> Void)? = nil,
+        onRedo: (() -> Void)? = nil
     ) -> WriterBodyUndoAction {
         let action = WriterBodyUndoAction(
             receipt: receipt,
             actionName: actionName,
             undoManager: undoManager,
             session: session,
-            store: store
+            store: store,
+            onUndo: onUndo,
+            onRedo: onRedo
         )
         undoActions.append(action)
         action.registerInitialUndo()
         undoState.refresh()
         return action
+    }
+
+    private func registerCommittedBodyUndo(
+        receipt: BodyAppendReceipt,
+        committedText: String,
+        sourceMessageID: String?,
+        actionName: String,
+        toastTitle: String
+    ) {
+        let commitReceipt = NarrativeCommitCoordinator.commitAcceptedProse(
+            committedText,
+            sourceMessageID: sourceMessageID,
+            insertionUTF16Offset: receipt.location,
+            session: session,
+            store: store
+        )
+        let action = registerBodyUndo(
+            receipt,
+            actionName: actionName,
+            onUndo: {
+                if let commitReceipt {
+                    NarrativeCommitCoordinator.undoCommit(commitReceipt, session: session)
+                }
+            },
+            onRedo: {
+                if let commitReceipt {
+                    NarrativeCommitCoordinator.redoCommit(commitReceipt, session: session)
+                }
+            }
+        )
+        presentUndoPrompt(toastTitle) {
+            action.undoViaButton()
+        }
     }
 
     /// 页面离开时注销所有撤销动作，避免跨项目误触发与悬挂引用。
@@ -265,16 +300,13 @@ extension WriterPane {
             let receipt = session.appendToManuscript(message.content)
             cursorOffset = session.manuscriptLength
             cursorPlaced = true
-            StateSyncWorkflow.scheduleSleepTimeSync(
-                excerpt: message.content,
-                session: session,
-                store: store
+            registerCommittedBodyUndo(
+                receipt: receipt,
+                committedText: receipt.text,
+                sourceMessageID: message.id,
+                actionName: "追加到正文",
+                toastTitle: "已追加到正文"
             )
-            let undoAction = registerBodyUndo(receipt, actionName: "追加到正文")
-            presentUndoPrompt("已追加到正文") {
-                StateSyncWorkflow.cancelSleepTimeSync(projectID: session.project.id)
-                undoAction.undoViaButton()
-            }
         case .rollback(let message):
             performRollback(to: message)
         case .cleanup(let message):

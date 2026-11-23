@@ -48,10 +48,18 @@ final class WriterController {
     /// 正在后台组装提示词。此时还没有开始生成，界面显示「整理提示词…」。
     private(set) var isPreparing = false
 
+    /// 正在执行只读工具回查时的轻量状态提示（无调用时为 nil）。
+    private(set) var activeToolStatus: String? = nil
+
+    private struct PreparedAssembly {
+        let retryResult: WriterPromptRetryResult
+        let bm25Index: ManuscriptIndex.IncrementalBM25Index?
+    }
+
     /// 准备阶段的 Task；点停止或切页时取消。
     private var prepareTask: Task<Void, Never>?
     /// 后台组装任务句柄；取消操作显式触发该句柄以防止旧任务并发运行。
-    private var prepareAssemblyTask: Task<WriterPromptRetryResult, Error>?
+    private var prepareAssemblyTask: Task<PreparedAssembly, Error>?
     /// 每次开始准备 +1。旧任务晚一步收尾时靠它认出自己已经过期，
     /// 不去改新一轮的 `isPreparing` / `prepareTask`。
     private var prepareGeneration = 0
@@ -381,25 +389,51 @@ final class WriterController {
                 client: client,
                 provider: provider
             )
+            let enableToolsOverride: Bool? = provider.stream ? nil : false
+            let willUseNativeTools = (enableToolsOverride ?? NarrativeReadTools.supportsNativeTools(provider: provider))
+            let cachedBM25 = willUseNativeTools ? nil : session.cachedBM25Index()
+            let projectID = session.project.id
+            let canReadByPage = session.canReadByPage
+            let bodyPageCount = session.bodyPageCount
+            let fileStore = store.fileStore
+            let fallbackText = canReadByPage && bodyPageCount > 0 ? nil : manuscript
+
             isPreparing = true
             prepareGeneration &+= 1
             let generation = prepareGeneration
             prepareTask?.cancel()
             prepareAssemblyTask?.cancel()
-            // 提示词组装在后台线程执行，取消需显式调用对应句柄。
-            let assembly = Task.detached(priority: .userInitiated) { () throws in
-                if retry == nil {
-                    return WriterPromptRetryResult.prepared(
-                        try WriterPromptBuilder.prepareCancellable(snapshot)
+            // 提示词组装与无工具 BM25 索引更新都在后台线程执行，取消需显式调用对应句柄。
+            let assembly = Task.detached(priority: .userInitiated) { () throws -> PreparedAssembly in
+                var localSnapshot = snapshot
+                var updatedBM25: ManuscriptIndex.IncrementalBM25Index?
+                if let cachedBM25 {
+                    let synced = ProjectSession.syncBM25Index(
+                        cachedBM25,
+                        projectID: projectID,
+                        canReadByPage: canReadByPage,
+                        bodyPageCount: bodyPageCount,
+                        fileStore: fileStore,
+                        fallbackManuscript: fallbackText
                     )
+                    localSnapshot.bm25Index = synced
+                    updatedBM25 = synced
                 }
-                return try WriterPromptBuilder.retryAfterTrimming(snapshot)
+                let retryResult: WriterPromptRetryResult
+                if retry == nil {
+                    retryResult = .prepared(
+                        try WriterPromptBuilder.prepareCancellable(localSnapshot)
+                    )
+                } else {
+                    retryResult = try WriterPromptBuilder.retryAfterTrimming(localSnapshot)
+                }
+                return PreparedAssembly(retryResult: retryResult, bm25Index: updatedBM25)
             }
             prepareAssemblyTask = assembly
             prepareTask = Task { @MainActor [weak self] in
-                let result: WriterPromptRetryResult
+                let preparedAssembly: PreparedAssembly
                 do {
-                    result = try await assembly.value
+                    preparedAssembly = try await assembly.value
                 } catch {
                     // 忽略过期批次的准备回调，防止状态竞争。
                     guard let self, self.prepareGeneration == generation else { return }
@@ -422,8 +456,11 @@ final class WriterController {
                 self.prepareAssemblyTask = nil
                 self.isPreparing = false
                 self.prepareTask = nil
+                if let updatedBM25 = preparedAssembly.bm25Index {
+                    session.storeBM25Index(updatedBM25)
+                }
                 self.finishPreparation(
-                    result,
+                    preparedAssembly.retryResult,
                     preparation: preparation,
                     session: session,
                     store: store
@@ -449,6 +486,11 @@ final class WriterController {
         excludingMessageID: String? = nil
     ) throws -> WriterPromptSnapshot {
         let plan = try budget(for: provider, settings: store.settings)
+        let workspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let enableToolsOverride: Bool? = provider.stream ? nil : false
+
         return WriterPromptSnapshot(
             action: action,
             manuscript: manuscript,
@@ -466,7 +508,10 @@ final class WriterController {
             inputBudget: plan.effectiveInputBudget,
             stickyCharacterIDs: Set(stickyCharacterTurns.keys),
             stickyEventIDs: Set(stickyEventTurns.keys),
-            stickyWorldbookIDs: Set(stickyWorldbookTurns.keys)
+            stickyWorldbookIDs: Set(stickyWorldbookTurns.keys),
+            narrativeWorkspace: workspace,
+            enableReadOnlyTools: enableToolsOverride,
+            bm25Index: nil
         )
     }
 
@@ -546,6 +591,12 @@ final class WriterController {
         session: ProjectSession,
         store: AppStore
     ) {
+        if let newBoundary = prepared.updatedReFoldBoundary,
+           var workspace = session.narrativeWorkspace,
+           workspace.reFoldBoundary != newBoundary {
+            workspace.reFoldBoundary = newBoundary
+            session.noteNarrativeWorkspaceUpdated(workspace)
+        }
         updateStickyCaches(
             matchedCharacters: prepared.matchedCharacterIDs,
             matchedEvents: prepared.matchedEventIDs,
@@ -720,7 +771,8 @@ final class WriterController {
             temperature: provider.temperature,
             maxTokens: plan.outputBudget,
             // 思考档位由供应方设置统一决定。
-            attemptId: UUID().uuidString
+            attemptId: UUID().uuidString,
+            tools: prepared.tools.isEmpty ? nil : prepared.tools
         )
         let model = provider.resolvedModel
         let useStreaming = provider.stream
@@ -738,11 +790,13 @@ final class WriterController {
             estimatedInputTokens: prepared.estimatedInputTokens
         )
 
+        let toolHistory = prepared.toolHistory
         task = Task { @MainActor in
             await runGeneration(
                 request: request,
                 client: client,
                 useStreaming: useStreaming,
+                toolHistory: toolHistory,
                 session: session,
                 store: store,
                 messageID: messageID,
@@ -753,11 +807,19 @@ final class WriterController {
         }
     }
 
+    private struct StreamRoundOutcome {
+        let toolCalls: [LLMToolCall]
+        let text: String
+        let reasoning: String
+        let finishReason: String?
+    }
+
     @MainActor
     private func runGeneration(
         request: LLMRequest,
         client: any LLMClient,
         useStreaming: Bool,
+        toolHistory: [LLMMessage],
         session: ProjectSession,
         store: AppStore,
         messageID: String,
@@ -766,41 +828,73 @@ final class WriterController {
         model: String
     ) async {
         var failure: Error?
-        let initialChars = streamingCharacterCount
         do {
             if useStreaming {
-                do {
-                    for try await event in client.stream(request) {
-                        handleStreamEvent(event, session: session, messageID: messageID)
-                        if Task.isCancelled { break }
+                var currentRequest = request
+                var round = 0
+                while round <= NarrativeReadTools.maxStepsPerTurn {
+                    if round == NarrativeReadTools.maxStepsPerTurn {
+                        currentRequest.tools = nil
+                        currentRequest.toolChoiceName = nil
                     }
-                } catch {
-                    // 流式未收到任何可见正文且非取消时，按原版 `-compat` 改用非流式重发一次。
-                    let noContentYet = streamingCharacterCount == initialChars
-                        && pendingDelta.isEmpty
-                        && displayBuffer.isEmpty
-                    if noContentYet,
-                       !error.isLLMCancellation,
-                       !Task.isCancelled,
-                       let attemptId = request.attemptId,
-                       !attemptId.isEmpty {
-                        var compat = request
-                        compat.stream = false
-                        compat.attemptId = attemptId + "-compat"
-                        let text = try await client.complete(compat)
-                        if !text.isEmpty {
-                            streamingText = text
-                            streamingCharacterCount = text.count
-                            pendingDelta += text
-                            flushStreaming(session: session, messageID: messageID)
+                    guard let outcome = try await streamSingleRound(
+                        currentRequest,
+                        round: round,
+                        client: client,
+                        session: session,
+                        messageID: messageID
+                    ) else {
+                        activeToolStatus = nil
+                        break
+                    }
+                    guard !Task.isCancelled, !stopRequested else {
+                        activeToolStatus = nil
+                        break
+                    }
+                    guard !outcome.toolCalls.isEmpty,
+                          round < NarrativeReadTools.maxStepsPerTurn else {
+                        if let finishReason = outcome.finishReason {
+                            handleStreamEvent(.finished(reason: finishReason), session: session, messageID: messageID)
                         }
-                    } else {
-                        throw error
+                        activeToolStatus = nil
+                        break
                     }
+
+                    if !outcome.text.isEmpty {
+                        resetRoundStreamingBuffers(session: session, messageID: messageID)
+                    }
+                    activeToolStatus = toolStatusDescription(for: outcome.toolCalls)
+                    let executions = await executeReadToolsInBackground(
+                        outcome.toolCalls,
+                        toolHistory: toolHistory,
+                        session: session,
+                        store: store
+                    )
+                    guard !Task.isCancelled, !stopRequested else {
+                        activeToolStatus = nil
+                        break
+                    }
+
+                    currentRequest.messages.append(
+                        .assistantToolCalls(
+                            outcome.toolCalls,
+                            content: outcome.text,
+                            reasoningContent: outcome.reasoning.isEmpty ? nil : outcome.reasoning
+                        )
+                    )
+                    for exec in executions {
+                        currentRequest.messages.append(
+                            .toolResult(callID: exec.callID, content: exec.output)
+                        )
+                    }
+                    currentRequest.attemptId = UUID().uuidString
+                    round += 1
                 }
             } else {
                 // 用户在设置里关掉了流式：一次性拿完整段再落盘。
-                let text = try await client.complete(request)
+                var directRequest = request
+                directRequest.tools = nil
+                let text = try await client.complete(directRequest)
                 if !text.isEmpty {
                     streamingText = text
                     streamingCharacterCount = text.count
@@ -820,6 +914,145 @@ final class WriterController {
             fallbackVariant: fallbackVariant,
             model: model
         )
+    }
+
+    @MainActor
+    private func streamSingleRound(
+        _ request: LLMRequest,
+        round: Int,
+        client: any LLMClient,
+        session: ProjectSession,
+        messageID: String
+    ) async throws -> StreamRoundOutcome? {
+        var toolCalls: [LLMToolCall] = []
+        var roundText = ""
+        var roundReasoning = ""
+        var finishReason: String?
+        let initialRoundChars = streamingCharacterCount
+
+        do {
+            for try await event in client.stream(request) {
+                switch event {
+                case .delta(let text):
+                    if activeToolStatus != nil { activeToolStatus = nil }
+                    roundText += text
+                    handleStreamEvent(.delta(text), session: session, messageID: messageID)
+                case .reasoning(let text):
+                    if activeToolStatus != nil { activeToolStatus = nil }
+                    roundReasoning += text
+                    handleStreamEvent(.reasoning(text), session: session, messageID: messageID)
+                case .toolCalls(let calls):
+                    toolCalls.append(contentsOf: calls)
+                case .finished(let reason):
+                    finishReason = reason
+                }
+                if Task.isCancelled { break }
+            }
+            return StreamRoundOutcome(
+                toolCalls: toolCalls,
+                text: roundText,
+                reasoning: roundReasoning,
+                finishReason: finishReason
+            )
+        } catch {
+            let noContentYet = streamingCharacterCount == initialRoundChars
+                && pendingDelta.isEmpty
+                && displayBuffer.isEmpty
+                && toolCalls.isEmpty
+                && round == 0
+            guard noContentYet,
+                  !error.isLLMCancellation,
+                  !Task.isCancelled,
+                  let attemptId = request.attemptId,
+                  !attemptId.isEmpty else {
+                throw error
+            }
+            var compat = request
+            compat.stream = false
+            compat.tools = nil
+            compat.toolChoiceName = nil
+            compat.parallelToolCalls = nil
+            compat.attemptId = attemptId + "-compat"
+            let text = try await client.complete(compat)
+            if !text.isEmpty {
+                streamingText = text
+                streamingCharacterCount = text.count
+                pendingDelta += text
+                flushStreaming(session: session, messageID: messageID)
+            }
+            return nil
+        }
+    }
+
+    private func resetRoundStreamingBuffers(session: ProjectSession, messageID: String) {
+        flushTask?.cancel()
+        flushTask = nil
+        displayTask?.cancel()
+        displayTask = nil
+        pendingDelta = ""
+        displayBuffer = ""
+        displayCharacterCount = 0
+        streamingText = ""
+        streamingCharacterCount = 0
+        displayTick &+= 1
+        session.resetStreamingContent(of: messageID)
+    }
+
+    private func toolStatusDescription(for calls: [LLMToolCall]) -> String {
+        guard let first = calls.first else { return "正在查阅设定…" }
+        switch first.functionName {
+        case NarrativeReadTools.grepManuscriptName:
+            return "正在回查前文…"
+        case NarrativeReadTools.readEntityPageName:
+            return "正在查阅设定档案…"
+        case NarrativeReadTools.restoreTurnName:
+            return "正在回看前文对话…"
+        default:
+            return "正在检索前文…"
+        }
+    }
+
+    private func executeReadToolsInBackground(
+        _ calls: [LLMToolCall],
+        toolHistory: [LLMMessage],
+        session: ProjectSession,
+        store: AppStore
+    ) async -> [NarrativeToolExecution] {
+        let needsBodyPages = calls.contains { $0.functionName == NarrativeReadTools.grepManuscriptName }
+        let materializedState = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        ).currentState()
+        let causalLimit = session.payload.continuationAnchor
+        let losslessHistory = calls.contains { $0.functionName == NarrativeReadTools.restoreTurnName }
+            ? toolHistory
+            : []
+
+        let canReadByPage = session.canReadByPage
+        let pageCount = session.bodyPageCount
+        let fileStore = store.fileStore
+        let projectID = session.project.id
+        let fallbackManuscript = (!needsBodyPages || (canReadByPage && pageCount > 0)) ? nil : session.manuscript
+
+        return await Task.detached(priority: .userInitiated) {
+            let pages: [String] = needsBodyPages
+                ? ProjectSession.loadManuscriptPages(
+                    projectID: projectID,
+                    canReadByPage: canReadByPage,
+                    bodyPageCount: pageCount,
+                    fileStore: fileStore,
+                    fallbackManuscript: fallbackManuscript
+                )
+                : []
+            let context = NarrativeToolContext(
+                pages: pages,
+                causalLimit: causalLimit,
+                materializedState: materializedState,
+                losslessHistory: losslessHistory
+            )
+            return calls.map { call in
+                NarrativeReadTools.execute(call: call, context: context)
+            }
+        }.value
     }
 
     @MainActor
@@ -845,7 +1078,7 @@ final class WriterController {
             reasoningBuffer += text
             reasoningBufferCharacterCount += text.count
             scheduleStreamingDisplay()
-        case .finished:
+        case .toolCalls, .finished:
             break
         }
     }
@@ -992,6 +1225,7 @@ final class WriterController {
 
         let completedReasoning = reasoningBuffer.isEmpty ? nil : reasoningBuffer
         let wasStopped = stopRequested
+        activeToolStatus = nil
         isGenerating = false
         streamingMessageID = nil
         streamingReasoning = nil

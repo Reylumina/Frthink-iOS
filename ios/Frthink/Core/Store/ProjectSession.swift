@@ -12,6 +12,10 @@ final class ProjectSession {
     var payload: ProjectPayload
     var sourceText: String
     var translations: [TranslationSegment]
+    /// 叙事工作区：从项目独立加密目录惰性挂载，与既有防抖存储互不干扰。
+    var narrativeWorkspace: NarrativeWorkspace?
+    /// 叙事工作区变更版本号，供轻量视图与详情页感知最新提交而不拷全量状态。
+    private(set) var narrativeRevision = 0
     /// 有未落盘的改动时为 true，UI 可以显示「保存中」。
     private(set) var isDirty = false
     /// 解密/解码失败时只读打开；所有保存入口直接返回，避免覆盖原文件。
@@ -33,6 +37,12 @@ final class ProjectSession {
     private let store: FileStore
     private var saveTask: Task<Void, Never>?
     private var sourceSaveTask: Task<Void, Never>?
+    private var narrativeSaveTask: Task<Void, Never>?
+    @ObservationIgnored private var narrativeSaveInFlight = false
+    @ObservationIgnored private var narrativeSaveQueued = false
+    @ObservationIgnored private var narrativeSaveWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var lastSavedNarrativeWorkspace: NarrativeWorkspace?
+    @ObservationIgnored private var incrementalBM25 = ManuscriptIndex.IncrementalBM25Index()
     /// 同一时间只允许一次编码/写盘，避免多个编码任务并发抢占 CPU 与内存峰值导致输入或滚动卡顿。
     private enum SaveKind: Equatable {
         /// 只写正文页和 body.meta，payload.json 不动。
@@ -279,6 +289,322 @@ final class ProjectSession {
         if payload.chapters.isEmpty, !payload.manuscript.isEmpty {
             scanChaptersIfNeeded(payload.manuscript)
         }
+        if case .loaded(let workspace) = store.narrative.loadWorkspaceState(project.id) {
+            self.narrativeWorkspace = workspace
+            self.lastSavedNarrativeWorkspace = workspace
+        }
+    }
+
+    // MARK: - 叙事工作区
+
+    var hasPendingNarrativeSave: Bool {
+        narrativeSaveTask != nil
+            || narrativeSaveInFlight
+            || narrativeWorkspace != lastSavedNarrativeWorkspace
+    }
+
+    @discardableResult
+    func ensureNarrativeWorkspace(
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) -> NarrativeWorkspace {
+        if let narrativeWorkspace {
+            return narrativeWorkspace
+        }
+        let (workspace, _) = LegacyArchiveImporter.importFromPayload(
+            payload,
+            projectID: project.id,
+            projectTitle: project.title,
+            settingsCorpusLibraries: settingsCorpusLibraries
+        )
+        self.narrativeWorkspace = workspace
+        self.narrativeRevision &+= 1
+        return workspace
+    }
+
+    /// 标记叙事工作区已变更，按需立即落盘或走防抖后台增量写盘。
+    func noteNarrativeWorkspaceUpdated(
+        _ workspace: NarrativeWorkspace,
+        persistSynchronously: Bool = false
+    ) {
+        self.narrativeWorkspace = workspace
+        narrativeRevision &+= 1
+        if persistSynchronously {
+            try? saveNarrativeWorkspaceNow()
+        } else {
+            scheduleNarrativeWorkspaceSave()
+        }
+    }
+
+    @discardableResult
+    func commitNarrativeDelta(
+        _ delta: PlotNodeDelta,
+        summary _: String,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) throws -> MaterializedNarrativeState {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        let sourceNodeID = workspace.storyGraph.headNodeID
+        let state = workspace.applyLedgerDelta(delta, sourceNodeID: sourceNodeID)
+        noteNarrativeWorkspaceUpdated(workspace)
+        return state
+    }
+
+    func checkoutNarrativeNode(
+        _ nodeID: String,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) throws {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        try workspace.storyGraph.checkout(nodeID: nodeID)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func forkNarrativeBranch(
+        from nodeID: String,
+        label: String,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) throws {
+        let cleanLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanLabel.isEmpty else { return }
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        let node = PlotNode(
+            parentID: nodeID,
+            branchLabel: cleanLabel,
+            summary: "开辟分支：\(cleanLabel)"
+        )
+        try workspace.storyGraph.appendNode(node)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func addPlotBeat(
+        summary: String,
+        branchLabel: String? = nil,
+        parentID: String? = nil,
+        secondaryCausalParentIDs: [String] = [],
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) throws {
+        let cleanSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanSummary.isEmpty else { return }
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        let resolvedParentID = parentID ?? workspace.storyGraph.headNodeID
+        let resolvedBranch = branchLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackBranch = workspace.storyGraph.nodes[resolvedParentID]?.branchLabel ?? "主线"
+        let node = PlotNode(
+            parentID: resolvedParentID,
+            secondaryCausalParentIDs: secondaryCausalParentIDs,
+            branchLabel: (resolvedBranch?.isEmpty == false ? resolvedBranch : nil) ?? fallbackBranch,
+            summary: cleanSummary
+        )
+        try workspace.storyGraph.appendNode(node)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func addNarrativeCausalEdge(
+        from parentID: String,
+        to childID: String,
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) throws {
+        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
+        try workspace.storyGraph.addCausalEdge(from: parentID, to: childID)
+        noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    func cachedBM25Index() -> ManuscriptIndex.IncrementalBM25Index {
+        incrementalBM25
+    }
+
+    func storeBM25Index(_ index: ManuscriptIndex.IncrementalBM25Index) {
+        incrementalBM25 = index
+    }
+
+    /// 跨线程分页读取正文切片（优先逐页加载已加密页面），统一供 BM25 索引与工具正文检索复用。
+    nonisolated static func loadManuscriptPages(
+        projectID: String,
+        canReadByPage: Bool,
+        bodyPageCount: Int,
+        fileStore: FileStore,
+        fallbackManuscript: String?,
+        forceFallbackText: Bool = false
+    ) -> [String] {
+        if !forceFallbackText, canReadByPage, bodyPageCount > 0 {
+            return (0..<bodyPageCount).compactMap { fileStore.loadBodyPage(projectID, index: $0) }
+        }
+        let source = fallbackManuscript ?? ""
+        guard !source.isEmpty else { return [] }
+        let pageSize = max(1, FileStore.bodyPageSize)
+        let ns = source as NSString
+        var pages: [String] = []
+        var offset = 0
+        while offset < ns.length {
+            let length = min(pageSize, ns.length - offset)
+            pages.append(ns.substring(with: NSRange(location: offset, length: length)))
+            offset += length
+        }
+        return pages
+    }
+
+    /// 跨线程纯值类型分页增量同步 BM25 索引，避免长篇场景阻塞主线程。
+    nonisolated static func syncBM25Index(
+        _ base: ManuscriptIndex.IncrementalBM25Index,
+        projectID: String,
+        canReadByPage: Bool,
+        bodyPageCount: Int,
+        fileStore: FileStore,
+        fallbackManuscript: String?,
+        forceFallbackText: Bool = false
+    ) -> ManuscriptIndex.IncrementalBM25Index {
+        var index = base
+        let pages = loadManuscriptPages(
+            projectID: projectID,
+            canReadByPage: canReadByPage,
+            bodyPageCount: bodyPageCount,
+            fileStore: fileStore,
+            fallbackManuscript: fallbackManuscript,
+            forceFallbackText: forceFallbackText
+        )
+        var offset = 0
+        for (pageIndex, page) in pages.enumerated() {
+            _ = index.updatePage(index: pageIndex, text: page, utf16Start: offset)
+            offset += (page as NSString).length
+        }
+        index.removePages(from: pages.count)
+        return index
+    }
+
+    /// 增量同步分页 BM25 索引并返回值拷贝，供无工具通道复用而跳过未改动页分词。
+    func updatedBM25Index(for manuscriptText: String? = nil) -> ManuscriptIndex.IncrementalBM25Index {
+        incrementalBM25 = Self.syncBM25Index(
+            incrementalBM25,
+            projectID: project.id,
+            canReadByPage: canReadByPage,
+            bodyPageCount: bodyPageCount,
+            fileStore: store,
+            fallbackManuscript: manuscriptText ?? (canReadByPage && bodyPageCount > 0 ? nil : manuscript),
+            forceFallbackText: manuscriptText != nil
+        )
+        return incrementalBM25
+    }
+
+    /// 将世界书流程更新后的文风、人物与长期规则委托给导出导入层增量并入已挂载的 `NarrativeWorkspace`。
+    func syncWorldChangesIntoNarrativeWorkspace(
+        settingsCorpusLibraries: [CorpusLibrary] = []
+    ) {
+        guard var workspace = narrativeWorkspace else { return }
+        let changed = LegacyArchiveImporter.syncWorldChanges(
+            from: payload,
+            projectID: project.id,
+            projectTitle: project.title,
+            settingsCorpusLibraries: settingsCorpusLibraries,
+            into: &workspace
+        )
+        if changed {
+            noteNarrativeWorkspaceUpdated(workspace)
+        }
+    }
+
+    func scheduleNarrativeWorkspaceSave() {
+        guard !isReadOnly, !savesQuiesced, narrativeWorkspace != nil else { return }
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+            self.flushNarrativeWorkspaceSave()
+        }
+    }
+
+    func saveNarrativeWorkspaceNow() throws {
+        guard !isReadOnly, let narrativeWorkspace else { return }
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = nil
+        narrativeSaveQueued = false
+        try store.narrative.saveWorkspace(
+            narrativeWorkspace,
+            previous: lastSavedNarrativeWorkspace,
+            projectID: project.id
+        )
+        lastSavedNarrativeWorkspace = narrativeWorkspace
+    }
+
+    func saveNarrativeWorkspaceAndWait() async {
+        guard !isReadOnly, !savesQuiesced, narrativeWorkspace != nil else { return }
+        flushNarrativeWorkspaceSave()
+        for _ in 0..<3 {
+            if !narrativeSaveInFlight { break }
+            await waitForNarrativeSaveCompletion()
+        }
+    }
+
+    private func flushNarrativeWorkspaceSave() {
+        guard !isReadOnly, !savesQuiesced, let snapshot = narrativeWorkspace else { return }
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = nil
+
+        guard !narrativeSaveInFlight else {
+            narrativeSaveQueued = true
+            return
+        }
+        guard snapshot != lastSavedNarrativeWorkspace else {
+            resumeNarrativeSaveWaiters()
+            return
+        }
+
+        narrativeSaveInFlight = true
+        let previous = lastSavedNarrativeWorkspace
+        let projectID = project.id
+        let store = self.store
+        let generation = saveGeneration
+
+        Task.detached(priority: .utility) { [weak self] in
+            var writeError: Error?
+            do {
+                try store.narrative.saveWorkspace(
+                    snapshot,
+                    previous: previous,
+                    projectID: projectID
+                )
+            } catch {
+                writeError = error
+            }
+            await MainActor.run {
+                self?.finishNarrativeSave(
+                    snapshot: snapshot,
+                    error: writeError,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    private func finishNarrativeSave(
+        snapshot: NarrativeWorkspace,
+        error: Error?,
+        generation: Int
+    ) {
+        guard saveGeneration == generation else { return }
+        narrativeSaveInFlight = false
+        resumeNarrativeSaveWaiters()
+        if let error {
+            narrativeSaveQueued = false
+            onSaveError?("叙事工作区保存失败：\(error.localizedDescription)")
+            return
+        }
+        lastSavedNarrativeWorkspace = snapshot
+        if !savesQuiesced, narrativeSaveQueued {
+            narrativeSaveQueued = false
+            flushNarrativeWorkspaceSave()
+        }
+    }
+
+    private func waitForNarrativeSaveCompletion() async {
+        guard narrativeSaveInFlight else { return }
+        await withCheckedContinuation { continuation in
+            narrativeSaveWaiters.append(continuation)
+        }
+    }
+
+    private func resumeNarrativeSaveWaiters() {
+        guard !narrativeSaveWaiters.isEmpty else { return }
+        let waiters = narrativeSaveWaiters
+        narrativeSaveWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     // MARK: - 落盘
@@ -387,6 +713,7 @@ final class ProjectSession {
             await waitForSaveCompletion()
             if !saveInFlight { break }
         }
+        await saveNarrativeWorkspaceAndWait()
     }
 
     /// 导入覆盖同名书之前调用：停掉挂起保存，等正在进行的写盘结束。
@@ -399,14 +726,22 @@ final class ProjectSession {
         saveTask = nil
         sourceSaveTask?.cancel()
         sourceSaveTask = nil
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = nil
         await waitForSaveCompletion()
+        await waitForNarrativeSaveCompletion()
         if !isReadOnly, isDirty {
             nextSaveKind = .all
             flushSave()
             await waitForSaveCompletion()
         }
+        if !isReadOnly, narrativeWorkspace != lastSavedNarrativeWorkspace {
+            flushNarrativeWorkspaceSave()
+            await waitForNarrativeSaveCompletion()
+        }
         savesQuiesced = true
         queuedSaveKind = nil
+        narrativeSaveQueued = false
         nextSaveKind = .bodyOnly
         isDirty = false
     }
@@ -983,14 +1318,19 @@ final class ProjectSession {
     func replaceLoadedState(project: Project, fileStore: FileStore) {
         saveTask?.cancel()
         saveTask = nil
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = nil
         chapterScanTask?.cancel()
         chapterScanTask = nil
         chapterScanGeneration &+= 1
         saveGeneration &+= 1
         saveInFlight = false
+        narrativeSaveInFlight = false
         savesQuiesced = false
         resumeSaveWaiters()
+        resumeNarrativeSaveWaiters()
         queuedSaveKind = nil
+        narrativeSaveQueued = false
         nextSaveKind = .all
         isReadOnly = false
         bodyLoaded = false
@@ -1003,6 +1343,15 @@ final class ProjectSession {
         payload = fileStore.loadPayload(project.id)
         sourceText = fileStore.loadSource(project.id)
         translations = fileStore.loadTranslations(project.id)
+        incrementalBM25 = ManuscriptIndex.IncrementalBM25Index()
+        if case .loaded(let workspace) = fileStore.narrative.loadWorkspaceState(project.id) {
+            self.narrativeWorkspace = workspace
+            self.lastSavedNarrativeWorkspace = workspace
+        } else {
+            self.narrativeWorkspace = nil
+            self.lastSavedNarrativeWorkspace = nil
+        }
+        narrativeRevision &+= 1
 
         if let meta = fileStore.loadBodyMeta(project.id) {
             bodyBlocks = meta.blocks
@@ -1063,6 +1412,14 @@ final class ProjectSession {
     func appendDelta(_ text: String, to messageID: String) {
         mutateMessage(messageID, save: false) { message in
             message.content += text
+            return true
+        }
+    }
+
+    func resetStreamingContent(of messageID: String) {
+        mutateMessage(messageID, save: false) { message in
+            guard !message.content.isEmpty else { return false }
+            message.content = ""
             return true
         }
     }

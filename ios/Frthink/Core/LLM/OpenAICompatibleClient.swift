@@ -117,13 +117,21 @@ final class OpenAICompatibleClient: LLMClient {
             req.stream = true
             var (bytes, http) = try await openStream(for: req)
 
-            // 最多按顺序回退两次：先剥离不支持的 stream_options，再剥离不支持的末尾 prefill。
-            for _ in 0..<2 where (400..<500).contains(http.statusCode) {
+            // 最多按顺序回退三次：剥离不支持的 stream_options、tools 或末尾 prefill。
+            for _ in 0..<3 where (400..<500).contains(http.statusCode) {
                 let body = try await Self.drain(bytes)
                 if !provider.isDeepSeek,
                    req.sendStreamOptions,
                    Self.isUnsupportedStreamOptions(status: http.statusCode, body: body) {
                     req.sendStreamOptions = false
+                    (bytes, http) = try await openStream(for: req)
+                    continue
+                }
+                if !(req.tools?.isEmpty ?? true),
+                   Self.isUnsupportedTools(status: http.statusCode, body: body) {
+                    req.tools = nil
+                    req.toolChoiceName = nil
+                    req.parallelToolCalls = nil
                     (bytes, http) = try await openStream(for: req)
                     continue
                 }
@@ -198,6 +206,19 @@ final class OpenAICompatibleClient: LLMClient {
         return keys.contains { lower.contains($0) }
     }
 
+    static func isUnsupportedTools(status: Int, body: String) -> Bool {
+        guard status == 400 || status == 422 else { return false }
+        let lower = body.lowercased()
+        let mentionsTools = lower.contains("tool") || lower.contains("function")
+        guard mentionsTools else { return false }
+        let markers = [
+            "unsupported", "not supported", "unknown", "unrecognized",
+            "not allowed", "not permitted", "invalid", "disabled",
+            "不支持", "不允许",
+        ]
+        return markers.contains { lower.contains($0) }
+    }
+
     static func strippingTrailingPrefill(from messages: [LLMMessage]) -> [LLMMessage]? {
         guard let last = messages.last, last.role == "assistant" else { return nil }
         guard last.isPrefix || ThinkTagStreamSplitter.startsInsideThink(for: messages) else {
@@ -221,6 +242,8 @@ final class OpenAICompatibleClient: LLMClient {
         // 单条数据流复用同一个解码器实例，避免为每个 chunk 重复创建 JSONDecoder。
         let chunkDecoder = JSONDecoder()
         var splitter = ThinkTagStreamSplitter(startsInsideThink: startsInsideThink)
+        var pendingToolCalls: [Int: (id: String, name: String, arguments: String)] = [:]
+        var maxToolIndex = -1
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -255,13 +278,34 @@ final class OpenAICompatibleClient: LLMClient {
                 splitter: &splitter,
                 continuation: continuation,
                 finishReason: &finishReason,
-                emittedAnything: &emittedAnything
+                emittedAnything: &emittedAnything,
+                pendingToolCalls: &pendingToolCalls,
+                maxToolIndex: &maxToolIndex
             )
         }
 
         for event in splitter.finish() {
             emittedAnything = true
             continuation.yield(event)
+        }
+
+        if !pendingToolCalls.isEmpty {
+            let calls: [LLMToolCall] = pendingToolCalls.keys.sorted().compactMap { idx in
+                guard let builder = pendingToolCalls[idx] else { return nil }
+                let cleanName = builder.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanName.isEmpty else { return nil }
+                let callID = builder.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawArgs = builder.arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+                return LLMToolCall(
+                    id: callID.isEmpty ? UUID().uuidString : callID,
+                    functionName: cleanName,
+                    arguments: rawArgs.isEmpty ? "{}" : builder.arguments
+                )
+            }
+            if !calls.isEmpty {
+                emittedAnything = true
+                continuation.yield(.toolCalls(calls))
+            }
         }
 
         if emittedAnything, undecodableLines > 0, finishReason == nil, !sawDone {
@@ -288,7 +332,9 @@ final class OpenAICompatibleClient: LLMClient {
         splitter: inout ThinkTagStreamSplitter,
         continuation: AsyncThrowingStream<LLMStreamEvent, Error>.Continuation,
         finishReason: inout String?,
-        emittedAnything: inout Bool
+        emittedAnything: inout Bool,
+        pendingToolCalls: inout [Int: (id: String, name: String, arguments: String)],
+        maxToolIndex: inout Int
     ) throws {
         // 状态码 200 的流式响应中亦可能下发错误信息（如限流、内容审核、上下文溢出），
         // 必须捕获处理，防止不完整正文被误判为正常结束。
@@ -309,6 +355,18 @@ final class OpenAICompatibleClient: LLMClient {
             if let reasoning, !reasoning.isEmpty {
                 emittedAnything = true
                 continuation.yield(.reasoning(reasoning))
+            }
+            if let toolDeltas = delta?.tool_calls, !toolDeltas.isEmpty {
+                emittedAnything = true
+                for tc in toolDeltas {
+                    let idx = tc.index ?? (maxToolIndex + 1)
+                    maxToolIndex = max(maxToolIndex, idx)
+                    var current = pendingToolCalls[idx] ?? (id: "", name: "", arguments: "")
+                    if let id = tc.id, !id.isEmpty { current.id = id }
+                    if let name = tc.function?.name, !name.isEmpty { current.name = name }
+                    if let args = tc.function?.arguments, !args.isEmpty { current.arguments += args }
+                    pendingToolCalls[idx] = current
+                }
             }
             if let content, !content.isEmpty {
                 emittedAnything = true
@@ -364,6 +422,22 @@ final class OpenAICompatibleClient: LLMClient {
         let data: Data
         do {
             (data, _) = try await send(urlRequest)
+        } catch let LLMError.http(status, body) where !(req.tools?.isEmpty ?? true)
+            && Self.isUnsupportedTools(status: status, body: body) {
+            req.tools = nil
+            req.toolChoiceName = nil
+            req.parallelToolCalls = nil
+            let retryRequest = try makeRequest(
+                path: "/chat/completions",
+                body: req.jsonBody(
+                    isDeepSeek: provider.isDeepSeek,
+                    kind: provider.kind,
+                    providerLevel: provider.effectiveThinkingLevel,
+                    offStyle: provider.effectiveReasoningOffStyle
+                ),
+                useDeepSeekBeta: usesPrefixBeta
+            )
+            (data, _) = try await send(retryRequest)
         } catch let LLMError.http(status, body) where Self.isUnsupportedPrefill(status: status, body: body) {
             guard let stripped = Self.strippingTrailingPrefill(from: req.messages) else {
                 throw LLMError.http(status: status, body: body)
@@ -545,6 +619,16 @@ final class OpenAICompatibleClient: LLMClient {
     private struct StreamChunk: Decodable {
         struct Choice: Decodable {
             struct Delta: Decodable {
+                struct ToolCallDelta: Decodable {
+                    struct FunctionDelta: Decodable {
+                        let name: String?
+                        let arguments: String?
+                    }
+                    let index: Int?
+                    let id: String?
+                    let function: FunctionDelta?
+                }
+
                 let content: String?
                 let text: String?
                 let output_text: String?
@@ -554,6 +638,7 @@ final class OpenAICompatibleClient: LLMClient {
                 let thinking: String?
                 let thought: String?
                 let stop_reason: String?
+                let tool_calls: [ToolCallDelta]?
 
                 var contentText: String? {
                     content ?? text ?? output_text

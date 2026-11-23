@@ -7,6 +7,10 @@ struct LLMMessage: Codable, Hashable {
     var content: String
     var reasoningContent: String? = nil
     var isPrefix: Bool = false
+    /// 模型发起的函数调用清单（工具对话轮次序列化用）。
+    var toolCalls: [LLMToolCall]? = nil
+    /// 工具返回消息关联的调用 ID（`role == "tool"` 时附带）。
+    var toolCallID: String? = nil
 
     static func system(_ s: String) -> LLMMessage { .init(role: "system", content: s) }
     static func user(_ s: String) -> LLMMessage { .init(role: "user", content: s) }
@@ -16,6 +20,21 @@ struct LLMMessage: Codable, Hashable {
         isPrefix: Bool = false
     ) -> LLMMessage {
         .init(role: "assistant", content: s, reasoningContent: reasoningContent, isPrefix: isPrefix)
+    }
+    static func assistantToolCalls(
+        _ calls: [LLMToolCall],
+        content: String = "",
+        reasoningContent: String? = nil
+    ) -> LLMMessage {
+        .init(
+            role: "assistant",
+            content: content,
+            reasoningContent: reasoningContent,
+            toolCalls: calls.isEmpty ? nil : calls
+        )
+    }
+    static func toolResult(callID: String, content: String) -> LLMMessage {
+        .init(role: "tool", content: content, toolCallID: callID)
     }
 }
 
@@ -27,7 +46,7 @@ struct LLMToolDefinition: Sendable, Hashable {
 }
 
 /// 模型在 `choices[0].message.tool_calls` 中返回的函数调用。
-struct LLMToolCall: Equatable, Sendable {
+struct LLMToolCall: Codable, Hashable, Sendable {
     var id: String
     var functionName: String
     var arguments: String
@@ -203,11 +222,27 @@ struct LLMRequest {
 
     private func serializeMessage(_ msg: LLMMessage, dialect: ReasoningDialect) -> [String: Any] {
         var dict: [String: Any] = ["role": msg.role, "content": msg.content]
+        if msg.role == "tool", let callID = msg.toolCallID, !callID.isEmpty {
+            dict["tool_call_id"] = callID
+            return dict
+        }
         guard msg.role == "assistant" else { return dict }
         if dialect.supportsReasoningContent,
            let reasoning = msg.reasoningContent,
            !reasoning.isEmpty {
             dict["reasoning_content"] = reasoning
+        }
+        if let calls = msg.toolCalls, !calls.isEmpty {
+            dict["tool_calls"] = calls.map { call in
+                [
+                    "id": call.id,
+                    "type": "function",
+                    "function": [
+                        "name": call.functionName,
+                        "arguments": call.arguments,
+                    ],
+                ] as [String: Any]
+            }
         }
         if msg.isPrefix, let prefixKey = dialect.prefixKey {
             dict[prefixKey] = true
@@ -255,11 +290,12 @@ struct LLMRequest {
     }
 }
 
-/// 流式事件枚举。除正文增量外，支持携带「思考过程」与「结束原因」：
+/// 流式事件枚举。除正文增量外，支持携带「思考过程」「只读工具调用」与「结束原因」：
 /// DeepSeek 等推理模型会优先输出 `reasoning_content`。
 enum LLMStreamEvent: Equatable {
     case delta(String)
     case reasoning(String)
+    case toolCalls([LLMToolCall])
     case finished(reason: String?)
 }
 

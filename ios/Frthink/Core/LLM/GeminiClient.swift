@@ -70,17 +70,62 @@ final class GeminiClient: LLMClient {
             .joined(separator: "\n\n")
 
         var contents: [[String: Any]] = []
+        var toolNamesByCallID: [String: String] = [:]
         for msg in request.messages where msg.role != "system" {
-            let role = msg.role == "assistant" ? "model" : "user"
+            let role: String
+            let messageParts: [[String: Any]]
+
+            if msg.role == "tool" {
+                role = "user"
+                let functionName = msg.toolCallID.flatMap { toolNamesByCallID[$0] } ?? "tool"
+                messageParts = [[
+                    "functionResponse": [
+                        "name": functionName,
+                        "response": ["result": msg.content],
+                    ],
+                ]]
+            } else if msg.role == "assistant", let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                role = "model"
+                var builtParts: [[String: Any]] = []
+                if !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    builtParts.append(["text": msg.content])
+                }
+                for call in toolCalls {
+                    toolNamesByCallID[call.id] = call.functionName
+                    let argsObject: Any
+                    if let data = call.arguments.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) {
+                        argsObject = obj
+                    } else {
+                        argsObject = [String: Any]()
+                    }
+                    builtParts.append([
+                        "functionCall": [
+                            "name": call.functionName,
+                            "args": argsObject,
+                        ],
+                    ])
+                }
+                messageParts = builtParts
+            } else {
+                role = msg.role == "assistant" ? "model" : "user"
+                messageParts = [["text": msg.content]]
+            }
+
             if let lastRole = contents.last?["role"] as? String, lastRole == role,
-               var parts = contents.last?["parts"] as? [[String: Any]],
-               let prevText = parts.last?["text"] as? String {
-                parts[parts.count - 1]["text"] = prevText + "\n\n" + msg.content
-                contents[contents.count - 1]["parts"] = parts
+               var existingParts = contents.last?["parts"] as? [[String: Any]] {
+                if messageParts.count == 1,
+                   let incomingText = messageParts[0]["text"] as? String,
+                   let prevText = existingParts.last?["text"] as? String {
+                    existingParts[existingParts.count - 1]["text"] = prevText + "\n\n" + incomingText
+                } else {
+                    existingParts.append(contentsOf: messageParts)
+                }
+                contents[contents.count - 1]["parts"] = existingParts
             } else {
                 contents.append([
                     "role": role,
-                    "parts": [["text": msg.content]],
+                    "parts": messageParts,
                 ])
             }
         }
@@ -200,6 +245,7 @@ final class GeminiClient: LLMClient {
         var rawLog: [String] = []
         let decoder = JSONDecoder()
         var splitter = ThinkTagStreamSplitter(startsInsideThink: false)
+        var collectedToolCalls: [LLMToolCall] = []
 
         for try await line in bytes.lines {
             if Task.isCancelled {
@@ -226,6 +272,18 @@ final class GeminiClient: LLMClient {
                     finishReason = rawReason == "MAX_TOKENS" ? "length" : rawReason.lowercased()
                 }
                 for part in candidate.content?.parts ?? [] {
+                    if let fc = part.functionCall {
+                        let argsData = (try? JSONSerialization.data(withJSONObject: fc.argsObject ?? [:])) ?? Data()
+                        let args = String(data: argsData, encoding: .utf8) ?? "{}"
+                        collectedToolCalls.append(
+                            LLMToolCall(
+                                id: UUID().uuidString,
+                                functionName: fc.name,
+                                arguments: args
+                            )
+                        )
+                        emittedAnything = true
+                    }
                     guard let text = part.text, !text.isEmpty else { continue }
                     emittedAnything = true
                     if part.thought == true {
@@ -242,6 +300,11 @@ final class GeminiClient: LLMClient {
         for event in splitter.finish() {
             emittedAnything = true
             continuation.yield(event)
+        }
+
+        if !collectedToolCalls.isEmpty {
+            emittedAnything = true
+            continuation.yield(.toolCalls(collectedToolCalls))
         }
 
         if emittedAnything, undecodableLines > 0, finishReason == nil {
