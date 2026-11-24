@@ -14,11 +14,11 @@ ios/
       FrthinkApp.swift
       RootView.swift
       ProjectWorkspaceView.swift
-    Core/                     # 核心模型、持久化、存档、LLM 协议、提示词与设计组件
+    Core/                     # 核心模型、持久化、存档、LLM 协议、提示词、叙事引擎与设计组件
       Archive.swift / ArchiveSnapshot.swift / ArchiveRestore.swift
       FrthinkGzip.swift / FrthinkArchiveError.swift
-      Models/  Store/  LLM/  Prompts/  Design/
-    Features/                 # 业务特性模块（Library / Writer / World / Translation / Universe / Settings）
+      Models/  Store/  LLM/  Prompts/  Narrative/  Design/
+    Features/                 # 业务特性模块（Library / Writer / World / Narrative / Reader / Translation / Universe / Settings）
     Resources/Assets.xcassets
 ```
 
@@ -51,9 +51,9 @@ struct ChatMessage                 // id, role(.user/.assistant/.system), varian
                                    // content 是计算属性，读写当前选中变体
 struct TranslationSegment          // id, owner, project, target, sourceHash, segment, payload, updatedAt
 
-enum ProviderKind                  // .deepseek / .openRouter / .anthropic / .openAICompatible
+enum ProviderKind                  // .deepseek / .openRouter / .anthropic / .gemini / .openAICompatible / .openCodeGo
 struct ProviderSetting             // id, kind, baseURL, model, temperature, maxTokens, stream, enabled
-struct AppSettings                 // providers[], activeProviderID, corpusEnabled, ownerID, streamByDefault
+struct AppSettings                 // providers[], activeProviderID, corpusEnabled, ownerID, streamByDefault, tokenUsageTotal
                                    // .activeProvider 取当前供应方
 ```
 
@@ -107,7 +107,7 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
 struct LLMMessage  { role, content; .system()/.user()/.assistant() 便捷构造 }
 struct LLMRequest  { model, messages, stream, temperature, maxTokens, topP }
 
-enum LLMStreamEvent { case delta(String), reasoning(String), finished(reason: String?) }
+enum LLMStreamEvent { case delta(String), reasoning(String), toolCalls([LLMToolCall]), finished(reason: String?) }
 enum LLMError: LocalizedError  // .notConfigured/.missingAPIKey/.badURL/.http/.decoding/.cancelled/.emptyResponse/.truncated
 
 protocol LLMClient {
