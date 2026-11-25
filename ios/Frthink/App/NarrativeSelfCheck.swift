@@ -3314,8 +3314,8 @@ extension SelfCheck {
             var ws = session.ensureNarrativeWorkspace()
             ws.applyLedgerDelta(
                 PlotNodeDelta(
-                    entityPageUpserts: [EntityPage(id: "c_lin", kind: .character, name: "林昭", identity: "新人物")],
-                    directiveAdds: [AuthorDirective(id: "d_tone", verbatimRule: "保持克制冷峻", scope: .global)]
+                    directiveAdds: [AuthorDirective(id: "d_tone", verbatimRule: "保持克制冷峻", scope: .global)],
+                    entityPageUpserts: [EntityPage(id: "c_lin", kind: .character, name: "林昭", identity: "新人物")]
                 ),
                 sourceNodeID: ws.storyGraph.headNodeID
             )
