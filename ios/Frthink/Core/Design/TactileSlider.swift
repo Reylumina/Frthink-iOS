@@ -6,11 +6,27 @@ import SwiftUI
 /// 本组件仅补充上述交互能力，视觉完全取自 `Theme` 语义色、无投影连续形状与 `Theme.motionSelection`。
 struct TactileSlider: View {
     @Binding var value: Double
-    let range: ClosedRange<Double>
-    var step: Double? = nil
-    var showTicks: Bool = true
-    var hapticsEnabled: Bool = true
-    var onEditingChanged: ((Bool) -> Void)? = nil
+    private let range: ClosedRange<Double>
+    private let step: Double?
+    private let showTicks: Bool
+    private let hapticsEnabled: Bool
+    private let onEditingChanged: ((Bool) -> Void)?
+
+    init(
+        value: Binding<Double>,
+        in range: ClosedRange<Double>,
+        step: Double? = nil,
+        showTicks: Bool = true,
+        hapticsEnabled: Bool = true,
+        onEditingChanged: ((Bool) -> Void)? = nil
+    ) {
+        self._value = value
+        self.range = range
+        self.step = step
+        self.showTicks = showTicks
+        self.hapticsEnabled = hapticsEnabled
+        self.onEditingChanged = onEditingChanged
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @GestureState private var isDragging = false
