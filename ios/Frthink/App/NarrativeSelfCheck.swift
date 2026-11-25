@@ -3291,7 +3291,6 @@ extension SelfCheck {
             world.characters = [CharacterCard(id: "c_ghost", name: "旧人物", identity: "旧档残余")]
             let payload = ProjectPayload(
                 manuscript: "雾港夜雨中，林昭收起了铜钥匙。\n\n远处传来沈清秋的脚步声。",
-                world: world,
                 messages: [
                     ChatMessage(id: "m0", role: .user, content: String(repeating: "旧要求甲。", count: 50)),
                     ChatMessage(id: "m1", role: .assistant, content: String(repeating: "旧草稿甲。", count: 50)),
@@ -3299,7 +3298,8 @@ extension SelfCheck {
                     ChatMessage(id: "m3", role: .assistant, content: "短回复", createdAt: t0),
                     ChatMessage(id: "m4", role: .user, content: "继续", createdAt: t0),
                     ChatMessage(id: "m5", role: .assistant, content: "收到", createdAt: t0),
-                ]
+                ],
+                world: world
             )
             let session = ProjectSession(
                 project: Project(id: "conflict-book", title: "冲突修复验证"),
