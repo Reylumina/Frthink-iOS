@@ -2757,6 +2757,169 @@ extension SelfCheck {
 
             return "加密 WAL 追加 + 截断修复后可续写 + 达阈值压实 + 检查点裁剪 + 整图替换与 O(1) 修订号 ok"
         }
+
+        // 验证四类实体分化（人物/地点/物件/世界观）、常驻世界观进 Tier 0、触发词唤醒及世界同步模型设置往返。
+        check("narrative.entityOntologyAndWorldSyncSettings") {
+            let legacyJSON = #"{"id":"legacy_lore","kind":"lore","name":"灵气潮汐","identity":"灵力体系","summary":"满月时灵气暴涨"}"#
+            let legacyData = Data(legacyJSON.utf8)
+            let decodedLegacy = try JSONDecoder().decode(EntityPage.self, from: legacyData)
+            try expect(
+                decodedLegacy.activationMode == .mentioned && decodedLegacy.triggerKeywords.isEmpty,
+                "旧版 EntityPage JSON 缺失新字段时必须平滑解码为 mentioned 与空触发词"
+            )
+
+            let alwaysLore = EntityPage(
+                id: "lore_always",
+                kind: .lore,
+                name: "灵力反噬铁律",
+                activationMode: .always,
+                summary: "越阶强行催动秘术必损经脉",
+                identity: "修炼法则",
+                hardBoundaries: ["筑基期不可承受元婴灵压"]
+            )
+            let triggeredLore = EntityPage(
+                id: "lore_keyword",
+                kind: .lore,
+                name: "天机阁密律",
+                triggerKeywords: ["星盘", "问卜"],
+                activationMode: .mentioned,
+                summary: "卜算天机须折寿三年",
+                identity: "宗门制度",
+                hardBoundaries: ["不得向外人泄露卦象代价"]
+            )
+            let hero = EntityPage(
+                id: "c_hero",
+                kind: .character,
+                name: "林昭",
+                summary: "性格谨慎",
+                identity: "北境斥候",
+                voiceProfile: "短句寡言",
+                hardBoundaries: ["绝不背弃同袍"]
+            )
+            let inn = EntityPage(
+                id: "l_inn",
+                kind: .location,
+                name: "松鹤楼",
+                summary: "临街两层木楼，二楼雅间直通后巷屋檐",
+                identity: "城南茶楼",
+                voiceProfile: "不应出现在地点渲染中的残留声线",
+                hardBoundaries: ["后门子时落锁"]
+            )
+            let relic = EntityPage(
+                id: "a_relic",
+                kind: .artifact,
+                name: "玄铁星盘",
+                triggerKeywords: ["推演"],
+                summary: "掌心大小的乌铁圆盘，盘面刻二十八宿",
+                identity: "林昭贴身持有",
+                hardBoundaries: ["每日至多催动一次"]
+            )
+
+            var state = MaterializedNarrativeState(atNodeID: "root", pathNodeIDs: ["root"])
+            for page in [alwaysLore, triggeredLore, hero, inn, relic] {
+                state.entityPages[page.id] = page
+            }
+            state.epistemicBeliefs["b_inn_leak"] = EpistemicBelief(
+                id: "b_inn_leak",
+                characterID: "l_inn",
+                topic: "误挂给地点的认知",
+                believedTruth: "不应出现",
+                knowsSecret: true,
+                updatedAtNodeID: "root"
+            )
+
+            let frozen = NarrativeContextOrchestrator.buildFrozenSystemPrefix(
+                globalPreset: "",
+                aiFlavorRules: "",
+                skills: [],
+                universes: [],
+                preservedStyle: PreservedStyleDistillation(),
+                bookIndexLines: [],
+                volumeOneLiners: [],
+                alwaysOnLorePages: [alwaysLore, hero]
+            )
+            try expect(
+                frozen.contains("【常驻世界观】")
+                    && frozen.contains("灵力反噬铁律")
+                    && frozen.contains("筑基期不可承受元婴灵压")
+                    && !frozen.contains("林昭"),
+                "Tier 0 静态前缀应仅纳入启用的常驻世界观，不应混入人物"
+            )
+
+            let cone = NarrativeContextOrchestrator.buildQueryConeBlock(
+                state: state,
+                scanText: "林昭推开松鹤楼后窗，指尖在玄铁星盘边缘一按，借星盘推演今夜祸福。",
+                povCharacterID: "c_hero"
+            )
+            try expect(
+                cone.block.contains("【当前在场人物与认知边界】")
+                    && cone.block.contains("【当前地点】")
+                    && cone.block.contains("【当前物件】")
+                    && cone.block.contains("【相关世界观】")
+                    && cone.block.contains("天机阁密律")
+                    && !cone.block.contains("灵力反噬铁律")
+                    && !cone.block.contains("不应出现在地点渲染中的残留声线")
+                    && !cone.block.contains("误挂给地点的认知"),
+                "Tier 2 应按四类分块渲染、支持触发词带入词条、去重常驻世界观，并隔离非人物的声线与认知"
+            )
+
+            let extractorJSON = #"{"entities":[{"id":"","kind":"世界观","name":"血契反噬","trigger_keywords":["血誓","契印"],"activation_mode":"always","identity":"禁术体系","summary":"背誓者心脉俱断"}]}"#
+            let parsedEntities = try NarrativeEntityExtractor.parseEntities(from: extractorJSON, existingPages: [])
+            try expect(
+                parsedEntities.upserts.first?.kind == .lore
+                    && parsedEntities.upserts.first?.activationMode == .always
+                    && parsedEntities.upserts.first?.triggerKeywords == ["血誓", "契印"],
+                "实体解析器应正确识别世界观分类、激活方式与触发关键词"
+            )
+
+            var settings = AppSettings(narrativeSyncProviderID: "sync_flash_provider")
+            let encodedSettings = try JSONEncoder().encode(settings)
+            let decodedSettings = try JSONDecoder().decode(AppSettings.self, from: encodedSettings)
+            let defaultSettings = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+            try expect(
+                decodedSettings.narrativeSyncProviderID == "sync_flash_provider"
+                    && defaultSettings.narrativeSyncProviderID.isEmpty,
+                "AppSettings.narrativeSyncProviderID 应支持 Codable 往返与旧设置空串默认"
+            )
+
+            settings.providers = [
+                ProviderSetting(id: "p_writer", kind: .openAICompatible, model: "writer-pro"),
+                ProviderSetting(id: "p_sync", kind: .openAICompatible, model: "sync-flash"),
+            ]
+            settings.activeProviderID = "p_writer"
+            settings.narrativeSyncProviderID = "p_sync"
+            let resolvedSyncID = settings.providers.first(where: { $0.id == settings.narrativeSyncProviderID })?.id
+            try expect(resolvedSyncID == "p_sync", "独立世界更新服务商设置应准确解析到指定供应方")
+
+            let mdSample = """
+            # 标题
+            ---
+            > 第一行引用
+            > 第二行引用
+            - 无序条目
+            1. 第一项
+            2、第二项
+            ```
+            let x = 1
+            ```
+            普通正文段落。
+            """
+            let mdBlocks = MarkdownDocumentView.parseBlocks(from: mdSample)
+            try expect(
+                mdBlocks.count == 8
+                    && mdBlocks[0] == .heading(id: 0, level: 1, text: "标题")
+                    && mdBlocks[1] == .divider(id: 1)
+                    && mdBlocks[2] == .quote(id: 2, lines: ["第一行引用", "第二行引用"])
+                    && mdBlocks[3] == .bullet(id: 4, text: "无序条目")
+                    && mdBlocks[4] == .numbered(id: 5, marker: "1.", text: "第一项")
+                    && mdBlocks[5] == .numbered(id: 6, marker: "2、", text: "第二项")
+                    && mdBlocks[6] == .codeBlock(id: 7, code: "let x = 1")
+                    && mdBlocks[7] == .paragraph(id: 10, text: "普通正文段落。"),
+                "MarkdownDocumentView.parseBlocks 应完整识别标题、分隔线、引用块、代码块、无序与有序列表及段落"
+            )
+
+            return "四类档案分化 + 常驻世界观 + 触发词带入 + 世界更新模型设置 ok"
+        }
     }
 
     private enum UnexpectedStoreStateError: Error {

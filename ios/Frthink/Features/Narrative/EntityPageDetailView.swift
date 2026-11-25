@@ -1,4 +1,4 @@
-// 设定详情页：提供冲突确认、已知事实与角色认知分离展示，以及富文本档案预览。
+// 档案详情页：提供冲突确认、已知事实与角色认知分离展示，以及富文本档案预览。
 
 import Foundation
 import SwiftUI
@@ -39,14 +39,16 @@ struct EntityPageDetailView: View {
                 }
                 overviewSection(for: page)
                 factsSection
-                beliefsSection
+                if page.kind == .character || !beliefs.isEmpty {
+                    beliefsSection
+                }
                 markdownPreviewSection(for: page)
                 deleteSection(for: page)
             } else {
                 Section {
                     InlineEmptyState(
                         symbol: "person.2.crop.square.stack",
-                        message: "未找到该设定。"
+                        message: "未找到该档案。"
                     )
                 }
             }
@@ -54,7 +56,7 @@ struct EntityPageDetailView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
-        .navigationTitle(page?.name ?? "设定详情")
+        .navigationTitle(page?.name ?? "档案详情")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if page != nil {
@@ -87,14 +89,14 @@ struct EntityPageDetailView: View {
             Button("取消", role: .cancel) {}
         }
         .deleteConfirmationDialog(
-            "删除设定「\(page?.name ?? "")」？",
+            "删除档案「\(page?.name ?? "")」？",
             isPresented: $showingDeleteConfirm
         ) {
             session.deleteEntityPage(
                 id: entityID,
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
-            store.toast = "已删除设定"
+            store.toast = "已删除档案"
             dismiss()
         }
         .task {
@@ -125,7 +127,7 @@ struct EntityPageDetailView: View {
                     HStack(spacing: Theme.Spacing.s) {
                         StatusPill(text: "有冲突", tone: .warning)
                         Spacer(minLength: 0)
-                        Button("保留原设定") {
+                        Button("保留原记录") {
                             dismissWarning(at: item.index, in: page)
                         }
                         .font(Theme.labelSmall)
@@ -154,21 +156,31 @@ struct EntityPageDetailView: View {
                 title: "分类",
                 value: NarrativeViewSupport.entityKindLabel(page.kind)
             )
+            if page.kind == .lore {
+                AppValueRow(
+                    title: "生效方式",
+                    value: page.activationMode.displayName
+                )
+            }
             if !page.aliases.isEmpty {
                 AppValueRow(title: "别名", value: page.aliases.joined(separator: "、"))
             }
+            if !page.triggerKeywords.isEmpty {
+                AppValueRow(title: "触发词", value: page.triggerKeywords.joined(separator: "、"))
+            }
             if !page.identity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                labeledText(title: "身份定位", value: page.identity)
+                labeledText(title: page.kind.identityLabel, value: page.identity)
             }
             if !page.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                labeledText(title: "设定摘要", value: page.summary)
+                labeledText(title: page.kind.summaryLabel, value: page.summary)
             }
-            if !page.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if page.kind == .character,
+               !page.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 labeledText(title: "说话风格", value: page.voiceProfile)
             }
             if !page.hardBoundaries.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("行为底线")
+                    Text(page.kind.boundariesLabel)
                         .font(Theme.metadata)
                         .foregroundStyle(.secondary)
                     ForEach(Array(page.hardBoundaries.enumerated()), id: \.offset) { _, boundary in
@@ -327,7 +339,7 @@ struct EntityPageDetailView: View {
         do {
             _ = try session.commitNarrativeDelta(
                 PlotNodeDelta(factEvents: [event]),
-                summary: "添加设定事实：\(attr)",
+                summary: "添加档案事实：\(attr)",
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
             store.toast = "已添加事实"
@@ -350,7 +362,7 @@ struct EntityPageDetailView: View {
         do {
             _ = try session.commitNarrativeDelta(
                 PlotNodeDelta(factEvents: [event]),
-                summary: "删除设定事实：\(fact.attribute)",
+                summary: "删除档案事实：\(fact.attribute)",
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
             store.toast = "已删除事实"

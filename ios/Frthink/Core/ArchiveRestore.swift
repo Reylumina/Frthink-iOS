@@ -868,6 +868,7 @@ extension FrthinkArchive {
         keepLocal(\.reservedOutputTokens, unlessArchived: "reservedOutputTokens", "outputBudgetTokens")
         keepLocal(\.tokenUsageTotal, unlessArchived: "tokenUsageTotal")
         keepLocal(\.translationProviderID, unlessArchived: "translationProviderID")
+        keepLocal(\.narrativeSyncProviderID, unlessArchived: "narrativeSyncProviderID")
         keepLocal(\.summaryModel, unlessArchived: "summaryModel")
         keepLocal(\.worldBuildInstruction, unlessArchived: "worldBuildInstruction")
         keepLocal(\.plotOutlineInstruction, unlessArchived: "plotOutlineInstruction")

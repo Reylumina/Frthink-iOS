@@ -1,6 +1,6 @@
 import Foundation
 
-/// 设定档案提取器：从正文末尾或指定片区增量提炼/更新四类设定（人物、地点、物件、设定），
+/// 档案提取器：从正文末尾或指定片区增量提取、更新四类档案（人物、地点、物件、世界观），
 /// 与既有实体按 ID 或名称自动对齐合并，保留作者手工调整与冲突历史。
 enum NarrativeEntityExtractor {
 
@@ -11,21 +11,26 @@ enum NarrativeEntityExtractor {
     ) -> [LLMMessage] {
         let kindScopeInstruction: String
         if let targetKind {
-            kindScopeInstruction = "本次只需重点提取并完善分类为 `\(targetKind.rawValue)`（\(kindDisplayName(targetKind))）的条目。"
+            kindScopeInstruction = "本次只需重点提取并完善分类为 `\(targetKind.rawValue)`（\(targetKind.displayName)）的条目。"
         } else {
-            kindScopeInstruction = "请覆盖正文中活跃的 `character`（人物）、`location`（地点）、`artifact`（物件）与 `lore`（世界设定）。"
+            kindScopeInstruction = "请区分正文中活跃的四类档案：`character`（人物）、`location`（地点）、`artifact`（物件）与 `lore`（世界观）。"
         }
 
         let systemPrompt = """
-        你是一个严谨的小说设定整理编辑，负责从正文中提炼与更新设定档案。
+        你是小说设定整理编辑，负责从正文中提取并更新四类档案。
         \(kindScopeInstruction)
-        请严格返回一个 JSON 对象（不要输出额外说明）：
-        {"entities":[{"id":"","kind":"character|location|artifact|lore","name":"","aliases":[""],"identity":"","summary":"","voice_profile":"","hard_boundaries":[""]}]}
-        约束要求：
-        1. 若设定已在下方「现有档案」中出现，请沿用其 exact `id`，仅补充或修正有原文依据的新信息。
-        2. 新发现的重要角色、关键地点、关键物件或世界规则可新建条目（`id` 留空即可），仅依据正文明确描写，不得凭空捏造。
-        3. `summary` 用 1-3 句简明概括当前设定现状；`voice_profile` 仅人物填写说话口吻或风格；`hard_boundaries` 列出不可违背的行为底线或规则。
-        4. 若正文中没有任何新增或变更的设定，返回 `{"entities":[]}`。
+        请只返回一个 JSON 对象，不要附加额外说明：
+        {"entities":[{"id":"","kind":"character|location|artifact|lore","name":"","aliases":[""],"trigger_keywords":[""],"activation_mode":"mentioned|always","identity":"","summary":"","voice_profile":"","hard_boundaries":[""]}]}
+        分类说明：
+        - `character`（人物）：有自主行动或视角的角色。`identity` 写身份与立场，`summary` 写性格与当前处境，`voice_profile` 写说话口吻与用词习惯，`hard_boundaries` 写人物底线与不可违背的原则。
+        - `location`（地点）：具体的物理场所。`identity` 写位置与所属区域，`summary` 写空间布局、环境氛围与出入口，`hard_boundaries` 写地形或准入限制；`voice_profile` 留空。
+        - `artifact`（物件）：可持有或使用的道具、信物与器物。`identity` 写当前持有者或归属，`summary` 写外观、用途与当前状态，`hard_boundaries` 写触发条件、代价或损耗限制；`voice_profile` 留空。
+        - `lore`（世界观）：世界内的力量体系、宗门势力、社会制度、历史事件或自然法则。不要把戏外作者的写作要求（如视角限制、行文节奏、字数要求、去 AI 味规范）归入 `lore`。`identity` 写所属类别，`summary` 写具体机制与词条内容，`hard_boundaries` 写世界内不可违背的规则与例外，`trigger_keywords` 填正文中提及即可带入该词条的关键词（不要重复填写名称本身）；只有作用于全局的基础铁律才将 `activation_mode` 设为 `"always"`，其余保持 `"mentioned"`。
+        整理要求：
+        1. 若条目已在下方「现有档案」中出现，请沿用其准确 `id`，只补充或修正有原文依据的新信息。
+        2. 新出现的重要角色、地点、物件或世界观条目可新建档案（`id` 留空），内容必须依据正文，不得臆造。
+        3. `summary` 用一至三句概括；非 `character` 分类禁止填写 `voice_profile`。
+        4. 若正文中没有新增或变化的条目，返回 `{"entities":[]}`。
         """
 
         var userLines: [String] = []
@@ -96,6 +101,15 @@ enum NarrativeEntityExtractor {
             )
 
             let incomingAliases = parseStringArray(item["aliases"])
+            let incomingTriggerKeywords = parseStringArray(
+                item["trigger_keywords"] ?? item["triggerKeywords"] ?? item["keywords"]
+            )
+            let rawActivation = NarrativeJSONScanner.firstNonEmptyString(
+                item,
+                keys: ["activation_mode", "activationMode"]
+            ).lowercased()
+            let parsedActivation: EntityActivationMode =
+                rawActivation == "always" ? .always : .mentioned
             let incomingIdentity = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["identity", "role"])
             let incomingSummary = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["summary", "description", "brief"])
             let incomingVoice = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["voice_profile", "voiceProfile", "voice"])
@@ -104,6 +118,10 @@ enum NarrativeEntityExtractor {
             if let existing {
                 var merged = existing
                 merged.aliases = deduplicatedStrings(existing.aliases + incomingAliases)
+                merged.triggerKeywords = deduplicatedStrings(existing.triggerKeywords + incomingTriggerKeywords)
+                if merged.kind == .lore, parsedActivation == .always {
+                    merged.activationMode = .always
+                }
                 if !incomingIdentity.isEmpty { merged.identity = incomingIdentity }
                 if !incomingSummary.isEmpty { merged.summary = incomingSummary }
                 if !incomingVoice.isEmpty, merged.kind == .character { merged.voiceProfile = incomingVoice }
@@ -111,6 +129,8 @@ enum NarrativeEntityExtractor {
                     merged.hardBoundaries = deduplicatedStrings(existing.hardBoundaries + incomingBoundaries)
                 }
                 let contentChanged = merged.aliases != existing.aliases
+                    || merged.triggerKeywords != existing.triggerKeywords
+                    || merged.activationMode != existing.activationMode
                     || merged.identity != existing.identity
                     || merged.summary != existing.summary
                     || merged.voiceProfile != existing.voiceProfile
@@ -136,6 +156,8 @@ enum NarrativeEntityExtractor {
                     kind: resolvedKind,
                     name: name,
                     aliases: deduplicatedStrings(incomingAliases),
+                    triggerKeywords: deduplicatedStrings(incomingTriggerKeywords),
+                    activationMode: resolvedKind == .lore ? parsedActivation : .mentioned,
                     summary: incomingSummary,
                     identity: incomingIdentity,
                     voiceProfile: resolvedKind == .character ? incomingVoice : "",
@@ -181,19 +203,10 @@ enum NarrativeEntityExtractor {
             return .location
         case "artifact", "物件", "物品", "道具":
             return .artifact
-        case "lore", "设定", "规则", "世界观":
+        case "lore", "设定", "规则", "世界观", "体系", "势力", "概念":
             return .lore
         default:
             return nil
-        }
-    }
-
-    private static func kindDisplayName(_ kind: EntityKind) -> String {
-        switch kind {
-        case .character: return "人物"
-        case .location: return "地点"
-        case .artifact: return "物件"
-        case .lore: return "设定"
         }
     }
 

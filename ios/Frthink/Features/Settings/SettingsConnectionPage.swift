@@ -111,7 +111,7 @@ struct SettingsConnectionPage: View {
 
     // MARK: - 任务模型
 
-    /// 翻译和摘要各自可以指定模型，合并成一块，二级页保持四个区块。
+    /// 翻译、世界更新和摘要各自可以指定模型。
     private var taskModelSection: some View {
         Section {
             NavigationLink {
@@ -120,6 +120,14 @@ struct SettingsConnectionPage: View {
                 SettingsLabelRow(
                     title: "翻译模型",
                     detail: translationModelShortLabel
+                )
+            }
+            NavigationLink {
+                NarrativeSyncProviderPicker(store: store)
+            } label: {
+                SettingsLabelRow(
+                    title: "世界更新模型",
+                    detail: narrativeSyncModelShortLabel
                 )
             }
             NavigationLink {
@@ -182,10 +190,16 @@ struct SettingsConnectionPage: View {
     }
 
     private var translationModelShortLabel: String {
-        guard !store.settings.translationProviderID.isEmpty,
-              let provider = store.settings.providers.first(where: {
-                  $0.id == store.settings.translationProviderID
-              })
+        providerShortLabel(for: store.settings.translationProviderID)
+    }
+
+    private var narrativeSyncModelShortLabel: String {
+        providerShortLabel(for: store.settings.narrativeSyncProviderID)
+    }
+
+    private func providerShortLabel(for providerID: String) -> String {
+        guard !providerID.isEmpty,
+              let provider = store.settings.providers.first(where: { $0.id == providerID })
         else { return "跟随当前" }
         return provider.resolvedModel.isEmpty ? provider.kind.displayName : provider.resolvedModel
     }
@@ -246,6 +260,42 @@ struct SettingsConnectionPage: View {
 struct TranslationProviderPicker: View {
     let store: AppStore
 
+    var body: some View {
+        TaskProviderPicker(
+            store: store,
+            navigationTitle: "翻译模型",
+            selectedProviderID: store.settings.translationProviderID
+        ) { providerID in
+            store.settings.translationProviderID = providerID
+        }
+    }
+}
+
+/// 自动世界更新与档案提炼服务商选择器。
+///
+/// 可为后台增量抽取与档案更新单独指定轻量模型，避免消耗写作主模型的推理额度。
+struct NarrativeSyncProviderPicker: View {
+    let store: AppStore
+
+    var body: some View {
+        TaskProviderPicker(
+            store: store,
+            navigationTitle: "世界更新模型",
+            selectedProviderID: store.settings.narrativeSyncProviderID,
+            footerText: "可选用轻量、快速的非思考模型（如 Flash 或 Mini），负责后台世界更新、摘要整理与档案提取。选「跟随当前」时会复用当前写作服务商，并自动关闭思考。"
+        ) { providerID in
+            store.settings.narrativeSyncProviderID = providerID
+        }
+    }
+}
+
+private struct TaskProviderPicker: View {
+    let store: AppStore
+    let navigationTitle: String
+    let selectedProviderID: String
+    var footerText: String? = nil
+    let onSelect: @MainActor (String) -> Void
+
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -253,9 +303,14 @@ struct TranslationProviderPicker: View {
             Section {
                 row(
                     title: "跟随当前AI服务商",
-                    selected: store.settings.translationProviderID.isEmpty
+                    selected: selectedProviderID.isEmpty
                 ) {
                     select("")
+                }
+            } footer: {
+                if let footerText {
+                    Text(footerText)
+                        .font(Theme.metadata)
                 }
             }
 
@@ -268,7 +323,7 @@ struct TranslationProviderPicker: View {
                         title: provider.model.isEmpty
                             ? provider.displayTitle
                             : "\(provider.displayTitle) · \(provider.model)",
-                        selected: store.settings.translationProviderID == provider.id
+                        selected: selectedProviderID == provider.id
                     ) {
                         select(provider.id)
                     }
@@ -279,7 +334,7 @@ struct TranslationProviderPicker: View {
         }
         .listStyle(.insetGrouped)
         .settingsFormColumn()
-        .navigationTitle("翻译模型")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -318,7 +373,7 @@ struct TranslationProviderPicker: View {
 
     @MainActor
     private func select(_ providerID: String) {
-        store.settings.translationProviderID = providerID
+        onSelect(providerID)
         store.saveSettings()
         dismiss()
     }

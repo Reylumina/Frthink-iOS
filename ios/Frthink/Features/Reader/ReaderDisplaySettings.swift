@@ -71,6 +71,7 @@ struct ReaderDisplaySettingsSheet: View {
             Form {
                 Section {
                     AppValueRow(title: "字号", value: "\(Int(fontSize)) pt")
+                        .contentTransition(.numericText())
                     IconSliderRow(
                         value: $fontSize,
                         range: 13...28,
@@ -84,6 +85,7 @@ struct ReaderDisplaySettingsSheet: View {
 
                 Section {
                     AppValueRow(title: "行距", value: String(format: "%.1f", lineHeight))
+                        .contentTransition(.numericText())
                     IconSliderRow(
                         value: $lineHeight,
                         range: 1.2...2.0,
@@ -140,6 +142,8 @@ struct ReaderDisplaySettingsSheet: View {
                     shape.strokeBorder(Theme.separator, lineWidth: 1)
                 }
             }
+            .themeAnimation(Theme.motionSelection, value: fontSize)
+            .themeAnimation(Theme.motionSelection, value: lineHeight)
             .padding(.vertical, Theme.Spacing.xs)
     }
 
@@ -164,8 +168,7 @@ private struct IconSliderRow: View {
                 .font(leadingFont)
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            Slider(value: $value, in: range, step: step)
-                .tint(Theme.accent)
+            TactileSlider(value: $value, in: range, step: step)
             Image(systemName: trailingSymbol)
                 .font(trailingFont)
                 .foregroundStyle(.tertiary)

@@ -194,10 +194,10 @@ enum NarrativeCommitCoordinator {
         maxCount: Int = 5
     ) async throws -> Int {
         guard maxCount > 0 else { return 0 }
-        guard let provider = store.settings.activeProvider else {
+        guard let provider = store.narrativeSyncProvider else {
             throw LLMError.notConfigured
         }
-        let client = try store.clientForActiveProvider()
+        let client = try store.clientForNarrativeSync()
 
         var workspace = session.ensureNarrativeWorkspace(
             settingsCorpusLibraries: store.settings.corpusLibraries
@@ -321,8 +321,8 @@ enum NarrativeCommitCoordinator {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
 
-            guard let provider = store.settings.activeProvider,
-                  let client = try? store.clientForActiveProvider(),
+            guard let provider = store.narrativeSyncProvider,
+                  let client = try? store.clientForNarrativeSync(),
                   let currentWorkspace = session.narrativeWorkspace,
                   currentWorkspace.storyGraph.nodes[nodeID] != nil
             else {
@@ -346,7 +346,7 @@ enum NarrativeCommitCoordinator {
                 )
             } catch {
                 guard !Task.isCancelled, !error.isLLMCancellation else { return }
-                store.toast = "后台设定同步失败，可稍后在设定核查中重试"
+                store.toast = "后台世界更新失败，可稍后在世界核查中重试"
             }
         }
         syncTasks[projectID] = (token: taskToken, task: task)
@@ -383,6 +383,7 @@ enum NarrativeCommitCoordinator {
             stream: false,
             temperature: deltaExtractionTemperature,
             maxTokens: max(provider.maxTokens, 2_048),
+            thinking: false,
             failOnLength: true
         )
 
@@ -475,6 +476,7 @@ enum NarrativeCommitCoordinator {
             stream: false,
             temperature: deltaExtractionTemperature,
             maxTokens: min(max(provider.maxTokens, 512), 1_024),
+            thinking: false,
             failOnLength: false
         )
         if let raw = try? await client.complete(request) {

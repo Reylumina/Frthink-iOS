@@ -221,9 +221,14 @@ struct ProviderEditorView: View {
                     Text(String(format: "%.2f", draft.temperature))
                         .font(Theme.numeric)
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 }
-                Slider(value: $draft.temperature, in: 0...2, step: 0.05)
-                    .tint(Theme.accent)
+                TactileSlider(
+                    value: $draft.temperature,
+                    in: 0...2,
+                    step: 0.05,
+                    showTicks: false
+                )
             }
         } header: {
             AppSectionHeader(title: "生成")

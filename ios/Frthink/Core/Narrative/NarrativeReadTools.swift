@@ -47,9 +47,9 @@ enum NarrativeReadTools {
         ),
         LLMToolDefinition(
             name: readEntityPageName,
-            description: "按 ID、名称或别名读取离场角色、地点、物件或设定的完整独立档案与关联事实。",
+            description: "按 ID、名称或别名读取离场人物、地点、物件或世界观的完整档案与关联事实。",
             parametersJSON: """
-            {"type":"object","properties":{"entity_id":{"type":"string","description":"实体 ID、姓名或别名"},"section":{"type":"string","description":"可选节标题筛选，例如 声音档案 / 行为底线 / 当前事实"}},"required":["entity_id"]}
+            {"type":"object","properties":{"entity_id":{"type":"string","description":"实体 ID、姓名或别名"},"section":{"type":"string","description":"可选节标题筛选，如：声音档案、行为底线、核心规则与例外、当前事实"}},"required":["entity_id"]}
             """
         ),
         LLMToolDefinition(

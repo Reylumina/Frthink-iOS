@@ -1,4 +1,4 @@
-// 设定档案列表页：按人物、地点、物件、设定分组直出，支持搜索、筛选、手动增删改与正文提取。
+// 档案列表页：按人物、地点、物件、世界观分组展示，支持搜索、筛选、手动增删改与正文提取。
 
 import Foundation
 import SwiftUI
@@ -62,7 +62,7 @@ struct EntityPagesView: View {
             } else {
                 entityList
                     .searchable(text: $searchText, prompt: "搜索名称、别名或摘要")
-                    .navigationTitle("设定档案")
+                    .navigationTitle("档案")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { standaloneToolbar }
             }
@@ -75,14 +75,14 @@ struct EntityPagesView: View {
             )
         }
         .deleteConfirmationDialog(
-            { "删除设定「\($0.name)」？" },
+            { "删除档案「\($0.name)」？" },
             item: $pendingDeletePage
         ) { target in
             session.deleteEntityPage(
                 id: target.id,
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
-            store.toast = "已删除设定"
+            store.toast = "已删除档案"
         }
         .task(id: session.narrativeRevision) {
             reloadState()
@@ -112,7 +112,7 @@ struct EntityPagesView: View {
         List {
             if isExtracting {
                 Section {
-                    AppStatusLine(kind: .progress, text: "正在从正文提取设定…")
+                    AppStatusLine(kind: .progress, text: "正在从正文提取档案…")
                 }
             }
             entitiesSections
@@ -150,17 +150,17 @@ struct EntityPagesView: View {
             .accessibilityLabel("按分类筛选")
 
             Menu {
-                Button("新建设定", systemImage: "plus") {
+                Button("新建档案", systemImage: "plus") {
                     showingCreateSheet = true
                 }
-                Button("从正文提取设定", systemImage: "arrow.clockwise") {
+                Button("从正文提取档案", systemImage: "arrow.clockwise") {
                     extractTrigger &+= 1
                 }
                 .disabled(isExtracting || !hasManuscriptContent)
             } label: {
                 Image(systemName: "plus")
             }
-            .accessibilityLabel("添加设定")
+            .accessibilityLabel("添加档案")
         }
     }
 
@@ -173,6 +173,7 @@ struct EntityPagesView: View {
             guard !query.isEmpty else { return true }
             return page.name.lowercased().contains(query)
                 || page.aliases.contains(where: { $0.lowercased().contains(query) })
+                || page.triggerKeywords.contains(where: { $0.lowercased().contains(query) })
                 || page.summary.lowercased().contains(query)
                 || page.identity.lowercased().contains(query)
         }
@@ -244,27 +245,27 @@ struct EntityPagesView: View {
         if !cleanSearch.isEmpty {
             InlineEmptyState(
                 symbol: "magnifyingglass",
-                message: "没有匹配的设定。"
+                message: "没有匹配的档案。"
             )
         } else if activeSelectedKind != nil {
             InlineEmptyState(
                 symbol: "line.3.horizontal.decrease.circle",
-                message: "当前分类下暂无设定。",
+                message: "当前分类下暂无档案。",
                 actionTitle: "显示全部",
                 action: { setSelectedKind(nil) }
             )
         } else if hasManuscriptContent {
             InlineEmptyState(
                 symbol: "person.2.crop.square.stack",
-                message: "暂无设定档案，可从正文提取或手动新建。",
+                message: "暂无档案，可从正文提取或手动新建。",
                 actionTitle: "从正文提取",
                 action: { extractTrigger &+= 1 }
             )
         } else {
             InlineEmptyState(
                 symbol: "person.2.crop.square.stack",
-                message: "暂无设定档案。",
-                actionTitle: "新建设定",
+                message: "暂无档案。",
+                actionTitle: "新建档案",
                 action: { showingCreateSheet = true }
             )
         }
@@ -293,9 +294,9 @@ struct EntityPagesView: View {
                 targetKind: activeSelectedKind
             )
             if result.added == 0 && result.updated == 0 {
-                store.toast = "未发现新的设定变更"
+                store.toast = "未发现新的档案变更"
             } else {
-                store.toast = "已更新设定：新增 \(result.added) 项，更新 \(result.updated) 项"
+                store.toast = "已更新档案：新增 \(result.added) 项，更新 \(result.updated) 项"
             }
         } catch {
             guard !Task.isCancelled, !error.isLLMCancellation else { return }
@@ -309,13 +310,19 @@ struct EntityPagesView: View {
         let cleanSummary = page.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanIdentity = page.identity.trimmingCharacters(in: .whitespacesAndNewlines)
         let previewText = cleanSummary.isEmpty ? cleanIdentity : cleanSummary
-        let countsText = nonZeroCountsSummary(facts: factCount, beliefs: beliefCount)
+        let countsText = nonZeroCountsSummary(
+            facts: factCount,
+            beliefs: page.kind == .character || beliefCount > 0 ? beliefCount : 0
+        )
 
         return VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             HStack(spacing: Theme.Spacing.s) {
                 Text(page.name)
                     .font(Theme.labelEmphasis)
                     .foregroundStyle(.primary)
+                if page.kind == .lore, page.activationMode == .always {
+                    StatusPill(text: "常驻", tone: .accent)
+                }
                 if !page.enabled {
                     StatusPill(text: "已停用", tone: .neutral)
                 }

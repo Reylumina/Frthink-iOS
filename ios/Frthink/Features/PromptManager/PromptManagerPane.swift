@@ -1,7 +1,7 @@
-// 提示词集成管理器：技能、全局预设、去 AI 味规则、项目补充指令四类可编辑指令。
+// 全局写作基准：管理跨书通用的技能、全局预设与去 AI 味规则。
 //
 // 列表仅提供入口与开关；详细内容推入二级页面编辑，
-// 预览调用 `PromptComposer`，与实际发送内容保持一致。
+// 预览调用 `PromptIntegration`，与实际发送内容保持一致。
 
 import SwiftUI
 
@@ -12,9 +12,6 @@ struct PromptManagerPane: View {
     @State private var skillRoute: SkillRoute?
     @State private var showingPreview = false
     @State private var pendingDelete: Skill?
-    @State private var pickedProjectID: String?
-    /// 从设置页进入时无现成会话；在 `.task` 中按所选书项目异步读取，避免在 body 中执行磁盘 I/O。
-    @State private var resolvedSession: ProjectSession?
 
     /// 技能编辑页的导航路由：新建操作固定生成单个空白技能并确定 ID，避免导航跳转时重复求值导致 ID 变动。
     private enum SkillRoute: Hashable {
@@ -33,8 +30,8 @@ struct PromptManagerPane: View {
 
     private var previewBlocks: [PromptBlock] {
         PromptIntegration.blocks(
-            projectID: resolvedSession?.project.id ?? "",
-            assistantSupplement: resolvedSession?.payload.assistantSupplement ?? "",
+            projectID: session?.project.id ?? "",
+            assistantSupplement: session?.payload.assistantSupplement ?? "",
             globalPreset: store.settings.globalPreset,
             skills: skills,
             aiFlavorRules: store.settings.aiFlavorRules
@@ -45,7 +42,6 @@ struct PromptManagerPane: View {
         List {
             skillsSection
             presetSection
-            projectSupplementSection
             previewSection
         }
         .listStyle(.insetGrouped)
@@ -53,7 +49,7 @@ struct PromptManagerPane: View {
         .groupedPageBackground()
         .keyboardDismissOnScroll()
         .settingsFormColumn()
-        .navigationTitle("提示词集成管理器")
+        .navigationTitle("全局写作基准")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -65,17 +61,8 @@ struct PromptManagerPane: View {
                 .accessibilityLabel("新建技能")
             }
         }
-        .onAppear {
-            if pickedProjectID == nil, session == nil {
-                pickedProjectID = store.activeProjects.first?.id
-            }
-        }
-        .task(id: pickedProjectID) {
-            await loadResolvedSession()
-        }
         .onDisappear {
             store.saveSettings()
-            resolvedSession?.scheduleSave()
         }
         .navigationDestination(item: $skillRoute) { route in
             switch route {
@@ -225,86 +212,6 @@ struct PromptManagerPane: View {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未填写" : "已填写"
     }
 
-    // MARK: - 项目补充指令
-
-    private var projectSupplementSection: some View {
-        Section {
-            if session == nil {
-                if store.activeProjects.isEmpty {
-                    InlineEmptyState(
-                        symbol: "books.vertical",
-                        message: "还没有书项目"
-                    )
-                } else {
-                    projectPickerRow
-                }
-            }
-
-            if let resolved = resolvedSession {
-                NavigationLink {
-                    SettingsTextEditorPage(
-                        title: "补充指令",
-                        text: resolved.payload.assistantSupplement,
-                        placeholder: "补充指令"
-                    ) { text in
-                        guard resolved.payload.assistantSupplement != text else { return }
-                        resolved.payload.assistantSupplement = text
-                        resolved.scheduleSave()
-                    }
-                } label: {
-                    SettingsLabelRow(
-                        title: "补充指令",
-                        detail: filledLabel(resolved.payload.assistantSupplement)
-                    )
-                }
-            } else if session == nil, !store.activeProjects.isEmpty {
-                AppStatusLine(kind: .progress, text: "正在打开书稿…")
-            }
-        } header: {
-            AppSectionHeader(title: "项目补充指令")
-        }
-    }
-
-    private var projectPickerRow: some View {
-        Menu {
-            ForEach(store.activeProjects) { project in
-                Button {
-                    pickedProjectID = project.id
-                } label: {
-                    if project.id == pickedProjectID {
-                        Label(project.title, systemImage: "checkmark")
-                    } else {
-                        Text(project.title)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: Theme.Spacing.s) {
-                Text("书项目")
-                    .font(Theme.label)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: Theme.Spacing.s)
-                Text(pickedProjectTitle)
-                    .font(Theme.label)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(Rectangle())
-            .frame(minHeight: Theme.Layout.rowContentHeight)
-        }
-    }
-
-    private var pickedProjectTitle: String {
-        guard let id = pickedProjectID,
-              let project = store.activeProjects.first(where: { $0.id == id })
-        else { return "选择书项目" }
-        return project.title
-    }
-
     // MARK: - 预览
 
     private var previewSection: some View {
@@ -325,30 +232,6 @@ struct PromptManagerPane: View {
         } header: {
             AppSectionHeader(title: "最终提示词预览")
         }
-    }
-
-    // MARK: - 加载与保存
-
-    @MainActor
-    private func loadResolvedSession() async {
-        if let session {
-            resolvedSession = session
-            return
-        }
-        guard let id = pickedProjectID,
-              let project = store.activeProjects.first(where: { $0.id == id })
-        else {
-            resolvedSession = nil
-            return
-        }
-        if let cached = store.cachedSession(for: id) {
-            resolvedSession = cached
-            return
-        }
-        resolvedSession = nil
-        let loaded = await store.openSessionAsync(for: project)
-        guard !Task.isCancelled, pickedProjectID == id else { return }
-        resolvedSession = loaded
     }
 
     private func skillEnabledBinding(_ skill: Skill) -> Binding<Bool> {

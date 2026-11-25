@@ -28,16 +28,18 @@ struct SettingsModelResponsePage: View {
                         Text(String(format: "%.2f", temperature))
                             .font(Theme.numeric)
                             .foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                     }
-                    Slider(
+                    TactileSlider(
                         value: $temperature,
                         in: 0...2,
                         step: 0.05,
+                        showTicks: false,
+                        hapticsEnabled: store.settings.hapticsEnabled,
                         onEditingChanged: { editing in
                             if !editing { commitTemperature() }
                         }
                     )
-                    .tint(Theme.accent)
                 }
                 .padding(.vertical, 2)
 
@@ -215,16 +217,17 @@ struct SettingsAppearanceSection: View {
                     Text("\(Int(fontSize)) pt")
                         .font(Theme.numeric)
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                 }
-                Slider(
+                TactileSlider(
                     value: $fontSize,
                     in: 13...28,
                     step: 1,
+                    hapticsEnabled: store.settings.hapticsEnabled,
                     onEditingChanged: { editing in
                         if !editing { commitFontSize() }
                     }
                 )
-                .tint(Theme.accent)
             }
             .padding(.vertical, 2)
 
@@ -235,6 +238,7 @@ struct SettingsAppearanceSection: View {
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .themeAnimation(Theme.motionSelection, value: fontSize)
                     .accessibilityLabel("正文预览，\(Int(fontSize)) 点")
             }
             .padding(.vertical, 2)
@@ -306,9 +310,10 @@ struct TokenSliderRow: View {
                 Text(displayValue)
                     .font(Theme.numeric)
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
             }
 
-            Slider(
+            TactileSlider(
                 value: indexBinding,
                 in: 0...Double(max(values.count - 1, 1)),
                 step: 1,
@@ -316,9 +321,8 @@ struct TokenSliderRow: View {
                     if !editing { onCommit?() }
                 }
             )
-                .tint(Theme.accent)
-                .accessibilityLabel(title)
-                .accessibilityValue(displayValue)
+            .accessibilityLabel(title)
+            .accessibilityValue(displayValue)
 
             HStack {
                 Text(label(for: values.first ?? 0))

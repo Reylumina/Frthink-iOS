@@ -1,5 +1,5 @@
-// 设定核查页：排查角色认知冲突、档案过长、缺少依据的记录与久未回收的伏笔，
-// 支持逐条确认（同步事实／保留信息差／跳转编辑／忽略）与仅针对安全项的一键整理。
+// 世界核查页：排查角色认知冲突、档案冗长、缺少依据的记录与久未回收的伏笔，
+// 支持逐条确认（同步事实、保留信息差、跳转编辑或忽略）及安全项一键整理。
 
 import Foundation
 import SwiftUI
@@ -52,7 +52,7 @@ struct DreamingAuditView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .groupedPageBackground()
-        .navigationTitle("设定核查")
+        .navigationTitle("世界核查")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: "\(session.narrativeRevision)-\(auditTrigger)") {
             dismissedIDs = NarrativeViewSupport.dismissedAuditFindingIDs(for: session.project.id)
@@ -74,7 +74,7 @@ struct DreamingAuditView: View {
                 auditTrigger &+= 1
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
-                    Text(isAuditing ? "正在核查设定与伏笔…" : "重新核查")
+                    Text(isAuditing ? "正在核查档案与伏笔…" : "重新核查")
                     if isAuditing {
                         Spacer(minLength: 0)
                         ProgressView()
@@ -89,7 +89,7 @@ struct DreamingAuditView: View {
                     Task { await flushPendingSyncs() }
                 } label: {
                     HStack(spacing: Theme.Spacing.s) {
-                        Text(isFlushingPending ? "正在补抽待同步正文…" : "补抽待同步正文（\(pendingSyncCount) 幕）")
+                        Text(isFlushingPending ? "正在补抽待更新正文…" : "补抽待更新正文（\(pendingSyncCount) 幕）")
                         if isFlushingPending {
                             Spacer(minLength: 0)
                             ProgressView()
@@ -133,7 +133,7 @@ struct DreamingAuditView: View {
     private var summaryText: String {
         let visible = visibleFindings
         if visible.isEmpty {
-            return "未发现待处理的设定冲突或伏笔问题。"
+            return "未发现待处理的档案冲突或伏笔问题。"
         }
         return "待处理 \(visible.count) 项，可逐条确认或执行安全整理。"
     }
@@ -221,7 +221,7 @@ struct DreamingAuditView: View {
             case .entityPageBloat:
                 if let liveState, NarrativeViewSupport.isAutoSafeCleanable(finding, in: liveState) {
                     Button("精简档案") {
-                        applyCleanup(findings: [finding], toastMessage: "已精简设定档案")
+                        applyCleanup(findings: [finding], toastMessage: "已精简档案")
                     }
                     .tint(Theme.accent)
                 }

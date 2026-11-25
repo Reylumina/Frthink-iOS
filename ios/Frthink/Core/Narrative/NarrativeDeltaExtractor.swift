@@ -53,12 +53,12 @@ enum NarrativeDeltaExtractor {
         let systemPrompt = """
         你是一个冷静、只记录已发生事实的叙事状态抽取器。
         给定一段刚刚采纳落盘的小说正文，以及当前已知实体列表和未决伏笔列表，请只抽取这段正文里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
-        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"scene_card":""}
+        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"scene_card":""}
         硬性约束：
         1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化与伏笔状态迁移。
-        2. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确名字的重要实体（龙套路人无需收录）。
+        2. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确名字的重要实体（龙套路人无需收录），并严格区分四类：`character`（人物）、`location`（物理地点）、`artifact`（可持有物件）、`lore`（世界观体系、势力、规则或历史概念；`trigger_keywords` 填正文中能带出该词条的关键词，不要把戏外作者写作规范归入 `lore`）。
         3. 每条 new_entities、facts 和 beliefs 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
-        4. attribute 优先使用 location / possession / condition / relation / goal / personality / lore / status。
+        4. facts 的 `attribute` 按实体类型选用：`character` 用 location、possession、condition、relation、goal、status；`location` 用 layout、atmosphere、access、status；`artifact` 用 owner、location、capability、cost、status；`lore` 用 rule、faction、history、exception、status。
         5. 若本段没有任何需要记录的状态变化，对应数组留空即可。
         """
 
@@ -326,6 +326,10 @@ enum NarrativeDeltaExtractor {
             let identity = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["identity", "role", "summary"])
             let aliases = NarrativeEntityExtractor.parseStringArray(item["aliases"])
                 .filter { $0.lowercased() != lowerName }
+            let triggerKeywords = NarrativeEntityExtractor.parseStringArray(
+                item["trigger_keywords"] ?? item["triggerKeywords"] ?? item["keywords"]
+            )
+            .filter { $0.lowercased() != lowerName }
 
             let entityID = "auto_\(kind.rawValue)_\(SummaryKey.sha256Hex(name).prefix(8))"
             guard !knownIDs.contains(entityID) else { continue }
@@ -341,6 +345,7 @@ enum NarrativeDeltaExtractor {
                     kind: kind,
                     name: name,
                     aliases: aliases,
+                    triggerKeywords: triggerKeywords,
                     identity: identity,
                     enabled: true,
                     updatedAt: now

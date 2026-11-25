@@ -358,13 +358,22 @@ enum NarrativeStateReducer {
             }
             existing.kind = incoming.kind
             existing.aliases = deduplicatedStrings(existing.aliases + incoming.aliases)
+            existing.triggerKeywords = deduplicatedStrings(
+                existing.triggerKeywords + incoming.triggerKeywords
+            )
+            if existing.kind == .lore, incoming.activationMode == .always {
+                existing.activationMode = .always
+            } else if existing.kind != .lore {
+                existing.activationMode = .mentioned
+            }
             if !incoming.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 existing.summary = incoming.summary
             }
             if !incoming.identity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 existing.identity = incoming.identity
             }
-            if !incoming.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if existing.kind == .character,
+               !incoming.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 existing.voiceProfile = incoming.voiceProfile
             }
             existing.hardBoundaries = deduplicatedStrings(
@@ -390,6 +399,13 @@ enum NarrativeStateReducer {
         for incoming in replacements where !incoming.id.isEmpty {
             var clean = incoming
             clean.aliases = deduplicatedStrings(incoming.aliases)
+            clean.triggerKeywords = deduplicatedStrings(incoming.triggerKeywords)
+            if clean.kind != .lore {
+                clean.activationMode = .mentioned
+            }
+            if clean.kind != .character {
+                clean.voiceProfile = ""
+            }
             clean.hardBoundaries = deduplicatedStrings(incoming.hardBoundaries)
             clean.conflictWarnings = deduplicatedStrings(incoming.conflictWarnings)
             state.entityPages[clean.id] = clean

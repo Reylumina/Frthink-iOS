@@ -31,20 +31,21 @@ enum NarrativePyramidConsolidator {
     }
 
     static func buildSceneRollupMessages(cards: [String]) -> [LLMMessage] {
-        let system = """
-        你是一个精准的小说剧情压缩助手。请将多条连续的场拍记录合并为一条紧凑、客观的阶段摘要（不超过 120 字），保留核心事件因果、关键地点与人物关系变化，只输出纯文本单句或两句，不要加项目符号或前缀。
-        """
-        let user = cards.enumerated().map { idx, text in
-            "\(idx + 1). \(text)"
-        }.joined(separator: "\n")
-        return [.system(system), .user(user)]
+        buildRollupMessages(
+            system: "将连续的场拍记录合并为一条紧凑、客观的阶段摘要（不超过 120 字），保留核心事件因果、关键地点与人物关系变化。只输出纯文本一两句话，不要加项目符号或前缀。",
+            items: cards
+        )
     }
 
     static func buildVolumeRollupMessages(plotlines: [String]) -> [LLMMessage] {
-        let system = """
-        你是一个精准的小说卷纲压缩助手。请将以下按时间推进的阶段情节合并为一条全书卷纲脉络（不超过 150 字），保留核心主线推进与主要矛盾转折，只输出纯文本，不要加项目符号或多余解释。
-        """
-        let user = plotlines.enumerated().map { idx, text in
+        buildRollupMessages(
+            system: "将按时间推进的阶段情节合并为一条全书卷纲脉络（不超过 150 字），保留核心主线推进与主要矛盾转折。只输出纯文本，不要加项目符号或多余解释。",
+            items: plotlines
+        )
+    }
+
+    private static func buildRollupMessages(system: String, items: [String]) -> [LLMMessage] {
+        let user = items.enumerated().map { idx, text in
             "\(idx + 1). \(text)"
         }.joined(separator: "\n")
         return [.system(system), .user(user)]

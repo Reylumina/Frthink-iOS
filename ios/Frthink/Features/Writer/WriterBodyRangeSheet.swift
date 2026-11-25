@@ -53,13 +53,13 @@ struct WriterBodyRangeSheet: View {
             Form {
                 Section {
                     AppValueRow(title: "发送范围", value: currentLabel)
+                        .contentTransition(.numericText())
 
-                    Slider(
+                    TactileSlider(
                         value: indexBinding,
                         in: 0...Double(Self.values.count - 1),
                         step: 1
                     )
-                    .tint(Theme.accent)
                     .accessibilityLabel("正文发送范围")
                     .accessibilityValue(currentLabel)
 

@@ -1,4 +1,4 @@
-// 规则工作台：统一收纳「仿写模板」（支持文风提炼、富文本预览与编辑）与结构化「写作规则」。
+// 规则工作台：统一收纳「仿写模板」（含文风量化指标、富文本预览与编辑）与结构化「写作规则」。
 
 import Foundation
 import SwiftUI
@@ -16,7 +16,89 @@ enum WorldRuleDraftSync: Equatable {
     }
 }
 
+private enum StyleFingerprintLoader {
+    @MainActor
+    static func load(
+        for session: ProjectSession,
+        fileStore: FileStore
+    ) async -> StyleDistiller.LinguisticFingerprint? {
+        guard session.manuscriptCharacterCount > 0 || session.bodyPageCount > 0 else {
+            return nil
+        }
+        let projectID = session.project.id
+        let canReadByPage = session.canReadByPage
+        let pageCount = session.bodyPageCount
+        let fallbackManuscript = (canReadByPage && pageCount > 0) ? nil : session.manuscript
+
+        return await Task.detached(priority: .utility) {
+            let pages = ProjectSession.loadManuscriptPages(
+                projectID: projectID,
+                canReadByPage: canReadByPage,
+                bodyPageCount: pageCount,
+                fileStore: fileStore,
+                fallbackManuscript: fallbackManuscript
+            )
+            let combined = pages.suffix(6).joined(separator: "\n")
+            guard !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return StyleDistiller.analyzeFingerprint(combined)
+        }.value
+    }
+}
+
+private struct StyleFingerprintBar: View {
+    let fingerprint: StyleDistiller.LinguisticFingerprint
+
+    @ScaledMetric(relativeTo: .body) private var dividerHeight: CGFloat = 28
+
+    private struct Column: Identifiable {
+        let id: String
+        let label: String
+        let value: String
+    }
+
+    private var columns: [Column] {
+        let avgSent = String(format: "%.1f 字", fingerprint.averageSentenceLength)
+        let shortPct = "\(Int((fingerprint.shortSentenceRatio * 100).rounded()))%"
+        let dlgPct = "\(Int((fingerprint.dialogueRatio * 100).rounded()))%"
+        let avgPara = "\(Int(fingerprint.averageParagraphLength.rounded())) 字"
+        return [
+            Column(id: "avgSent", label: "句均", value: avgSent),
+            Column(id: "shortPct", label: "短句", value: shortPct),
+            Column(id: "dlgPct", label: "对白", value: dlgPct),
+            Column(id: "avgPara", label: "段均", value: avgPara),
+        ]
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(columns.enumerated()), id: \.element.id) { index, column in
+                if index > 0 {
+                    Divider()
+                        .frame(height: dividerHeight)
+                }
+                VStack(spacing: Theme.Spacing.xs) {
+                    Text(column.value)
+                        .font(Theme.labelEmphasis.monospacedDigit())
+                        .foregroundStyle(.primary)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(column.label)
+                        .font(Theme.metadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.s)
+    }
+}
+
 struct WorldRulesHubView: View {
+    @Environment(AppStore.self) private var store
     @Bindable var session: ProjectSession
     var isDistillingStyle: Bool = false
     var isActionDisabled: Bool = false
@@ -24,9 +106,15 @@ struct WorldRulesHubView: View {
     var onDistillStyle: (_ refreshTemplate: Bool) -> Void
 
     @State private var showingAddRuleSheet = false
+    @State private var fingerprint: StyleDistiller.LinguisticFingerprint?
+    @State private var errorMessage: String?
 
     private var trimmedTemplate: String {
         session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedSupplement: String {
+        session.payload.assistantSupplement.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var hasManuscriptContent: Bool {
@@ -36,6 +124,9 @@ struct WorldRulesHubView: View {
     var body: some View {
         List {
             styleTemplateSection
+            if !trimmedSupplement.isEmpty {
+                legacySupplementSection
+            }
             AuthorDirectivesListContent(
                 session: session,
                 showingAddSheet: $showingAddRuleSheet
@@ -50,6 +141,10 @@ struct WorldRulesHubView: View {
         .onChange(of: externalCreateTrigger) { _, _ in
             showingAddRuleSheet = true
         }
+        .task(id: "\(session.project.id)-\(session.manuscriptCharacterCount)-\(session.bodyPageCount)") {
+            fingerprint = await StyleFingerprintLoader.load(for: session, fileStore: store.fileStore)
+        }
+        .narrativeErrorAlert($errorMessage)
     }
 
     private var styleTemplateSection: some View {
@@ -75,6 +170,12 @@ struct WorldRulesHubView: View {
                                 .font(Theme.numericSmall)
                                 .foregroundStyle(.secondary)
                         }
+                        if let fingerprint {
+                            Text(compactMetricsLine(for: fingerprint))
+                                .font(Theme.numericSmall)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
                         Text(previewText(for: template))
                             .font(Theme.labelSmall)
                             .foregroundStyle(.secondary)
@@ -85,6 +186,13 @@ struct WorldRulesHubView: View {
             } else {
                 if isDistillingStyle {
                     AppStatusLine(kind: .progress, text: "正在提炼文风…")
+                }
+
+                if let fingerprint {
+                    Text(compactMetricsLine(for: fingerprint))
+                        .font(Theme.numericSmall)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, Theme.Spacing.xs)
                 }
 
                 Button {
@@ -108,6 +216,65 @@ struct WorldRulesHubView: View {
         }
     }
 
+    private var legacySupplementSection: some View {
+        Section {
+            NavigationLink {
+                SettingsTextEditorPage(
+                    title: "原项目补充指令",
+                    text: session.payload.assistantSupplement,
+                    placeholder: "补充指令"
+                ) { text in
+                    guard session.payload.assistantSupplement != text else { return }
+                    session.payload.assistantSupplement = text
+                    session.scheduleSave()
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text("原项目补充指令")
+                        .font(Theme.label)
+                        .foregroundStyle(.primary)
+                    Text(trimmedSupplement)
+                        .font(Theme.labelSmall)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(.vertical, Theme.Spacing.xs)
+            }
+
+            Button("转为写作规则") {
+                migrateSupplementToDirective()
+            }
+        } header: {
+            AppSectionHeader(title: "待迁移指令")
+        }
+    }
+
+    private func migrateSupplementToDirective() {
+        let rule = trimmedSupplement
+        guard !rule.isEmpty else { return }
+        let directive = AuthorDirective(verbatimRule: rule, scope: .global)
+        do {
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(directiveAdds: [directive]),
+                summary: "迁入原补充指令",
+                settingsCorpusLibraries: store.settings.corpusLibraries
+            )
+            session.payload.assistantSupplement = ""
+            session.scheduleSave()
+            store.toast = "已转为写作规则"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func compactMetricsLine(for fp: StyleDistiller.LinguisticFingerprint) -> String {
+        let avgSent = String(format: "%.1f", fp.averageSentenceLength)
+        let shortPct = Int((fp.shortSentenceRatio * 100).rounded())
+        let dlgPct = Int((fp.dialogueRatio * 100).rounded())
+        let avgPara = Int(fp.averageParagraphLength.rounded())
+        return "句均 \(avgSent) 字 · 短句 \(shortPct)% · 对白 \(dlgPct)% · 段均 \(avgPara) 字"
+    }
+
     private func previewText(for markdown: String) -> String {
         let lines = markdown
             .split(whereSeparator: \.isNewline)
@@ -128,6 +295,7 @@ struct StyleTemplateDetailView: View {
     var onDistillStyle: () -> Void
 
     @State private var isEditing = false
+    @State private var fingerprint: StyleDistiller.LinguisticFingerprint?
 
     private var template: String {
         session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -138,6 +306,17 @@ struct StyleTemplateDetailView: View {
             if isDistillingStyle {
                 Section {
                     AppStatusLine(kind: .progress, text: "正在提炼文风…")
+                }
+            }
+
+            if let fingerprint {
+                Section {
+                    StyleFingerprintBar(fingerprint: fingerprint)
+                } header: {
+                    AppSectionHeader(title: "文风数据")
+                } footer: {
+                    Text("短句按 10 字及以下统计，样本取自正文末尾。")
+                        .font(Theme.metadata)
                 }
             }
 
@@ -186,6 +365,9 @@ struct StyleTemplateDetailView: View {
         }
         .navigationDestination(isPresented: $isEditing) {
             StyleTemplateEditorPage(session: session)
+        }
+        .task(id: "\(session.project.id)-\(session.manuscriptCharacterCount)-\(session.bodyPageCount)") {
+            fingerprint = await StyleFingerprintLoader.load(for: session, fileStore: store.fileStore)
         }
     }
 }

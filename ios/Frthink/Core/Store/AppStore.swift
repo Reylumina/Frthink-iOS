@@ -526,6 +526,19 @@ final class AppStore {
         try client(for: translationProvider)
     }
 
+    /// 自动世界更新与档案提取使用的供应方；未单独指定时复用当前供应方。
+    var narrativeSyncProvider: ProviderSetting? {
+        if !settings.narrativeSyncProviderID.isEmpty,
+           let picked = settings.providers.first(where: { $0.id == settings.narrativeSyncProviderID }) {
+            return picked
+        }
+        return settings.activeProvider
+    }
+
+    func clientForNarrativeSync() throws -> any LLMClient {
+        try client(for: narrativeSyncProvider)
+    }
+
     func recordTokenUsage(_ tokens: Int) {
         guard tokens > 0 else { return }
         settings.tokenUsageTotal += tokens

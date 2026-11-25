@@ -454,14 +454,74 @@ enum EntityKind: String, Codable, Hashable {
     case location
     case artifact
     case lore
+
+    var displayName: String {
+        switch self {
+        case .character: return "人物"
+        case .location: return "地点"
+        case .artifact: return "物件"
+        case .lore: return "世界观"
+        }
+    }
+
+    var identityLabel: String {
+        switch self {
+        case .character: return "身份"
+        case .location: return "位置与类型"
+        case .artifact: return "归属与类型"
+        case .lore: return "所属类别"
+        }
+    }
+
+    var summaryLabel: String {
+        switch self {
+        case .character: return "性格与处境"
+        case .location: return "布局与氛围"
+        case .artifact: return "外观与用途"
+        case .lore: return "词条内容"
+        }
+    }
+
+    var boundariesLabel: String {
+        switch self {
+        case .character: return "行为底线"
+        case .location: return "空间限制"
+        case .artifact: return "使用代价与限制"
+        case .lore: return "核心规则与例外"
+        }
+    }
+
+    var markdownOverviewHeading: String {
+        switch self {
+        case .character: return "身份与摘要"
+        case .location: return "布局与氛围"
+        case .artifact: return "归属与用途"
+        case .lore: return "词条概述"
+        }
+    }
 }
 
-/// 按单个实体拆分的设定档案页，支持独立读写与按需按页加载。
+/// 档案进入上下文的方式：正文或指令提及时带入，或固定写入静态前缀。
+enum EntityActivationMode: String, Codable, Hashable, CaseIterable {
+    case mentioned
+    case always
+
+    var displayName: String {
+        switch self {
+        case .mentioned: return "按关键词触发"
+        case .always: return "始终生效"
+        }
+    }
+}
+
+/// 按单个实体拆分的独立档案页，支持按需按页读写。
 struct EntityPage: Identifiable, Codable, Hashable {
     var id: String
     var kind: EntityKind
     var name: String
     var aliases: [String]
+    var triggerKeywords: [String]
+    var activationMode: EntityActivationMode
     var summary: String
     var identity: String
     var voiceProfile: String
@@ -476,6 +536,8 @@ struct EntityPage: Identifiable, Codable, Hashable {
         kind: EntityKind,
         name: String,
         aliases: [String] = [],
+        triggerKeywords: [String] = [],
+        activationMode: EntityActivationMode = .mentioned,
         summary: String = "",
         identity: String = "",
         voiceProfile: String = "",
@@ -489,6 +551,8 @@ struct EntityPage: Identifiable, Codable, Hashable {
         self.kind = kind
         self.name = name
         self.aliases = aliases
+        self.triggerKeywords = triggerKeywords
+        self.activationMode = kind == .lore ? activationMode : .mentioned
         self.summary = summary
         self.identity = identity
         self.voiceProfile = voiceProfile
@@ -505,6 +569,9 @@ struct EntityPage: Identifiable, Codable, Hashable {
         kind = (try? c.decode(EntityKind.self, forKey: .kind)) ?? .character
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         aliases = (try? c.decode([String].self, forKey: .aliases)) ?? []
+        triggerKeywords = (try? c.decode([String].self, forKey: .triggerKeywords)) ?? []
+        let decodedActivation = (try? c.decode(EntityActivationMode.self, forKey: .activationMode)) ?? .mentioned
+        activationMode = kind == .lore ? decodedActivation : .mentioned
         summary = (try? c.decode(String.self, forKey: .summary)) ?? ""
         identity = (try? c.decode(String.self, forKey: .identity)) ?? ""
         voiceProfile = (try? c.decode(String.self, forKey: .voiceProfile)) ?? ""
@@ -521,8 +588,18 @@ struct EntityPage: Identifiable, Codable, Hashable {
         beliefs: [EpistemicBelief]
     ) -> String {
         var sections: [String] = ["# \(name)"]
+        var metaLines: [String] = []
         if !aliases.isEmpty {
-            sections.append("- 别名：\(aliases.joined(separator: "、"))")
+            metaLines.append("- 别名：\(aliases.joined(separator: "、"))")
+        }
+        if kind == .lore {
+            metaLines.append("- 生效方式：\(activationMode.displayName)")
+        }
+        if !triggerKeywords.isEmpty {
+            metaLines.append("- 触发词：\(triggerKeywords.joined(separator: "、"))")
+        }
+        if !metaLines.isEmpty {
+            sections.append(metaLines.joined(separator: "\n"))
         }
 
         var overview: [String] = []
@@ -533,17 +610,17 @@ struct EntityPage: Identifiable, Codable, Hashable {
             overview.append(cleanSummary)
         }
         if !overview.isEmpty {
-            sections.append("## 身份与摘要\n" + overview.joined(separator: "\n"))
+            sections.append("## \(kind.markdownOverviewHeading)\n" + overview.joined(separator: "\n"))
         }
 
         let cleanVoice = voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanVoice.isEmpty {
+        if kind == .character, !cleanVoice.isEmpty {
             sections.append("## 声音档案\n" + cleanVoice)
         }
 
         if !hardBoundaries.isEmpty {
             let lines = hardBoundaries.map { "- \($0)" }
-            sections.append("## 行为底线\n" + lines.joined(separator: "\n"))
+            sections.append("## \(kind.boundariesLabel)\n" + lines.joined(separator: "\n"))
         }
 
         let ownFacts = resolvedFacts
@@ -568,7 +645,7 @@ struct EntityPage: Identifiable, Codable, Hashable {
                 if lhs.topic != rhs.topic { return lhs.topic < rhs.topic }
                 return lhs.id < rhs.id
             }
-        if !ownBeliefs.isEmpty {
+        if (kind == .character || !ownBeliefs.isEmpty), !ownBeliefs.isEmpty {
             let lines = ownBeliefs.map { belief in
                 let secretTag = belief.knowsSecret ? "已掌握" : "尚未知晓/存在盲区"
                 return "- [\(secretTag)] \(belief.topic)：\(belief.believedTruth)"

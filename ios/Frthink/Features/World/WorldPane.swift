@@ -1,4 +1,4 @@
-// 「世界」工作台：档案 / 剧情 / 规则三段式直出界面，及顶栏动作与环境态设定核查入口。
+// 「世界」工作台：档案、剧情与规则三栏直出界面，以及顶栏动作和世界核查入口。
 
 import Foundation
 import SwiftUI
@@ -129,6 +129,7 @@ struct WorldPane: View {
                 )
             }
         }
+        .themeAnimation(Theme.motionSelection, value: tab)
         .groupedPageBackground()
         .sensoryFeedback(.selection, trigger: tab) { _, _ in store.settings.hapticsEnabled }
         .toolbar { worldToolbar }
@@ -201,17 +202,17 @@ struct WorldPane: View {
 
     private var entityAddMenu: some View {
         Menu {
-            Button("新建设定", systemImage: "plus") {
+            Button("新建档案", systemImage: "plus") {
                 entityCreateTrigger &+= 1
             }
-            Button("从正文提取设定", systemImage: "arrow.clockwise") {
+            Button("从正文提取档案", systemImage: "arrow.clockwise") {
                 entityExtractTrigger &+= 1
             }
             .disabled(!hasManuscriptContent)
         } label: {
             Image(systemName: "plus")
         }
-        .accessibilityLabel("添加设定")
+        .accessibilityLabel("添加档案")
     }
 
     private var plotAddMenu: some View {
@@ -267,7 +268,7 @@ struct WorldPane: View {
                 Image(systemName: "checkmark.shield")
             }
         }
-        .accessibilityLabel(pendingAuditCount > 0 ? "设定核查，\(pendingAuditCount) 项待处理" : "设定核查")
+        .accessibilityLabel(pendingAuditCount > 0 ? "世界核查，\(pendingAuditCount) 项待处理" : "世界核查")
     }
 
     // MARK: - 状态条

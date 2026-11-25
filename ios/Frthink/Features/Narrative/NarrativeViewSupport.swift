@@ -33,12 +33,7 @@ enum NarrativeViewSupport {
     }
 
     static func entityKindLabel(_ kind: EntityKind) -> String {
-        switch kind {
-        case .character: return "人物"
-        case .location: return "地点"
-        case .artifact: return "物件"
-        case .lore: return "设定"
-        }
+        kind.displayName
     }
 
     enum EntityRefreshError: LocalizedError {
@@ -48,9 +43,9 @@ enum NarrativeViewSupport {
         var errorDescription: String? {
             switch self {
             case .emptyManuscript:
-                return "当前正文为空，暂无可用于提取设定的内容。"
+                return "当前正文为空，暂无可用于提取档案的内容。"
             case .emptyInput:
-                return "当前文本为空，暂无可用于提取设定的内容。"
+                return "当前文本为空，暂无可用于提取档案的内容。"
             }
         }
     }
@@ -99,10 +94,10 @@ enum NarrativeViewSupport {
         guard !trimmed.isEmpty else {
             throw EntityRefreshError.emptyInput
         }
-        guard let provider = store.settings.activeProvider else {
+        guard let provider = store.narrativeSyncProvider else {
             throw LLMError.notConfigured
         }
-        let client = try store.clientForActiveProvider()
+        let client = try store.clientForNarrativeSync()
         let workspace = session.ensureNarrativeWorkspace(
             settingsCorpusLibraries: store.settings.corpusLibraries
         )
@@ -120,6 +115,7 @@ enum NarrativeViewSupport {
             stream: false,
             temperature: 0.2,
             maxTokens: max(provider.maxTokens, 2_048),
+            thinking: false,
             failOnLength: true
         )
         let raw = try await client.complete(request)
@@ -133,7 +129,7 @@ enum NarrativeViewSupport {
         if !parsed.upserts.isEmpty {
             _ = try session.commitNarrativeDelta(
                 PlotNodeDelta(entityPageReplacements: parsed.upserts),
-                summary: "更新设定档案",
+                summary: "更新档案",
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
         }

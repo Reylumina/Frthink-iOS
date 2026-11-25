@@ -12,8 +12,8 @@ struct SettingsPromptPage: View {
         Form {
             promptIntegrationSection
             writingBehaviorSection
-            worldBuildSection
             conversationSummarySection
+            advancedTemplatesSection
         }
         .settingsFormColumn()
         .navigationTitle("提示词与资料")
@@ -28,7 +28,7 @@ struct SettingsPromptPage: View {
                 PromptManagerPane(store: store)
             } label: {
                 SettingsLabelRow(
-                    title: "技能与预设",
+                    title: "全局预设与技能",
                     detail: "\(store.settings.skills.count) 个技能"
                 )
             }
@@ -46,7 +46,7 @@ struct SettingsPromptPage: View {
                 )
             }
         } header: {
-            AppSectionHeader(title: "提示词集成")
+            AppSectionHeader(title: "全局写作基准")
         }
     }
 
@@ -54,7 +54,7 @@ struct SettingsPromptPage: View {
         Section {
             Toggle("启用语料收集库", isOn: settingsBinding(store, \.corpusEnabled))
             Toggle("默认流式输出", isOn: settingsBinding(store, \.streamByDefault))
-            Toggle("采纳正文后自动更新设定与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
+            Toggle("采纳正文后自动更新世界与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
             Toggle("动态按需激活人物与事件卡", isOn: settingsBinding(store, \.dynamicContextActivation))
             Toggle("预填充卡 CoT（DeepSeek / 兼容推理网关）", isOn: settingsBinding(store, \.prefillCoT))
             Picker("历史思维链回灌", selection: settingsBinding(store, \.reasoningContextPolicy)) {
@@ -65,21 +65,6 @@ struct SettingsPromptPage: View {
             .pickerStyle(.menu)
         } header: {
             AppSectionHeader(title: "写作行为")
-        }
-    }
-
-    private var worldBuildSection: some View {
-        Section {
-            NavigationLink {
-                WorldBuildEditorPage(store: store)
-            } label: {
-                SettingsLabelRow(
-                    title: "世界建立要求",
-                    detail: worldBuildDetail
-                )
-            }
-        } header: {
-            AppSectionHeader(title: "世界建立")
         }
     }
 
@@ -97,13 +82,28 @@ struct SettingsPromptPage: View {
                 }
                 .pickerStyle(.menu)
             }
+        } header: {
+            AppSectionHeader(title: "对话总结")
+        }
+    }
+
+    private var advancedTemplatesSection: some View {
+        Section {
+            NavigationLink {
+                WorldBuildEditorPage(store: store)
+            } label: {
+                SettingsLabelRow(
+                    title: "世界建立要求",
+                    detail: worldBuildDetail
+                )
+            }
             NavigationLink {
                 SettingsLongTermRulesPage(store: store)
             } label: {
                 SettingsLabelRow(title: "长期规则摘要")
             }
         } header: {
-            AppSectionHeader(title: "对话总结")
+            AppSectionHeader(title: "高级任务模板")
         }
     }
 
@@ -226,11 +226,7 @@ struct WorldBuildDefaultSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(text)
-                    .font(Theme.reply)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                MarkdownDocumentView(markdown: text)
                     .padding(Theme.Spacing.l)
             }
             .pageBackground()

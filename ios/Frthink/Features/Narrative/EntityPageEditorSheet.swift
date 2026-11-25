@@ -1,4 +1,4 @@
-// 设定档案新建与编辑浮层：支持全部四类设定（人物、地点、物件、设定）的创建与全字段修改。
+// 档案新建与编辑浮层：支持人物、地点、物件、世界观四类档案的创建与全字段修改。
 
 import Foundation
 import SwiftUI
@@ -14,6 +14,8 @@ struct EntityPageEditorSheet: View {
     @State private var kind: EntityKind
     @State private var name: String
     @State private var aliasesText: String
+    @State private var triggerKeywordsText: String
+    @State private var activationMode: EntityActivationMode
     @State private var identity: String
     @State private var summary: String
     @State private var voiceProfile: String
@@ -33,6 +35,8 @@ struct EntityPageEditorSheet: View {
         _kind = State(initialValue: existingPage?.kind ?? initialKind)
         _name = State(initialValue: existingPage?.name ?? "")
         _aliasesText = State(initialValue: existingPage?.aliases.joined(separator: "、") ?? "")
+        _triggerKeywordsText = State(initialValue: existingPage?.triggerKeywords.joined(separator: "、") ?? "")
+        _activationMode = State(initialValue: existingPage?.activationMode ?? .mentioned)
         _identity = State(initialValue: existingPage?.identity ?? "")
         _summary = State(initialValue: existingPage?.summary ?? "")
         _voiceProfile = State(initialValue: existingPage?.voiceProfile ?? "")
@@ -53,7 +57,7 @@ struct EntityPageEditorSheet: View {
             }
             .scrollContentBackground(.hidden)
             .groupedPageBackground()
-            .navigationTitle(existingPage == nil ? "新建设定" : "编辑设定")
+            .navigationTitle(existingPage == nil ? "新建档案" : "编辑档案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -79,8 +83,21 @@ struct EntityPageEditorSheet: View {
             TextField("名称（必填）", text: $name)
                 .font(Theme.label)
 
-            TextField("别名（用顿号或逗号分隔）", text: $aliasesText)
+            TextField(aliasesPlaceholder, text: $aliasesText)
                 .font(Theme.labelSmall)
+
+            if kind == .lore {
+                Picker("生效方式", selection: $activationMode) {
+                    Text(EntityActivationMode.mentioned.displayName).tag(EntityActivationMode.mentioned)
+                    Text(EntityActivationMode.always.displayName).tag(EntityActivationMode.always)
+                }
+            }
+
+            if kind != .lore || activationMode == .mentioned {
+                TextField("触发词（正文中出现即带入，用顿号或逗号分隔）", text: $triggerKeywordsText, axis: .vertical)
+                    .font(Theme.labelSmall)
+                    .lineLimit(1...3)
+            }
 
             Toggle("参与生成上下文", isOn: $enabled)
         } header: {
@@ -90,11 +107,11 @@ struct EntityPageEditorSheet: View {
 
     private var detailSection: some View {
         Section {
-            TextField("身份定位（如：主人公、城南酒馆、传家玉佩）", text: $identity, axis: .vertical)
+            TextField(identityPlaceholder, text: $identity, axis: .vertical)
                 .font(Theme.label)
                 .lineLimit(1...4)
 
-            TextField("设定摘要（核心特征与现状）", text: $summary, axis: .vertical)
+            TextField(summaryPlaceholder, text: $summary, axis: .vertical)
                 .font(Theme.labelSmall)
                 .lineLimit(2...6)
 
@@ -104,17 +121,61 @@ struct EntityPageEditorSheet: View {
                     .lineLimit(1...4)
             }
         } header: {
-            AppSectionHeader(title: "详细设定")
+            AppSectionHeader(title: detailSectionTitle)
         }
     }
 
     private var boundariesSection: some View {
         Section {
-            TextField("每行一条不可违背的底线或规则…", text: $hardBoundariesText, axis: .vertical)
+            TextField(boundariesPlaceholder, text: $hardBoundariesText, axis: .vertical)
                 .font(Theme.labelSmall)
                 .lineLimit(2...6)
         } header: {
-            AppSectionHeader(title: "行为底线 / 约束（可选）")
+            AppSectionHeader(title: boundariesSectionTitle)
+        }
+    }
+
+    private var aliasesPlaceholder: String {
+        kind == .lore ? "同义词或别称（用顿号或逗号分隔）" : "别名（用顿号或逗号分隔）"
+    }
+
+    private var identityPlaceholder: String {
+        switch kind {
+        case .character: return "身份（如：主角、北境校尉）"
+        case .location: return "位置与类型（如：城南酒馆、地宫二层）"
+        case .artifact: return "归属与类型（如：林昭佩剑、南诏秘匣）"
+        case .lore: return "所属类别（如：修炼体系、宗门制度、货币）"
+        }
+    }
+
+    private var summaryPlaceholder: String {
+        switch kind {
+        case .character: return "性格与近期处境"
+        case .location: return "空间布局、环境氛围与出入口"
+        case .artifact: return "外观、用途与当前状态"
+        case .lore: return "词条内容与具体机制"
+        }
+    }
+
+    private var detailSectionTitle: String {
+        switch kind {
+        case .character: return "人物设定"
+        case .location: return "空间与环境"
+        case .artifact: return "器物与用途"
+        case .lore: return "世界观内容"
+        }
+    }
+
+    private var boundariesSectionTitle: String {
+        "\(kind.boundariesLabel)（选填）"
+    }
+
+    private var boundariesPlaceholder: String {
+        switch kind {
+        case .character: return "每行一条，写角色绝不会违背的底线"
+        case .location: return "每行一条，写地形、出入口或准入限制"
+        case .artifact: return "每行一条，写触发条件、代价或损耗限制"
+        case .lore: return "每行一条，写世界内不可违背的铁律或例外"
         }
     }
 
@@ -123,6 +184,7 @@ struct EntityPageEditorSheet: View {
         guard !cleanName.isEmpty else { return }
 
         let aliases = NarrativeEntityExtractor.parseStringArray(aliasesText)
+        let triggerKeywords = NarrativeEntityExtractor.parseStringArray(triggerKeywordsText)
 
         let boundaries = hardBoundariesText
             .split(whereSeparator: \.isNewline)
@@ -137,6 +199,8 @@ struct EntityPageEditorSheet: View {
             kind: kind,
             name: cleanName,
             aliases: aliases,
+            triggerKeywords: triggerKeywords,
+            activationMode: kind == .lore ? activationMode : .mentioned,
             summary: summary.trimmingCharacters(in: .whitespacesAndNewlines),
             identity: identity.trimmingCharacters(in: .whitespacesAndNewlines),
             voiceProfile: kind == .character ? voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines) : "",
@@ -151,7 +215,7 @@ struct EntityPageEditorSheet: View {
             isReplacement: true,
             settingsCorpusLibraries: store.settings.corpusLibraries
         )
-        store.toast = existingPage == nil ? "已添加设定" : "已保存修改"
+        store.toast = existingPage == nil ? "已添加档案" : "已保存修改"
         dismiss()
     }
 }

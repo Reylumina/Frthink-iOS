@@ -536,6 +536,8 @@ struct AppSettings: Codable {
     var tokenUsageTotal: Int
     /// 「翻译模型」：翻译任务单独指定一个供应方；空串表示复用当前供应方。
     var translationProviderID: String
+    /// 「世界更新模型」：为自动世界更新与档案提取单独指定供应方，留空则复用当前供应方。
+    var narrativeSyncProviderID: String
     /// 「摘要模型」：空串表示复用当前供应方的模型。
     var summaryModel: String
     /// 「世界建立」：改写 P18「世界建立要求」的正文；空串表示用出厂值。
@@ -570,6 +572,7 @@ struct AppSettings: Codable {
         hapticsEnabled: Bool = true,
         tokenUsageTotal: Int = 0,
         translationProviderID: String = "",
+        narrativeSyncProviderID: String = "",
         summaryModel: String = "",
         worldBuildInstruction: String = "",
         plotOutlineInstruction: String = "",
@@ -608,6 +611,7 @@ struct AppSettings: Codable {
         self.hapticsEnabled = hapticsEnabled
         self.tokenUsageTotal = tokenUsageTotal
         self.translationProviderID = translationProviderID
+        self.narrativeSyncProviderID = narrativeSyncProviderID
         self.summaryModel = summaryModel
         self.worldBuildInstruction = worldBuildInstruction
         self.plotOutlineInstruction = plotOutlineInstruction
@@ -679,6 +683,8 @@ struct AppSettings: Codable {
         tokenUsageTotal = (try? c.decode(Int.self, forKey: .tokenUsageTotal)) ?? 0
         translationProviderID =
             (try? c.decode(String.self, forKey: .translationProviderID)) ?? ""
+        narrativeSyncProviderID =
+            (try? c.decode(String.self, forKey: .narrativeSyncProviderID)) ?? ""
         summaryModel = (try? c.decode(String.self, forKey: .summaryModel)) ?? ""
         worldBuildInstruction =
             (try? c.decode(String.self, forKey: .worldBuildInstruction)) ?? ""

@@ -37,7 +37,8 @@ enum NarrativeContextOrchestrator {
         universes: [UniverseEntry],
         preservedStyle: PreservedStyleDistillation,
         bookIndexLines: [String],
-        volumeOneLiners: [String] = []
+        volumeOneLiners: [String] = [],
+        alwaysOnLorePages: [EntityPage] = []
     ) -> String {
         var sections: [String] = []
 
@@ -100,6 +101,32 @@ enum NarrativeContextOrchestrator {
             }
         }
 
+        let activeAlwaysLore = alwaysOnLorePages
+            .filter { $0.enabled && $0.kind == .lore && $0.activationMode == .always }
+            .sorted { lhs, rhs in
+                if lhs.name != rhs.name { return lhs.name < rhs.name }
+                return lhs.id < rhs.id
+            }
+        if !activeAlwaysLore.isEmpty {
+            var loreLines = ["【常驻世界观】"]
+            for page in activeAlwaysLore.prefix(24) {
+                var loreParts: [String] = []
+                let cleanIdentity = page.identity.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleanIdentity.isEmpty { loreParts.append("类别：\(cleanIdentity)") }
+                let cleanSummary = page.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleanSummary.isEmpty { loreParts.append(cleanSummary) }
+                if !page.hardBoundaries.isEmpty {
+                    loreParts.append("规则：\(page.hardBoundaries.joined(separator: "；"))")
+                }
+                if loreParts.isEmpty {
+                    loreLines.append("- \(page.name)")
+                } else {
+                    loreLines.append("- \(page.name)：" + loreParts.joined(separator: "｜"))
+                }
+            }
+            sections.append(loreLines.joined(separator: "\n"))
+        }
+
         let cleanVolumes = volumeOneLiners
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -124,8 +151,8 @@ enum NarrativeContextOrchestrator {
         causalAncestors: [String] = [],
         plannedBeat: String? = nil
     ) -> (block: String, onStageEntityIDs: Set<String>) {
-        let enabledPages = state.entityPages.values
-            .filter(\.enabled)
+        let tier2Candidates = state.entityPages.values
+            .filter { $0.enabled && !($0.kind == .lore && $0.activationMode == .always) }
             .sorted { lhs, rhs in
                 if lhs.kind.rawValue != rhs.kind.rawValue {
                     return lhs.kind.rawValue < rhs.kind.rawValue
@@ -137,10 +164,11 @@ enum NarrativeContextOrchestrator {
         var selectedPages: [EntityPage] = []
         var onStageIDs = Set<String>()
 
-        for page in enabledPages {
+        for page in tier2Candidates {
             let matchesScan = !scanText.isEmpty && (
                 scanText.localizedCaseInsensitiveContains(page.name)
                     || page.aliases.contains { !$0.isEmpty && scanText.localizedCaseInsensitiveContains($0) }
+                    || page.triggerKeywords.contains { !$0.isEmpty && scanText.localizedCaseInsensitiveContains($0) }
             )
             let isPOV = povCharacterID != nil && page.id == povCharacterID
             if matchesScan || isPOV {
@@ -151,7 +179,7 @@ enum NarrativeContextOrchestrator {
 
         // 无显式命中时，仅在角色总量极小（不超过 3 人）时兜底全放入，避免大量离场角色稀释注意力。
         if selectedPages.isEmpty {
-            let characters = enabledPages.filter { $0.kind == .character }
+            let characters = tier2Candidates.filter { $0.kind == .character }
             if characters.count <= 3 {
                 selectedPages = characters
                 onStageIDs = Set(characters.map(\.id))
@@ -160,40 +188,20 @@ enum NarrativeContextOrchestrator {
 
         var parts: [String] = []
 
-        if !selectedPages.isEmpty {
-            var entityLines = ["【当前在场实体与私有认知边界】"]
-            for page in selectedPages {
-                var detailParts: [String] = []
-                let cleanIdentity = page.identity.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleanIdentity.isEmpty { detailParts.append("设定：\(cleanIdentity)") }
-                let cleanVoice = page.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleanVoice.isEmpty { detailParts.append("声线：\(cleanVoice)") }
-                if !page.hardBoundaries.isEmpty {
-                    detailParts.append("底线：\(page.hardBoundaries.joined(separator: "；"))")
-                }
-                let facts = state.facts(for: page.id)
-                for fact in facts {
-                    detailParts.append("\(fact.attribute)=\(fact.value)")
-                }
-
-                // POV 隔离：若指定了视角角色，仅暴露该视角角色自身认知，屏蔽其他角色未公开的秘密认知。
-                let visibleBeliefs = state.beliefs(for: page.id).filter { belief in
-                    guard let povCharacterID else { return true }
-                    return page.id == povCharacterID || !belief.knowsSecret
-                }
-                for belief in visibleBeliefs {
-                    let prefix = belief.knowsSecret ? "已知[\(belief.topic)]" : "盲区/误认为[\(belief.topic)]"
-                    detailParts.append("\(prefix)：\(belief.believedTruth)")
-                }
-
-                let header = "- \(page.name)（\(page.kind.rawValue)/\(page.id)）"
-                if detailParts.isEmpty {
-                    entityLines.append(header)
-                } else {
-                    entityLines.append("\(header)：" + detailParts.joined(separator: "｜"))
-                }
+        let kindSections: [(EntityKind, String)] = [
+            (.character, "【当前在场人物与认知边界】"),
+            (.location, "【当前地点】"),
+            (.artifact, "【当前物件】"),
+            (.lore, "【相关世界观】"),
+        ]
+        for (kind, headerTitle) in kindSections {
+            let group = selectedPages.filter { $0.kind == kind }
+            guard !group.isEmpty else { continue }
+            var lines = [headerTitle]
+            for page in group {
+                lines.append(formatQueryConePageLine(for: page, state: state, povCharacterID: povCharacterID))
             }
-            parts.append(entityLines.joined(separator: "\n"))
+            parts.append(lines.joined(separator: "\n"))
         }
 
         let readyThreads = state.threads.values
@@ -203,7 +211,7 @@ enum NarrativeContextOrchestrator {
         let oneHopOffStagePages = collectOneHopRelatedOffStagePages(
             selectedPages: selectedPages,
             onStageIDs: onStageIDs,
-            enabledPages: enabledPages,
+            enabledPages: tier2Candidates,
             readyThreads: readyThreads,
             state: state
         )
@@ -268,6 +276,72 @@ enum NarrativeContextOrchestrator {
         }
 
         return (parts.joined(separator: "\n\n"), onStageIDs)
+    }
+
+    private static func formatQueryConePageLine(
+        for page: EntityPage,
+        state: MaterializedNarrativeState,
+        povCharacterID: String?
+    ) -> String {
+        let identityLabel: String
+        let summaryLabel: String?
+        let boundaryLabel: String
+        switch page.kind {
+        case .character:
+            identityLabel = "身份"
+            summaryLabel = nil
+            boundaryLabel = "底线"
+        case .location:
+            identityLabel = "定位"
+            summaryLabel = "布局与氛围"
+            boundaryLabel = "空间限制"
+        case .artifact:
+            identityLabel = "归属"
+            summaryLabel = "用途与状态"
+            boundaryLabel = "代价与限制"
+        case .lore:
+            identityLabel = "类别"
+            summaryLabel = "说明"
+            boundaryLabel = "规则与例外"
+        }
+
+        var detailParts: [String] = []
+        let cleanIdentity = page.identity.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanIdentity.isEmpty {
+            detailParts.append("\(identityLabel)：\(cleanIdentity)")
+        }
+        if let summaryLabel {
+            let cleanSummary = page.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanSummary.isEmpty, cleanSummary != cleanIdentity {
+                detailParts.append("\(summaryLabel)：\(cleanSummary)")
+            }
+        }
+        if page.kind == .character {
+            let cleanVoice = page.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanVoice.isEmpty {
+                detailParts.append("声线：\(cleanVoice)")
+            }
+        }
+        if !page.hardBoundaries.isEmpty {
+            detailParts.append("\(boundaryLabel)：\(page.hardBoundaries.joined(separator: "；"))")
+        }
+        for fact in state.facts(for: page.id) {
+            detailParts.append("\(fact.attribute)=\(fact.value)")
+        }
+        if page.kind == .character {
+            // POV 隔离：若指定了视角角色，仅暴露该视角角色自身认知，屏蔽其他角色未公开的秘密认知。
+            let visibleBeliefs = state.beliefs(for: page.id).filter { belief in
+                guard let povCharacterID else { return true }
+                return page.id == povCharacterID || !belief.knowsSecret
+            }
+            for belief in visibleBeliefs {
+                let prefix = belief.knowsSecret ? "已知[\(belief.topic)]" : "盲区/误认为[\(belief.topic)]"
+                detailParts.append("\(prefix)：\(belief.believedTruth)")
+            }
+        }
+
+        let header = "- \(page.name)（\(page.kind.rawValue)/\(page.id)）"
+        return detailParts.isEmpty ? header : "\(header)：" + detailParts.joined(separator: "｜")
     }
 
     /// 从就绪伏笔的关联实体及在场实体的关系事实出发，做纯符号一跳扩展，补全最多 2 个离场关键实体。
@@ -363,6 +437,9 @@ enum NarrativeContextOrchestrator {
 
         let enabledUniverses = settings.enabledUniverseEntries(for: enabledUniverseEntryIDs)
         let bookIndex = state.bookIndexLines(maxLines: 200)
+        let alwaysOnLorePages = state.entityPages.values.filter {
+            $0.enabled && $0.kind == .lore && $0.activationMode == .always
+        }
         let frozenSystemPrefix = buildFrozenSystemPrefix(
             globalPreset: settings.globalPreset,
             aiFlavorRules: settings.aiFlavorRules,
@@ -370,7 +447,8 @@ enum NarrativeContextOrchestrator {
             universes: enabledUniverses,
             preservedStyle: workspace.preservedStyle,
             bookIndexLines: bookIndex,
-            volumeOneLiners: state.pyramid.volumeOneLiners
+            volumeOneLiners: state.pyramid.volumeOneLiners,
+            alwaysOnLorePages: alwaysOnLorePages
         )
 
         // 按继续写作锚点执行严格因果截断，杜绝锚点之后的正文进入下文工作区。
