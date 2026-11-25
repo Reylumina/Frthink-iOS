@@ -79,10 +79,12 @@ enum NarrativeCommitCoordinator {
             )
         }
 
+        let leadingRange = (text as NSString).range(of: trimmed)
+        let leadingUTF16 = leadingRange.location == NSNotFound ? 0 : leadingRange.location
         let lintReport = ProseStyleLinter.lint(
             trimmed,
             pageIndex: startPage,
-            baseUTF16Offset: safeOffset
+            baseUTF16Offset: safeOffset + leadingUTF16
         )
         workspace.latestStyleLint = lintReport
 
@@ -371,11 +373,17 @@ enum NarrativeCommitCoordinator {
         let activeThreads = currentState.threads.values
             .filter { !$0.state.isTerminal }
             .sorted { $0.id < $1.id }
+        let activeEvents = Array(
+            currentState.sortedEpisodicEvents()
+                .filter { $0.status == .ongoing }
+                .prefix(8)
+        )
 
         let messages = NarrativeDeltaExtractor.buildExtractionMessages(
             excerpt: excerpt,
             knownEntities: knownEntities,
-            activeThreads: activeThreads
+            activeThreads: activeThreads,
+            activeEvents: activeEvents
         )
         let request = LLMRequest(
             model: provider.resolvedModel,
@@ -395,14 +403,21 @@ enum NarrativeCommitCoordinator {
         else {
             return
         }
-        let latestKnownEntities = latestWorkspace.currentState().entityPages.values.sorted { $0.id < $1.id }
+        let latestState = latestWorkspace.currentState()
+        let latestKnownEntities = latestState.entityPages.values.sorted { $0.id < $1.id }
+        let latestActiveEvents = Array(
+            latestState.sortedEpisodicEvents()
+                .filter { $0.status == .ongoing }
+                .prefix(8)
+        )
         let extraction = try NarrativeDeltaExtractor.parseDelta(
             from: raw,
             excerpt: excerpt,
             nodeID: nodeID,
             pageIndex: pageIndex,
             baseUTF16Offset: baseUTF16Offset,
-            knownEntities: latestKnownEntities
+            knownEntities: latestKnownEntities,
+            activeEvents: latestActiveEvents
         )
 
         var updatedDelta = extraction.delta
@@ -499,8 +514,7 @@ enum NarrativeCommitCoordinator {
         if session.canReadByPage,
            let pageText = session.bodyPage(anchor.pageIndex),
            !pageText.isEmpty {
-            let pageSize = max(1, FileStore.bodyPageSize)
-            let pageBase = anchor.pageIndex * pageSize
+            let pageBase = session.pageStartOffset(for: anchor.pageIndex)
             let nsPage = pageText as NSString
             let localStart = anchor.utf16Start - pageBase
             if localStart >= 0,

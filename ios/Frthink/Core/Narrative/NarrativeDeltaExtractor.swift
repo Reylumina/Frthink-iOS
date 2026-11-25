@@ -48,18 +48,22 @@ enum NarrativeDeltaExtractor {
     static func buildExtractionMessages(
         excerpt: String,
         knownEntities: [EntityPage],
-        activeThreads: [ProspectiveThread]
+        activeThreads: [ProspectiveThread],
+        activeEvents: [EpisodicEvent] = []
     ) -> [LLMMessage] {
         let systemPrompt = """
         你是一个冷静、只记录已发生事实的叙事状态抽取器。
         给定一段刚刚采纳落盘的小说正文，以及当前已知实体列表和未决伏笔列表，请只抽取这段正文里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
-        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"scene_card":""}
+        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"events":[{"id":"","title":"","arc":"","scene":"","participants":[""],"cause":"","development":"","outcome":"","status":"ongoing|resolved","quote":""}],"scene_card":""}
         硬性约束：
-        1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化与伏笔状态迁移。
+        1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化、关键事件与伏笔状态迁移。
         2. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确名字的重要实体（龙套路人无需收录），并严格区分四类：`character`（人物）、`location`（物理地点）、`artifact`（可持有物件）、`lore`（世界观体系、势力、规则或历史概念；`trigger_keywords` 填正文中能带出该词条的关键词，不要把戏外作者写作规范归入 `lore`）。
-        3. 每条 new_entities、facts 和 beliefs 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
-        4. facts 的 `attribute` 按实体类型选用：`character` 用 location、possession、condition、relation、goal、status；`location` 用 layout、atmosphere、access、status；`artifact` 用 owner、location、capability、cost、status；`lore` 用 rule、faction、history、exception、status。
-        5. 若本段没有任何需要记录的状态变化，对应数组留空即可。
+        3. 每条 new_entities、facts 和 events 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
+        4. beliefs 仅在正文明确写出关键秘密、隐瞒或戏剧性信息差且能附上原文逐字短引用 quote 时才记录，禁止臆测常规认知状态。
+        5. facts 的 `attribute` 按实体类型选用：`character` 用 location、possession、condition、goal、status，人际关系按对象写成 `relation:<对象名>`（如 `relation:沈清秋`），避免不同对象互相覆盖；`location` 用 layout、atmosphere、access、status；`artifact` 用 owner、location、capability、cost、status；`lore` 用 rule、faction、history、exception、status。
+        6. events 仅在正文发生、推进或完结实质性剧情事件时填写；同一场景的连续推进必须复用「进行中关键事件」的 id（更新 development / outcome），不要把同一场戏拆成多条碎片事件；完结时将 status 设为 resolved。
+        7. threads 推进或收束时优先复用已知 thread_id；若一次性伏笔（once）在本段正文已经彻底兑现或解答，直接输出 action 为 satisfied。
+        8. 若本段没有任何需要记录的状态变化，对应数组留空即可。
         """
 
         var lines: [String] = []
@@ -75,7 +79,27 @@ enum NarrativeDeltaExtractor {
         if !activeThreads.isEmpty {
             lines.append("【当前未决伏笔（优先复用 thread_id）】")
             for thread in activeThreads.sorted(by: { $0.id < $1.id }) {
-                lines.append("- \(thread.id) [\(thread.state.rawValue)]: \(thread.goal)")
+                var detailParts: [String] = []
+                let cue = thread.activationCue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cue.isEmpty {
+                    detailParts.append("触发线索：\(cue)")
+                }
+                if let quoteRaw = thread.evidenceAnchors.last?.quote.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !quoteRaw.isEmpty {
+                    let clipped = quoteRaw.count > 40 ? String(quoteRaw.prefix(40)) + "…" : quoteRaw
+                    detailParts.append("埋设依据：\(clipped)")
+                }
+                let suffix = detailParts.isEmpty ? "" : "（" + detailParts.joined(separator: "；") + "）"
+                lines.append("- \(thread.id) [\(thread.state.rawValue)/\(thread.recurrence.rawValue)]: \(thread.goal)\(suffix)")
+            }
+        }
+        if !activeEvents.isEmpty {
+            lines.append("【进行中关键事件（延续或完结时优先复用 id）】")
+            for event in activeEvents.sorted(by: { $0.id < $1.id }) {
+                let arcPart = event.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? ""
+                    : " [\(event.arcTitle)]"
+                lines.append("- \(event.id)\(arcPart): \(event.title)")
             }
         }
         lines.append("【本段新增正文】")
@@ -94,6 +118,7 @@ enum NarrativeDeltaExtractor {
         pageIndex: Int = 0,
         baseUTF16Offset: Int = 0,
         knownEntities: [EntityPage] = [],
+        activeEvents: [EpisodicEvent] = [],
         now: Date = Date()
     ) throws -> NarrativeDeltaExtractionResult {
         guard let jsonString = NarrativeJSONScanner.extractFirstJSONObject(from: raw) else {
@@ -117,7 +142,9 @@ enum NarrativeDeltaExtractor {
         let allowedTopKeys: Set<String> = [
             "new_entities", "newEntities",
             "facts", "fact_events", "beliefs", "epistemic_beliefs",
-            "threads", "thread_events", "scene_card", "sceneCard",
+            "threads", "thread_events",
+            "events", "episodic_events", "episodicEvents",
+            "scene_card", "sceneCard",
         ]
         if !object.keys.contains(where: { allowedTopKeys.contains($0) }) && droppedSpeculativeCount == 0 {
             throw NarrativeDeltaParseError.invalidStructure("缺少 facts / beliefs / threads / scene_card 字段")
@@ -185,15 +212,14 @@ enum NarrativeDeltaExtractor {
             }
             let knowsSecret = parseBool(item["knows_secret"]) ?? parseBool(item["knowsSecret"]) ?? false
             let quote = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["quote", "evidence"])
-            let anchor = verifiedAnchor(
+            guard let anchor = verifiedAnchor(
                 quote: quote,
                 in: excerpt,
                 pageIndex: pageIndex,
                 baseUTF16Offset: baseUTF16Offset
-            )
-            let authority: AuthorityRank = anchor != nil ? .canonProseQuote : .inferredByAI
-            if anchor == nil {
-                ungroundedCount += 1
+            ) else {
+                droppedSpeculativeCount += 1
+                continue
             }
             epistemicBeliefs.append(
                 EpistemicBelief(
@@ -202,7 +228,7 @@ enum NarrativeDeltaExtractor {
                     topic: topic,
                     believedTruth: believedTruth,
                     knowsSecret: knowsSecret,
-                    authority: authority,
+                    authority: .canonProseQuote,
                     updatedAtNodeID: nodeID,
                     quoteAnchor: anchor,
                     updatedAt: now
@@ -258,6 +284,18 @@ enum NarrativeDeltaExtractor {
             )
         }
 
+        let episodicEvents = parseEpisodicEvents(
+            from: object,
+            excerpt: excerpt,
+            nodeID: nodeID,
+            pageIndex: pageIndex,
+            baseUTF16Offset: baseUTF16Offset,
+            knownEntities: knownEntities + newEntityPages,
+            activeEvents: activeEvents,
+            now: now,
+            droppedSpeculativeCount: &droppedSpeculativeCount
+        )
+
         let sceneCard = NarrativeJSONScanner.firstNonEmptyString(object, keys: ["scene_card", "sceneCard"])
         let patch: NarrativePyramidPatch? = sceneCard.isEmpty
             ? nil
@@ -268,6 +306,7 @@ enum NarrativeDeltaExtractor {
             factEvents: factEvents,
             epistemicBeliefs: epistemicBeliefs,
             threadEvents: threadEvents,
+            episodicEvents: episodicEvents,
             pyramidPatch: patch
         )
         return NarrativeDeltaExtractionResult(
@@ -353,6 +392,113 @@ enum NarrativeDeltaExtractor {
             )
         }
         return result
+    }
+
+    private static func parseEpisodicEvents(
+        from object: [String: Any],
+        excerpt: String,
+        nodeID: String,
+        pageIndex: Int,
+        baseUTF16Offset: Int,
+        knownEntities: [EntityPage],
+        activeEvents: [EpisodicEvent],
+        now: Date,
+        droppedSpeculativeCount: inout Int
+    ) -> [EpisodicEvent] {
+        let rawEvents = (object["events"] as? [[String: Any]])
+            ?? (object["episodic_events"] as? [[String: Any]])
+            ?? (object["episodicEvents"] as? [[String: Any]])
+            ?? []
+        guard !rawEvents.isEmpty else { return [] }
+
+        var activeEventsByID: [String: EpisodicEvent] = [:]
+        var activeEventsByLowerTitle: [String: EpisodicEvent] = [:]
+        for event in activeEvents {
+            activeEventsByID[event.id] = event
+            let lower = event.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !lower.isEmpty, activeEventsByLowerTitle[lower] == nil {
+                activeEventsByLowerTitle[lower] = event
+            }
+        }
+
+        var entityLookup: [String: String] = [:]
+        for page in knownEntities {
+            entityLookup[page.id.lowercased()] = page.id
+            let lowerName = page.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !lowerName.isEmpty, entityLookup[lowerName] == nil {
+                entityLookup[lowerName] = page.id
+            }
+            for alias in page.aliases {
+                let lowerAlias = alias.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !lowerAlias.isEmpty, entityLookup[lowerAlias] == nil {
+                    entityLookup[lowerAlias] = page.id
+                }
+            }
+        }
+
+        var events: [EpisodicEvent] = []
+        for (idx, item) in rawEvents.enumerated() {
+            let title = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["title", "name"])
+            guard !title.isEmpty else { continue }
+            let rawID = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["id", "event_id", "eventID"])
+            let existing = (!rawID.isEmpty ? activeEventsByID[rawID] : nil)
+                ?? activeEventsByLowerTitle[title.lowercased()]
+
+            let quote = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["quote", "evidence"])
+            let anchor = verifiedAnchor(
+                quote: quote,
+                in: excerpt,
+                pageIndex: pageIndex,
+                baseUTF16Offset: baseUTF16Offset
+            )
+            let matchesTitle = !excerpt.isEmpty && excerpt.localizedCaseInsensitiveContains(title)
+            guard anchor != nil || matchesTitle || existing != nil else {
+                droppedSpeculativeCount += 1
+                continue
+            }
+
+            let arcTitle = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["arc", "arc_title", "arcTitle", "storyline"])
+            let scene = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["scene", "location"])
+            let cause = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["cause", "reason"])
+            let development = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["development", "progress", "detail"])
+            let outcome = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["outcome", "consequence", "result"])
+            let statusRaw = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["status", "state"]).lowercased()
+            let status: EpisodicEventStatus = (statusRaw == "resolved" || statusRaw == "closed" || statusRaw == "ended" || statusRaw == "done")
+                ? .resolved
+                : .ongoing
+
+            let rawParticipants = NarrativeEntityExtractor.parseStringArray(
+                item["participants"] ?? item["characters"] ?? item["participant_entity_ids"] ?? item["participantEntityIDs"]
+            )
+            let participantIDs = rawParticipants.compactMap { token -> String? in
+                let lower = token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !lower.isEmpty else { return nil }
+                return entityLookup[lower]
+            }
+
+            let resolvedID = existing?.id
+                ?? (rawID.isEmpty ? "\(nodeID)_evt_\(idx)_\(SummaryKey.sha256Hex(title).prefix(8))" : rawID)
+            let authority: AuthorityRank = anchor != nil ? .canonProseQuote : .inferredByAI
+
+            events.append(
+                EpisodicEvent(
+                    id: resolvedID,
+                    title: title,
+                    arcTitle: arcTitle,
+                    scene: scene,
+                    participantEntityIDs: participantIDs,
+                    cause: cause,
+                    development: development,
+                    outcome: outcome,
+                    status: status,
+                    authority: authority,
+                    quoteAnchor: anchor,
+                    nodeID: nodeID,
+                    updatedAt: now
+                )
+            )
+        }
+        return events
     }
 
     private static func verifiedAnchor(

@@ -92,12 +92,14 @@ struct WriterMaterialsSheet: View {
 
     private var promptMaterialsSection: some View {
         let activeRuleCount = liveState?.directiveLedger.activeDirectives().count ?? 0
+        let activeStyleTemplate = session.narrativeWorkspace?.preservedStyle.styleTemplate
+            ?? session.payload.world.styleTemplate
         return Section {
             materialLink(
                 title: "仿写模板",
                 symbol: "doc.on.doc",
-                text: session.payload.world.styleTemplate,
-                detailOverride: materialDetail(session.payload.world.styleTemplate),
+                text: activeStyleTemplate,
+                detailOverride: materialDetail(activeStyleTemplate),
                 rendersMarkdown: true
             )
             materialLink(
@@ -105,12 +107,6 @@ struct WriterMaterialsSheet: View {
                 symbol: "shield.lefthalf.filled",
                 text: activeDirectivesText,
                 detailOverride: activeRuleCount == 0 ? "未填写" : "\(activeRuleCount) 条"
-            )
-            materialLink(
-                title: "项目补充指令",
-                symbol: "text.append",
-                text: session.payload.assistantSupplement,
-                detailOverride: materialDetail(session.payload.assistantSupplement)
             )
         } header: {
             AppSectionHeader(title: "会写进提示词")

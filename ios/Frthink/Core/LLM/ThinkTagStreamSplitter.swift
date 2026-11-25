@@ -1,10 +1,6 @@
 import Foundation
 
-/// 流式 `<think>...</think>` 标签剥离状态机。
-///
-/// 支持两种场景：
-/// 1. 末尾挂了未闭合 `<think>` 预填充（`startsInsideThink = true`），模型首段输出直接作为 `.reasoning`，直到 `</think>` 后切回 `.delta`；
-/// 2. 模型在普通文本流中自行输出 `<think>...</think>`，按标签边界自动拆分为 `.reasoning` 与 `.delta`，支持标签被 SSE 分片截断。
+/// 流式 `<think>...</think>` 标签剥离状态机：按标签边界自动拆分为 `.reasoning` 与 `.delta`，支持标签被 SSE 分片截断。
 struct ThinkTagStreamSplitter {
     private static let openTag = "<think>"
     private static let closeTag = "</think>"
@@ -17,11 +13,6 @@ struct ThinkTagStreamSplitter {
     init(startsInsideThink: Bool = false) {
         self.insideThink = startsInsideThink
         self.checkDuplicateOpenTag = startsInsideThink
-    }
-
-    static func startsInsideThink(for messages: [LLMMessage]) -> Bool {
-        guard let last = messages.last, last.role == "assistant" else { return false }
-        return last.content.contains(openTag) && !last.content.contains(closeTag)
     }
 
     mutating func push(_ chunk: String) -> [LLMStreamEvent] {

@@ -492,8 +492,6 @@ struct AppSettings: Codable {
     var reasoningContextPolicy: ReasoningContextPolicy
     /// 是否按注意力/关键词动态激活人物卡与事件卡（含 3 轮 Sticky 黏性）。
     var dynamicContextActivation: Bool
-    /// 是否在非原生思考通道上使用末尾 `assistant` `<think>` 预填充卡 CoT。
-    var prefillCoT: Bool
     /// 技能列表（P04）。启用的每条渲染成 `# <技能名>\n<内容>`。
     var skills: [Skill]
     /// 语料收集库。原版存 `universe-corpus-v1.enc`，库可以嵌套；这里平铺多库。
@@ -587,8 +585,7 @@ struct AppSettings: Codable {
         reinforceStyleAtTail: Bool = true,
         sleepTimeStateSync: Bool = true,
         reasoningContextPolicy: ReasoningContextPolicy = .recentTwo,
-        dynamicContextActivation: Bool = true,
-        prefillCoT: Bool = false
+        dynamicContextActivation: Bool = true
     ) {
         let defaults = providers ?? ProviderKind.selectableCases.map { ProviderSetting(kind: $0) }
         self.providers = defaults
@@ -627,7 +624,6 @@ struct AppSettings: Codable {
         self.sleepTimeStateSync = sleepTimeStateSync
         self.reasoningContextPolicy = reasoningContextPolicy
         self.dynamicContextActivation = dynamicContextActivation
-        self.prefillCoT = prefillCoT
     }
 
     /// 提示词能用的预算：上下文窗口 − 预留输出，再留一成安全空间。
@@ -712,8 +708,6 @@ struct AppSettings: Codable {
             ?? .recentTwo
         dynamicContextActivation =
             (try? c.decode(Bool.self, forKey: .dynamicContextActivation)) ?? true
-        prefillCoT =
-            (try? c.decode(Bool.self, forKey: .prefillCoT)) ?? false
         if activeProviderID.isEmpty, let first = providers.first {
             activeProviderID = first.id
         }

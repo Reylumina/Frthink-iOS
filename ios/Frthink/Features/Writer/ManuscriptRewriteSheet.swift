@@ -13,7 +13,7 @@ struct ManuscriptRewriteSheet: View {
     let selectedText: String
     @Binding var cursor: Int
 
-    @State private var instruction = ""
+    @State private var instruction: String
     @State private var result = ""
     /// 流式增量缓冲区，以约 60ms 间隔批量刷新至结果视图，降低排版开销。
     @State private var streamBuffer = ""
@@ -25,6 +25,20 @@ struct ManuscriptRewriteSheet: View {
     @State private var runID = UUID()
     /// 有草稿或结果时关闭前确认放弃（§5.8）。
     @State private var showDiscardConfirm = false
+
+    init(
+        session: ProjectSession,
+        range: NSRange,
+        selectedText: String,
+        cursor: Binding<Int>,
+        initialInstruction: String = ""
+    ) {
+        self.session = session
+        self.range = range
+        self.selectedText = selectedText
+        self._cursor = cursor
+        self._instruction = State(initialValue: initialInstruction)
+    }
 
     private var trimmedResult: String {
         result.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -188,12 +202,17 @@ struct ManuscriptRewriteSheet: View {
                     throw LLMError.notConfigured
                 }
                 let client = try store.clientForActiveProvider()
+                let rewriteMessages = NarrativeContextOrchestrator.buildRewritePrompt(
+                    workspace: session.narrativeWorkspace,
+                    manuscript: session.manuscript,
+                    range: range,
+                    selection: selectedText,
+                    instruction: instruction,
+                    settings: store.settings
+                )
                 let request = LLMRequest(
                     model: provider.resolvedModel,
-                    messages: [
-                        .system(Self.systemPrompt),
-                        .user(Self.userPrompt(selection: selectedText, instruction: instruction)),
-                    ],
+                    messages: rewriteMessages,
                     stream: true,
                     temperature: provider.temperature,
                     maxTokens: max(1_024, min(provider.maxTokens, 8_192)),
@@ -266,27 +285,19 @@ struct ManuscriptRewriteSheet: View {
 
         let updated = ns.replacingCharacters(in: range, with: replacement)
         session.updateManuscript(updated)
+        if var workspace = session.narrativeWorkspace {
+            workspace.anchorIndex.adjustForEdit(
+                range: range,
+                replacementUTF16Length: (replacement as NSString).length,
+                updatedText: updated,
+                knownEntities: Array(workspace.currentState().entityPages.values)
+            )
+            workspace.latestStyleLint = nil
+            session.noteNarrativeWorkspaceUpdated(workspace)
+        }
         session.noteManuscriptEdited()
         session.saveNow()
         cursor = range.location + (replacement as NSString).length
         dismiss()
-    }
-
-    private static let systemPrompt = """
-    你是中文小说编辑。只改写用户给出的正文片段，严格保留原意、人物、视角、时态和段落结构。只输出改写后的正文，不要解释、不要加引号、不要 Markdown、不要复述要求。
-    """
-
-    private static func userPrompt(selection: String, instruction: String) -> String {
-        let requirement = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        let final = requirement.isEmpty
-            ? "保留原意和人物视角，让文字更自然、更有画面感。"
-            : requirement
-        return """
-        【改写要求】
-        \(final)
-
-        【正文片段】
-        \(selection)
-        """
     }
 }

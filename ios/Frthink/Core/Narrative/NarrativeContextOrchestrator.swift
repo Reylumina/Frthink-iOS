@@ -204,15 +204,49 @@ enum NarrativeContextOrchestrator {
             parts.append(lines.joined(separator: "\n"))
         }
 
-        let readyThreads = state.threads.values
-            .filter { $0.state == .ready }
-            .sorted { lhs, rhs in lhs.id < rhs.id }
+        let scoredReadyThreads = state.threads.values
+            .filter { $0.state == .ready || ($0.state == .enacted && $0.recurrence == .recurring) }
+            .map { thread in
+                (
+                    thread: thread,
+                    score: threadSceneRelevanceScore(thread, onStageIDs: onStageIDs, scanText: scanText)
+                )
+            }
+            .sorted { lhs, rhs in
+                let leftMatched = lhs.score > 0
+                let rightMatched = rhs.score > 0
+                if leftMatched != rightMatched { return leftMatched }
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                if lhs.thread.state != rhs.thread.state { return lhs.thread.state == .ready }
+                if lhs.thread.updatedAt != rhs.thread.updatedAt { return lhs.thread.updatedAt > rhs.thread.updatedAt }
+                return lhs.thread.id < rhs.thread.id
+            }
+        let sceneMatchedReady = scoredReadyThreads.filter { $0.score > 0 }.map(\.thread)
+        let selectedReadyThreads = sceneMatchedReady.isEmpty
+            ? Array(scoredReadyThreads.prefix(2).map(\.thread))
+            : Array(sceneMatchedReady.prefix(3))
+
+        let selectedPendingThreads = state.threads.values
+            .filter { $0.state == .pending && threadActivationCueMatches($0, scanText: scanText) }
+            .map { thread in
+                (
+                    thread: thread,
+                    score: threadSceneRelevanceScore(thread, onStageIDs: onStageIDs, scanText: scanText)
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                if lhs.thread.updatedAt != rhs.thread.updatedAt { return lhs.thread.updatedAt > rhs.thread.updatedAt }
+                return lhs.thread.id < rhs.thread.id
+            }
+            .prefix(2)
+            .map(\.thread)
 
         let oneHopOffStagePages = collectOneHopRelatedOffStagePages(
             selectedPages: selectedPages,
             onStageIDs: onStageIDs,
             enabledPages: tier2Candidates,
-            readyThreads: readyThreads,
+            readyThreads: selectedReadyThreads + selectedPendingThreads,
             state: state
         )
         if !oneHopOffStagePages.isEmpty {
@@ -240,17 +274,20 @@ enum NarrativeContextOrchestrator {
             parts.append(relatedLines.joined(separator: "\n"))
         }
 
-        if !readyThreads.isEmpty {
-            var threadLines = ["【条件已就绪待推进伏笔（Ready）】"]
-            for thread in readyThreads {
-                let cue = thread.activationCue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if cue.isEmpty {
-                    threadLines.append("- [\(thread.id)] \(thread.goal)")
-                } else {
-                    threadLines.append("- [\(thread.id)] \(thread.goal)（触发线索：\(cue)）")
-                }
+        if !selectedReadyThreads.isEmpty {
+            var threadLines = ["【条件已就绪待推进伏笔】"]
+            for thread in selectedReadyThreads {
+                threadLines.append(formattedThreadContextLine(thread))
             }
             parts.append(threadLines.joined(separator: "\n"))
+        }
+
+        if !selectedPendingThreads.isEmpty {
+            var pendingLines = ["【当前场景关联潜伏伏笔（可自然呼应，不必强行收线）】"]
+            for thread in selectedPendingThreads {
+                pendingLines.append(formattedThreadContextLine(thread))
+            }
+            parts.append(pendingLines.joined(separator: "\n"))
         }
 
         if !causalAncestors.isEmpty {
@@ -273,6 +310,14 @@ enum NarrativeContextOrchestrator {
         let recentCards = state.pyramid.recentSceneCards.suffix(3)
         if !recentCards.isEmpty {
             parts.append("【近期场拍卡】\n" + recentCards.map { "- \($0)" }.joined(separator: "\n"))
+        }
+
+        if let eventsBlock = buildEpisodicEventsBlock(
+            state: state,
+            onStageIDs: onStageIDs,
+            scanText: scanText
+        ) {
+            parts.append(eventsBlock)
         }
 
         return (parts.joined(separator: "\n\n"), onStageIDs)
@@ -366,11 +411,17 @@ enum NarrativeContextOrchestrator {
         }
 
         let relationValues: [String] = selectedPages.flatMap { page in
-            state.facts(for: page.id)
-                .filter { fact in
-                    fact.attribute == WorldFactEvent.StandardAttribute.relation || fact.attribute == "关系"
+            state.facts(for: page.id).compactMap { fact -> String? in
+                if fact.attribute == WorldFactEvent.StandardAttribute.relation || fact.attribute == "关系" {
+                    return fact.value
                 }
-                .map(\.value)
+                if fact.attribute.hasPrefix("relation:") {
+                    let target = String(fact.attribute.dropFirst("relation:".count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    return target.isEmpty ? fact.value : "\(target) \(fact.value)"
+                }
+                return nil
+            }
         }
         if !relationValues.isEmpty {
             for candidate in offStagePages {
@@ -395,6 +446,92 @@ enum NarrativeContextOrchestrator {
 
         guard !matchedIDs.isEmpty else { return [] }
         return Array(offStagePages.filter { matchedIDs.contains($0.id) }.prefix(limit))
+    }
+
+    private static func threadActivationCueMatches(
+        _ thread: ProspectiveThread,
+        scanText: String
+    ) -> Bool {
+        let cleanCue = thread.activationCue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !scanText.isEmpty, !cleanCue.isEmpty else { return false }
+        let delimiters = CharacterSet(charactersIn: "，。、；;！？!?,.\n\t：:")
+            .union(.whitespaces)
+        let tokens = cleanCue.components(separatedBy: delimiters)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 2 }
+        return (cleanCue.count >= 2 && scanText.localizedCaseInsensitiveContains(cleanCue))
+            || tokens.contains { scanText.localizedCaseInsensitiveContains($0) }
+    }
+
+    private static func threadSceneRelevanceScore(
+        _ thread: ProspectiveThread,
+        onStageIDs: Set<String>,
+        scanText: String
+    ) -> Int {
+        var score = 0
+        if thread.relatedEntityIDs.contains(where: { onStageIDs.contains($0) }) {
+            score += 3
+        }
+        if threadActivationCueMatches(thread, scanText: scanText) {
+            score += 2
+        }
+        return score
+    }
+
+    private static func formattedThreadContextLine(_ thread: ProspectiveThread) -> String {
+        var suffixParts: [String] = []
+        let cue = thread.activationCue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cue.isEmpty {
+            suffixParts.append("触发线索：\(cue)")
+        }
+        if let quoteRaw = thread.evidenceAnchors.last?.quote.trimmingCharacters(in: .whitespacesAndNewlines),
+           !quoteRaw.isEmpty {
+            let clipped = quoteRaw.count > 40 ? String(quoteRaw.prefix(40)) + "…" : quoteRaw
+            suffixParts.append("埋设依据：\(clipped)")
+        }
+        if suffixParts.isEmpty {
+            return "- [\(thread.id)] \(thread.goal)"
+        }
+        return "- [\(thread.id)] \(thread.goal)（" + suffixParts.joined(separator: "；") + "）"
+    }
+
+    private static func buildEpisodicEventsBlock(
+        state: MaterializedNarrativeState,
+        onStageIDs: Set<String>,
+        scanText: String
+    ) -> String? {
+        guard !state.episodicEvents.isEmpty else { return nil }
+        let scored = state.episodicEvents.values
+            .map { event -> (event: EpisodicEvent, score: Int) in
+                var score = event.status == .ongoing ? 1 : 0
+                let participantHits = event.participantEntityIDs.filter { onStageIDs.contains($0) }.count
+                score += participantHits * 3
+                if !scanText.isEmpty {
+                    let tokens = [event.title, event.scene, event.arcTitle]
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { $0.count >= 2 }
+                    if tokens.contains(where: { scanText.localizedCaseInsensitiveContains($0) }) {
+                        score += 2
+                    }
+                }
+                return (event, score)
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                if lhs.event.status != rhs.event.status { return lhs.event.status == .ongoing }
+                if lhs.event.updatedAt != rhs.event.updatedAt { return lhs.event.updatedAt > rhs.event.updatedAt }
+                return lhs.event.id < rhs.event.id
+            }
+
+        let sceneMatched = scored.filter { $0.score > 1 }.prefix(4).map(\.event)
+        let chosen: [EpisodicEvent]
+        if !sceneMatched.isEmpty {
+            chosen = Array(sceneMatched)
+        } else {
+            chosen = Array(scored.filter { $0.event.status == .ongoing }.prefix(2).map(\.event))
+        }
+        guard !chosen.isEmpty else { return nil }
+        return "【相关关键事件】\n" + chosen.map { "- \($0.formattedSummaryLine)" }.joined(separator: "\n")
     }
 
     static func effectiveTailText(
@@ -440,12 +577,17 @@ enum NarrativeContextOrchestrator {
         let alwaysOnLorePages = state.entityPages.values.filter {
             $0.enabled && $0.kind == .lore && $0.activationMode == .always
         }
+        var effectiveStyle = workspace.preservedStyle
+        if !settings.corpusEnabled {
+            effectiveStyle.centroidExemplar = nil
+            effectiveStyle.exemplars = []
+        }
         let frozenSystemPrefix = buildFrozenSystemPrefix(
             globalPreset: settings.globalPreset,
             aiFlavorRules: settings.aiFlavorRules,
             skills: settings.skills,
             universes: enabledUniverses,
-            preservedStyle: workspace.preservedStyle,
+            preservedStyle: effectiveStyle,
             bookIndexLines: bookIndex,
             volumeOneLiners: state.pyramid.volumeOneLiners,
             alwaysOnLorePages: alwaysOnLorePages
@@ -489,7 +631,8 @@ enum NarrativeContextOrchestrator {
             history: history,
             boundary: workspace.reFoldBoundary,
             modelContextWindow: effectiveWindow,
-            effectiveInputBudget: historyBudget
+            effectiveInputBudget: historyBudget,
+            allowRestoreTool: enableTools
         )
 
         // 构建尾部动态工作区：逐字规则 -> Query-Cone 最小状态 -> 场次正文 Tail -> 尾部动态文风样本 -> 工具回退预检。
@@ -512,31 +655,33 @@ enum NarrativeContextOrchestrator {
             tailSections.append("【当前场次正文】\n" + tailText)
         }
 
-        let centroidID = workspace.preservedStyle.centroidExemplar?.id
-        let sceneCandidateEntries = workspace.preservedStyle.exemplars
-            .filter { entry in
-                if let centroidID, entry.id == centroidID { return false }
-                return true
+        if settings.corpusEnabled {
+            let centroidID = effectiveStyle.centroidExemplar?.id
+            let sceneCandidateEntries = effectiveStyle.exemplars
+                .filter { entry in
+                    if let centroidID, entry.id == centroidID { return false }
+                    return true
+                }
+                .map { entry in
+                    PromptAssembly.Corpus(
+                        libraryID: "preserved-exemplars",
+                        libraryName: "场景示范",
+                        entryID: entry.id,
+                        entryName: entry.title,
+                        category: "仿写样本",
+                        text: entry.text
+                    )
+                }
+            let sceneStyleRef = StyleDistiller.styleReferenceBlock(
+                from: sceneCandidateEntries,
+                maxSamples: 1,
+                tokenBudget: max(256, inputBudget / 6),
+                instructionText: cleanInstruction.isEmpty ? nil : cleanInstruction,
+                queryText: PromptComposer.codePointTail(tailText, limit: 800)
+            )
+            if let renderedStyle = sceneStyleRef.block?.rendered, !renderedStyle.isEmpty {
+                tailSections.append(renderedStyle)
             }
-            .map { entry in
-                PromptAssembly.Corpus(
-                    libraryID: "preserved-exemplars",
-                    libraryName: "场景示范",
-                    entryID: entry.id,
-                    entryName: entry.title,
-                    category: "仿写样本",
-                    text: entry.text
-                )
-            }
-        let sceneStyleRef = StyleDistiller.styleReferenceBlock(
-            from: sceneCandidateEntries,
-            maxSamples: 1,
-            tokenBudget: max(256, inputBudget / 6),
-            instructionText: cleanInstruction.isEmpty ? nil : cleanInstruction,
-            queryText: PromptComposer.codePointTail(tailText, limit: 800)
-        )
-        if let renderedStyle = sceneStyleRef.block?.rendered, !renderedStyle.isEmpty {
-            tailSections.append(renderedStyle)
         }
 
         let prefetch = buildLexicalPrefetchSection(
@@ -583,6 +728,76 @@ enum NarrativeContextOrchestrator {
             usedFallbackBM25: usedFallbackBM25,
             estimatedInputTokens: TokenEstimator.estimate(messages: finalMessages)
         )
+    }
+
+    /// 构建语境感知选区改写提示词：注入前后文衔接片段、在场实体约束、活跃规则与仿写基准（StoryLens）。
+    static func buildRewritePrompt(
+        workspace: NarrativeWorkspace?,
+        manuscript: String,
+        range: NSRange,
+        selection: String,
+        instruction: String,
+        settings: AppSettings
+    ) -> [LLMMessage] {
+        var systemParts = [
+            "你是中文小说编辑。只改写【待改写片段】，严格保留未要求改动的人物事实、视角、时态和上下文衔接。只输出改写后的片段本身，不要重复上下文、不要解释、不要加引号、不要 Markdown、不要复述要求。"
+        ]
+        if let styleTemplate = workspace?.preservedStyle.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines),
+           !styleTemplate.isEmpty {
+            systemParts.append("【仿写模板】\n\(styleTemplate)")
+        }
+        let flavor = settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !flavor.isEmpty {
+            systemParts.append("【文风与去 AI 规范】\n\(flavor)")
+        }
+
+        let nsManuscript = manuscript as NSString
+        let safeStart = max(0, min(range.location, nsManuscript.length))
+        let safeEnd = max(safeStart, min(range.location + max(0, range.length), nsManuscript.length))
+        let beforeContext = PromptComposer.codePointTail(nsManuscript.substring(to: safeStart), limit: 500)
+        let afterContext = String(nsManuscript.substring(from: safeEnd).prefix(300))
+        let cleanInstruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var userSections: [String] = []
+        if let workspace {
+            let state = workspace.currentState()
+            let scanText = [beforeContext, selection, cleanInstruction]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            let cone = buildQueryConeBlock(
+                state: state,
+                scanText: scanText,
+                povCharacterID: workspace.activePOVCharacterID
+            )
+            let currentBranchID = workspace.storyGraph.nodes[workspace.storyGraph.headNodeID]?.branchLabel
+            let authorityRules = state.directiveLedger.renderedAuthorityBlock(
+                branchID: currentBranchID,
+                entityIDs: cone.onStageEntityIDs
+            )
+            if !authorityRules.isEmpty {
+                userSections.append(authorityRules)
+            }
+            if !cone.block.isEmpty {
+                userSections.append(cone.block)
+            }
+        }
+
+        if !beforeContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userSections.append("【上文衔接（仅供衔接，勿重复输出）】\n\(beforeContext)")
+        }
+        userSections.append("【待改写片段】\n\(selection)")
+        if !afterContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userSections.append("【下文衔接（仅供衔接，勿重复输出）】\n\(afterContext)")
+        }
+        let finalRequirement = cleanInstruction.isEmpty
+            ? "保留原意和人物视角，让文字更自然、更有画面感。"
+            : cleanInstruction
+        userSections.append("【改写要求】\n\(finalRequirement)")
+
+        return [
+            .system(systemParts.joined(separator: "\n\n")),
+            .user(userSections.joined(separator: "\n\n")),
+        ]
     }
 
     /// 无工具路径下合并连续同角色非 system 消息，满足严格角色交替的兼容网关要求。
@@ -695,7 +910,9 @@ enum NarrativeContextOrchestrator {
             }
         }
         guard !lines.isEmpty else { return (nil, false) }
-        return (lines.joined(separator: "\n"), !enableTools)
+        // 明确状态时序优先级：早期细节回忆不得覆盖当前在场事实与关键事件（抗状态漂移）。
+        let precedenceRule = "以下早期片段与锚点仅作细节回忆；若与当前在场事实、关键事件或正文状态冲突，一律以当前最新状态为准。"
+        return (([precedenceRule] + lines).joined(separator: "\n"), !enableTools)
     }
 
     private static func anchorPriorityScore(

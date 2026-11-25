@@ -129,7 +129,31 @@ struct NarrativeStore {
         var activeFacts: [String: WorldFactEvent]
         var epistemicBeliefs: [String: EpistemicBelief]
         var threads: [String: ProspectiveThread]
+        var episodicEvents: [String: EpisodicEvent]
         var conflictWarnings: [StateConflictWarning]
+
+        init(
+            activeFacts: [String: WorldFactEvent] = [:],
+            epistemicBeliefs: [String: EpistemicBelief] = [:],
+            threads: [String: ProspectiveThread] = [:],
+            episodicEvents: [String: EpisodicEvent] = [:],
+            conflictWarnings: [StateConflictWarning] = []
+        ) {
+            self.activeFacts = activeFacts
+            self.epistemicBeliefs = epistemicBeliefs
+            self.threads = threads
+            self.episodicEvents = episodicEvents
+            self.conflictWarnings = conflictWarnings
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            activeFacts = (try? c.decode([String: WorldFactEvent].self, forKey: .activeFacts)) ?? [:]
+            epistemicBeliefs = (try? c.decode([String: EpistemicBelief].self, forKey: .epistemicBeliefs)) ?? [:]
+            threads = (try? c.decode([String: ProspectiveThread].self, forKey: .threads)) ?? [:]
+            episodicEvents = (try? c.decode([String: EpisodicEvent].self, forKey: .episodicEvents)) ?? [:]
+            conflictWarnings = (try? c.decode([StateConflictWarning].self, forKey: .conflictWarnings)) ?? []
+        }
     }
 
     private static func makeEncoder() -> JSONEncoder {
@@ -299,6 +323,7 @@ struct NarrativeStore {
                             workspace.entityPages[belief.characterID] != nil || replayed.entityPages[belief.characterID] == nil
                         }
                         workspace.threads = replayed.threads
+                        workspace.episodicEvents = replayed.episodicEvents
                         workspace.conflictWarnings = replayed.conflictWarnings
                         workspace.hasLiveLedgers = true
                     }
@@ -311,6 +336,7 @@ struct NarrativeStore {
                     workspace.activeFacts = ledgers.activeFacts
                     workspace.epistemicBeliefs = ledgers.epistemicBeliefs
                     workspace.threads = ledgers.threads
+                    workspace.episodicEvents = ledgers.episodicEvents
                     workspace.conflictWarnings = ledgers.conflictWarnings
                     workspace.hasLiveLedgers = true
                 }
@@ -469,12 +495,14 @@ struct NarrativeStore {
                     : (previous?.activeFacts != workspace.activeFacts
                         || previous?.epistemicBeliefs != workspace.epistemicBeliefs
                         || previous?.threads != workspace.threads
+                        || previous?.episodicEvents != workspace.episodicEvents
                         || previous?.conflictWarnings != workspace.conflictWarnings))
             if ledgersChanged {
                 let effectiveState: (
                     facts: [String: WorldFactEvent],
                     beliefs: [String: EpistemicBelief],
                     threads: [String: ProspectiveThread],
+                    events: [String: EpisodicEvent],
                     warnings: [StateConflictWarning]
                 )
                 if workspace.hasLiveLedgers {
@@ -482,6 +510,7 @@ struct NarrativeStore {
                         workspace.activeFacts,
                         workspace.epistemicBeliefs,
                         workspace.threads,
+                        workspace.episodicEvents,
                         workspace.conflictWarnings
                     )
                 } else {
@@ -490,18 +519,21 @@ struct NarrativeStore {
                         materialized.activeFacts,
                         materialized.epistemicBeliefs,
                         materialized.threads,
+                        materialized.episodicEvents,
                         materialized.conflictWarnings
                     )
                 }
                 let hasAnyLedgerContent = !effectiveState.facts.isEmpty
                     || !effectiveState.beliefs.isEmpty
                     || !effectiveState.threads.isEmpty
+                    || !effectiveState.events.isEmpty
                     || !effectiveState.warnings.isEmpty
                 if !canDiff || workspace.hasLiveLedgers || hasAnyLedgerContent || ledgersPathExists {
                     let ledgers = LedgerBundle(
                         activeFacts: effectiveState.facts,
                         epistemicBeliefs: effectiveState.beliefs,
                         threads: effectiveState.threads,
+                        episodicEvents: effectiveState.events,
                         conflictWarnings: effectiveState.warnings
                     )
                     try fileStore.writeEncrypted(

@@ -585,7 +585,8 @@ struct EntityPage: Identifiable, Codable, Hashable {
     /// 渲染为结构化 Markdown 文档，供实体查看与按需工具读取使用。
     func renderedMarkdown(
         resolvedFacts: [WorldFactEvent],
-        beliefs: [EpistemicBelief]
+        beliefs: [EpistemicBelief],
+        relatedEvents: [EpisodicEvent] = []
     ) -> String {
         var sections: [String] = ["# \(name)"]
         var metaLines: [String] = []
@@ -658,7 +659,109 @@ struct EntityPage: Identifiable, Codable, Hashable {
             sections.append("## 待确认冲突\n" + lines.joined(separator: "\n"))
         }
 
+        if !relatedEvents.isEmpty {
+            let lines = relatedEvents.prefix(6).map { "- \($0.formattedSummaryLine)" }
+            sections.append("## 关联关键事件\n" + lines.joined(separator: "\n"))
+        }
+
         return sections.joined(separator: "\n\n")
+    }
+}
+
+/// 关键事件状态：区分仍待推进的进行中事件与因果已闭合的完结事件。
+enum EpisodicEventStatus: String, Codable, Hashable, CaseIterable {
+    case ongoing
+    case resolved
+
+    var displayName: String {
+        switch self {
+        case .ongoing: return "进行中"
+        case .resolved: return "已完结"
+        }
+    }
+}
+
+/// 结构化情节关键事件：桥接零散剧情节拍与高阶金字塔摘要，保留因果链、参与实体与故事线归属。
+struct EpisodicEvent: Identifiable, Codable, Hashable {
+    var id: String
+    var title: String
+    var arcTitle: String
+    var scene: String
+    var participantEntityIDs: [String]
+    var cause: String
+    var development: String
+    var outcome: String
+    var status: EpisodicEventStatus
+    var authority: AuthorityRank
+    var quoteAnchor: TextSpanAnchor?
+    var nodeID: String
+    var updatedAt: Date
+
+    var formattedSummaryLine: String {
+        var header = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanArc = arcTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanArc.isEmpty {
+            header += " [\(cleanArc)]"
+        }
+        let cleanScene = scene.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanScene.isEmpty {
+            header += "（\(cleanScene)）"
+        }
+        var clauses: [String] = []
+        let cleanCause = cause.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDev = development.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanOutcome = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanCause.isEmpty { clauses.append("起因：\(cleanCause)") }
+        if !cleanDev.isEmpty { clauses.append("经过：\(cleanDev)") }
+        if !cleanOutcome.isEmpty { clauses.append("结果：\(cleanOutcome)") }
+        return clauses.isEmpty ? header : header + "｜" + clauses.joined(separator: "｜")
+    }
+
+    init(
+        id: String = UUID().uuidString,
+        title: String,
+        arcTitle: String = "",
+        scene: String = "",
+        participantEntityIDs: [String] = [],
+        cause: String = "",
+        development: String = "",
+        outcome: String = "",
+        status: EpisodicEventStatus = .ongoing,
+        authority: AuthorityRank = .canonProseQuote,
+        quoteAnchor: TextSpanAnchor? = nil,
+        nodeID: String = "root",
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.arcTitle = arcTitle
+        self.scene = scene
+        self.participantEntityIDs = participantEntityIDs
+        self.cause = cause
+        self.development = development
+        self.outcome = outcome
+        self.status = status
+        self.authority = authority
+        self.quoteAnchor = quoteAnchor
+        self.nodeID = nodeID
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        arcTitle = (try? c.decode(String.self, forKey: .arcTitle)) ?? ""
+        scene = (try? c.decode(String.self, forKey: .scene)) ?? ""
+        participantEntityIDs = (try? c.decode([String].self, forKey: .participantEntityIDs)) ?? []
+        cause = (try? c.decode(String.self, forKey: .cause)) ?? ""
+        development = (try? c.decode(String.self, forKey: .development)) ?? ""
+        outcome = (try? c.decode(String.self, forKey: .outcome)) ?? ""
+        status = (try? c.decode(EpisodicEventStatus.self, forKey: .status)) ?? .ongoing
+        authority = (try? c.decode(AuthorityRank.self, forKey: .authority)) ?? .canonProseQuote
+        quoteAnchor = try? c.decodeIfPresent(TextSpanAnchor.self, forKey: .quoteAnchor)
+        nodeID = (try? c.decode(String.self, forKey: .nodeID)) ?? "root"
+        updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? Date()
     }
 }
 
@@ -783,6 +886,77 @@ struct AnchorIndex: Codable, Hashable {
                 || anchor.span.quote.localizedCaseInsensitiveContains(needle)
         }
     }
+
+    /// 局部正文改写后增量更新锚点：移除受影响窗内旧锚点、平移下游 UTF-16 偏移并仅重抽邻域窗。
+    mutating func adjustForEdit(
+        range: NSRange,
+        replacementUTF16Length: Int,
+        updatedText: String,
+        knownEntities: [EntityPage]
+    ) {
+        let nsUpdated = updatedText as NSString
+        let editStart = max(0, range.location)
+        let editEnd = max(editStart, editStart + max(0, range.length))
+        let delta = max(0, replacementUTF16Length) - max(0, range.length)
+
+        var oldWindowStart = max(0, editStart - 40)
+        if oldWindowStart > 0 && oldWindowStart < nsUpdated.length {
+            let ch = nsUpdated.character(at: oldWindowStart)
+            if ch >= 0xDC00 && ch <= 0xDFFF {
+                oldWindowStart -= 1
+            }
+        }
+        let oldWindowEnd = editEnd + 40
+        var newWindowEnd = min(nsUpdated.length, editStart + max(0, replacementUTF16Length) + 40)
+        if newWindowEnd > oldWindowStart && newWindowEnd < nsUpdated.length {
+            let tailCh = nsUpdated.character(at: newWindowEnd - 1)
+            if tailCh >= 0xD800 && tailCh <= 0xDBFF {
+                newWindowEnd -= 1
+            }
+        }
+
+        let safePageSize = max(1, FileStore.bodyPageSize)
+        var preserved: [MechanicalAnchor] = []
+        preserved.reserveCapacity(anchors.count)
+        for var anchor in anchors {
+            let anchorStart = anchor.span.utf16Start
+            let anchorEnd = anchorStart + anchor.span.utf16Length
+            if anchorEnd > oldWindowStart && anchorStart < oldWindowEnd {
+                continue
+            }
+            if anchorStart >= oldWindowEnd {
+                anchor.span.utf16Start = max(0, anchorStart + delta)
+                anchor.span.pageIndex = anchor.span.utf16Start / safePageSize
+            }
+            preserved.append(anchor)
+        }
+
+        let windowLen = max(0, newWindowEnd - oldWindowStart)
+        let refreshed: [MechanicalAnchor]
+        if windowLen > 0 {
+            let windowText = nsUpdated.substring(with: NSRange(location: oldWindowStart, length: windowLen))
+            refreshed = MechanicalAnchorExtractor.extract(
+                from: windowText,
+                knownEntities: knownEntities,
+                pageIndex: oldWindowStart / FileStore.bodyPageSize,
+                baseUTF16Offset: oldWindowStart
+            )
+        } else {
+            refreshed = []
+        }
+
+        var seenIDs = Set<String>()
+        anchors = (preserved + refreshed)
+            .filter { seenIDs.insert($0.id).inserted }
+            .sorted { lhs, rhs in
+                if lhs.span.utf16Start != rhs.span.utf16Start {
+                    return lhs.span.utf16Start < rhs.span.utf16Start
+                }
+                return lhs.id < rhs.id
+            }
+        version &+= 1
+        indexedUTF16Length = nsUpdated.length
+    }
 }
 
 /// 对话历史分块可逆折叠边界：保留前部前缀稳定性并记录按步恢复存根。
@@ -810,6 +984,20 @@ struct ReFoldBoundary: Codable, Hashable {
         stride = max(1, (try? c.decode(Int.self, forKey: .stride)) ?? 3)
         foldedStepNotes = (try? c.decode([Int: String].self, forKey: .foldedStepNotes)) ?? [:]
         deduplicatedStubs = (try? c.decode([Int: String].self, forKey: .deduplicatedStubs)) ?? [:]
+    }
+
+    /// 历史消息被删改、撤回或重插后，清理从受影响轮次起的折叠边界与存根，防止错位覆盖后续短消息。
+    mutating func invalidate(fromTurnIndex turnIndex: Int) {
+        if turnIndex <= 0 {
+            boundaryTurnIndex = 0
+            foldedStepNotes = [:]
+            deduplicatedStubs = [:]
+            return
+        }
+        let safeStride = max(1, stride)
+        boundaryTurnIndex = min(boundaryTurnIndex, (turnIndex / safeStride) * safeStride)
+        foldedStepNotes = foldedStepNotes.filter { $0.key < boundaryTurnIndex }
+        deduplicatedStubs = deduplicatedStubs.filter { $0.key < turnIndex }
     }
 }
 

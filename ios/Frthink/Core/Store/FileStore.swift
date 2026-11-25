@@ -482,6 +482,7 @@ struct FileStore {
             totalUTF16Length: ns.length,
             chapters: chapters,
             blocks: BodyBlockIndex.blocks(from: text),
+            pageStartOffsets: ranges.map(\.location),
             projectID: projectID
         )
     }
@@ -509,6 +510,13 @@ struct FileStore {
         let windowBlocks = BodyBlockIndex.blocks(from: text).map {
             BodyBlock(start: $0.start + windowStart, length: $0.length)
         }
+        let prefixOffsets: [Int]
+        if let oldOffsets = oldMeta?.pageStartOffsets, oldOffsets.count >= startPage {
+            prefixOffsets = Array(oldOffsets.prefix(startPage))
+        } else {
+            prefixOffsets = (0..<startPage).map { $0 * Self.bodyPageSize }
+        }
+        let pageStartOffsets = prefixOffsets + ranges.map { windowStart + $0.location }
         try writeBodyPagesAndMeta(
             ns: ns,
             ranges: ranges,
@@ -518,6 +526,7 @@ struct FileStore {
             totalUTF16Length: windowStart + ns.length,
             chapters: chapters,
             blocks: prefixBlocks + windowBlocks,
+            pageStartOffsets: pageStartOffsets,
             projectID: projectID
         )
     }
@@ -531,6 +540,7 @@ struct FileStore {
         totalUTF16Length: Int,
         chapters: [Chapter],
         blocks: [BodyBlock],
+        pageStartOffsets: [Int],
         projectID: String
     ) throws {
         let directory = bodyPagesDirectory(projectID)
@@ -560,7 +570,8 @@ struct FileStore {
             chapters: chapters,
             blocks: blocks,
             pageSize: Self.bodyPageSize,
-            pageCount: totalPageCount
+            pageCount: totalPageCount,
+            pageStartOffsets: pageStartOffsets
         )
         try writeEncrypted(
             try encoder.encode(meta),
@@ -584,6 +595,8 @@ struct FileStore {
         var blocks: [BodyBlock]?
         var pageSize: Int?
         var pageCount: Int?
+        /// 各分页在全文中的真实 UTF-16 起点；代理对跨页缩页时避免按固定页长换算偏移漂移。
+        var pageStartOffsets: [Int]?
     }
 
     func loadBodyMeta(_ projectID: String) -> BodyMeta? {

@@ -2109,7 +2109,10 @@ extension SelfCheck {
             syncSession.payload.world.characters = [
                 CharacterCard(id: "c_shen", name: "沈夜", identity: "守夜人")
             ]
-            syncSession.syncWorldChangesIntoNarrativeWorkspace()
+            syncSession.syncWorldChangesIntoNarrativeWorkspace(
+                syncLegacyCharacters: true,
+                syncLongTermRules: true
+            )
 
             let syncedState = syncSession.ensureNarrativeWorkspace().currentState()
             try expect(
@@ -2122,7 +2125,10 @@ extension SelfCheck {
             )
 
             syncSession.payload.world.longTermRules = "全书保持冷峻克制笔调。"
-            syncSession.syncWorldChangesIntoNarrativeWorkspace()
+            syncSession.syncWorldChangesIntoNarrativeWorkspace(
+                syncLegacyCharacters: true,
+                syncLongTermRules: true
+            )
             let updatedRules = syncSession.ensureNarrativeWorkspace()
                 .currentState()
                 .directiveLedger
@@ -2919,6 +2925,655 @@ extension SelfCheck {
             )
 
             return "四类档案分化 + 常驻世界观 + 触发词带入 + 世界更新模型设置 ok"
+        }
+
+        // 验证关键事件层、旧档全字段导入、场景门控伏笔、多目标关系与泛化认知冲突核查。
+        check("narrative.episodicEventsForeshadowingAndAntiDrift") {
+            let t0 = Date(timeIntervalSince1970: 1_796_500_000)
+
+            var world = WorldBook()
+            world.characters = [
+                CharacterCard(
+                    id: "c_lin",
+                    name: "林昭",
+                    identity: "旧书店店主",
+                    relationshipAttitudes: "沈清秋：表面恭敬，实则防备\n赵二: 暗中互通消息",
+                    customEntries: [
+                        CharacterCard.CustomEntry(id: "ce1", title: "随身武器", body: "断水匕首")
+                    ],
+                    memories: [
+                        CharacterMemory(
+                            id: "m1",
+                            content: "十年前码头失火",
+                            evidence: "左手掌心留有旧疤",
+                            createdAt: 1_700_000_000_000
+                        )
+                    ]
+                ),
+                CharacterCard(id: "c_shen", name: "沈清秋", identity: "南城掌柜"),
+                CharacterCard(id: "c_zhao", name: "赵二", identity: "漕帮暗桩"),
+            ]
+            world.events = [
+                EventCard(
+                    id: "ev_dock",
+                    title: "雾港码头密会",
+                    scene: "雾港老码头",
+                    characters: ["林昭", "沈清秋"],
+                    cause: "匿名信约见",
+                    development: "双方交换半枚玄铁令",
+                    consequence: "",
+                    updatedAt: t0
+                )
+            ]
+            let imported = LegacyArchiveImporter.importFromPayload(
+                ProjectPayload(manuscript: "第一章\n林昭站在雾港老码头。", world: world),
+                projectID: "episodic_import",
+                projectTitle: "雾港夜行",
+                now: t0
+            )
+            let importedState = try imported.workspace.materializedState()
+            let importedFacts = importedState.facts(for: "c_lin")
+            try expect(
+                importedState.episodicEvents["legacy_evt_ev_dock"]?.status == .ongoing
+                    && importedState.episodicEvents["legacy_evt_ev_dock"]?.participantEntityIDs == ["c_lin", "c_shen"]
+                    && importedFacts.contains(where: { $0.attribute == "relation:沈清秋" })
+                    && importedFacts.contains(where: { $0.attribute == "relation:赵二" })
+                    && importedFacts.contains(where: { $0.attribute == "custom:随身武器" && $0.value == "断水匕首" })
+                    && importedFacts.contains(where: { $0.attribute == "memory:1" && $0.value.contains("十年前码头失火") }),
+                "旧档导入应完整迁移 EventCard、customEntries、memories 与多目标关系槽位"
+            )
+
+            let excerpt = "沈清秋在松鹤楼低声拆穿了假信，林昭这才明白旧案另有主谋。"
+            let deltaJSON = """
+            {
+              "facts": [
+                {"entity_id":"c_lin","attribute":"relation:沈清秋","value":"已识破沈清秋暗中查案","quote":"沈清秋在松鹤楼低声拆穿了假信"}
+              ],
+              "beliefs": [
+                {"character_id":"c_lin","topic":"常规猜测","believed_truth":"猜测对方想喝茶","knows_secret":false,"quote":""},
+                {"character_id":"c_lin","topic":"旧案主谋","believed_truth":"意识到另有主谋","knows_secret":true,"quote":"旧案另有主谋"}
+              ],
+              "events": [
+                {"id":"","title":"松鹤楼拆信","arc":"南疆追查线","scene":"松鹤楼","participants":["林昭","沈清秋"],"cause":"假信引蛇出洞","development":"当面对质","outcome":"识破主谋线索","status":"resolved","quote":"沈清秋在松鹤楼低声拆穿了假信"}
+              ],
+              "threads": []
+            }
+            """
+            let parsed = try NarrativeDeltaExtractor.parseDelta(
+                from: deltaJSON,
+                excerpt: excerpt,
+                nodeID: "n1",
+                knownEntities: Array(importedState.entityPages.values),
+                now: t0.addingTimeInterval(20)
+            )
+            try expect(
+                parsed.droppedSpeculativeCount >= 1
+                    && parsed.delta.epistemicBeliefs.count == 1
+                    && parsed.delta.epistemicBeliefs.first?.authority == .canonProseQuote
+                    && parsed.delta.episodicEvents.count == 1
+                    && parsed.delta.episodicEvents.first?.status == .resolved
+                    && parsed.delta.factEvents.first?.attribute == "relation:沈清秋",
+                "冷同步抽取应拦截无依据认知臆测、保留多目标关系与结构化事件"
+            )
+
+            // 验证事件与多目标关系在一跳召回、工具读取和分支切换中的隔离表现，以及伏笔场景相关性门控。
+            var ws = imported.workspace
+            ws.applyLedgerDelta(
+                PlotNodeDelta(
+                    factEvents: [
+                        WorldFactEvent(
+                            id: "f_zhao_only_attr",
+                            entityID: "c_lin",
+                            attribute: "relation:赵二",
+                            value: "可随时联络的暗线",
+                            nodeID: "root",
+                            authority: .canonProseQuote,
+                            createdAt: t0.addingTimeInterval(5)
+                        )
+                    ],
+                    threadEvents: [
+                        ProspectiveThreadEvent(
+                            id: "p_rel_ready",
+                            threadID: "th_dock_ready",
+                            kind: .plant,
+                            goal: "林昭交付老码头暗格钥匙",
+                            activationCue: "老码头交接",
+                            relatedEntityIDs: ["c_lin"],
+                            nodeID: "root",
+                            createdAt: t0
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "r_rel_ready",
+                            threadID: "th_dock_ready",
+                            kind: .promoteReady,
+                            nodeID: "root",
+                            createdAt: t0.addingTimeInterval(1)
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "p_unrel_1",
+                            threadID: "th_unrel_1",
+                            kind: .plant,
+                            goal: "无关伏笔甲",
+                            relatedEntityIDs: ["c_shen"],
+                            nodeID: "root",
+                            createdAt: t0
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "r_unrel_1",
+                            threadID: "th_unrel_1",
+                            kind: .promoteReady,
+                            nodeID: "root",
+                            createdAt: t0.addingTimeInterval(1)
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "p_unrel_2",
+                            threadID: "th_unrel_2",
+                            kind: .plant,
+                            goal: "无关伏笔乙",
+                            relatedEntityIDs: ["c_shen"],
+                            nodeID: "root",
+                            createdAt: t0
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "r_unrel_2",
+                            threadID: "th_unrel_2",
+                            kind: .promoteReady,
+                            nodeID: "root",
+                            createdAt: t0.addingTimeInterval(1)
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "p_pend_hit",
+                            threadID: "th_pend_hit",
+                            kind: .plant,
+                            goal: "暗夜钟声响起后验证暗号",
+                            activationCue: "暗夜钟声",
+                            relatedEntityIDs: [],
+                            evidenceAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 6, quote: "巷口铜钟三响"),
+                            nodeID: "root",
+                            createdAt: t0
+                        ),
+                        ProspectiveThreadEvent(
+                            id: "p_pend_entity_only",
+                            threadID: "th_pend_entity_only",
+                            kind: .plant,
+                            goal: "血月升起后揭开血契",
+                            activationCue: "血月升起",
+                            relatedEntityIDs: ["c_lin"],
+                            nodeID: "root",
+                            createdAt: t0
+                        ),
+                    ]
+                ),
+                sourceNodeID: "root"
+            )
+            let stateForCone = ws.currentState()
+            let cone = NarrativeContextOrchestrator.buildQueryConeBlock(
+                state: stateForCone,
+                scanText: "林昭独自走在雨巷中，听见远处传来暗夜钟声。"
+            )
+            try expect(
+                cone.block.contains("【相关关键事件】")
+                    && cone.block.contains("雾港码头密会")
+                    && cone.block.contains("【关联离场实体（一跳）】")
+                    && cone.block.contains("赵二")
+                    && cone.block.contains("林昭交付老码头暗格钥匙")
+                    && !cone.block.contains("无关伏笔甲")
+                    && cone.block.contains("【当前场景关联潜伏伏笔")
+                    && cone.block.contains("暗夜钟声响起后验证暗号")
+                    && cone.block.contains("巷口铜钟三响")
+                    && !cone.block.contains("th_pend_entity_only")
+                    && !cone.block.contains("参考"),
+                "热路径应注入相关关键事件、通过 relation:赵二 触发一跳召回，并对伏笔做线索词门控与原文依据透出"
+            )
+
+            let extractionMessages = NarrativeDeltaExtractor.buildExtractionMessages(
+                excerpt: "巷口铜钟再响，林昭轻声对出了暗号。",
+                knownEntities: [],
+                activeThreads: Array(stateForCone.threads.values),
+                activeEvents: []
+            )
+            let extractionText = extractionMessages.map(\.content).joined(separator: "\n")
+            try expect(
+                extractionText.contains("暗夜钟声")
+                    && extractionText.contains("巷口铜钟三响")
+                    && extractionText.contains("satisfied"),
+                "冷同步伏笔提示词应包含激活线索、埋设原文依据与 once 兑现提示"
+            )
+
+            ws.anchorIndex = AnchorIndex(
+                version: 1,
+                anchors: [
+                    MechanicalAnchor(
+                        id: "anc_clock",
+                        kind: .artifactOrCount,
+                        surfaceText: "铜钟",
+                        span: TextSpanAnchor.make(utf16Start: 0, utf16Length: 6, quote: "巷口铜钟三响")
+                    )
+                ],
+                indexedUTF16Length: 120
+            )
+            var checkSettings = AppSettings()
+            checkSettings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-chat")]
+            checkSettings.activeProviderID = checkSettings.providers[0].id
+            let composedWithPrefetch = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: "第一章 雾港旧事：巷口铜钟三响。\n\n第五章 雨巷：林昭听见远处传来暗夜钟声。",
+                history: [],
+                userInstruction: "林昭留意铜钟动静",
+                settings: checkSettings,
+                enabledUniverseEntryIDs: [],
+                tailCodePointLimitOverride: 30,
+                inputBudget: 16_000,
+                enableTools: false
+            )
+            let prefetchJoined = composedWithPrefetch.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                prefetchJoined.contains("一律以当前最新状态为准"),
+                "词法预检片段应附带状态时序优先级规则以防状态漂移"
+            )
+
+            // 验证跨分支切换与持久化往返对 EpisodicEvent 的隔离与兼容解码。
+            let oldDeltaData = Data("{}".utf8)
+            let decodedOldDelta = try JSONDecoder().decode(PlotNodeDelta.self, from: oldDeltaData)
+            try expect(decodedOldDelta.episodicEvents.isEmpty && decodedOldDelta.removedEpisodicEventIDs.isEmpty, "旧版 PlotNodeDelta 缺省解码应为空")
+
+            var branchGraph = StoryGraph.makeInitial(
+                rootID: "root",
+                initialDelta: PlotNodeDelta(
+                    entityPageUpserts: [EntityPage(id: "c_lin", kind: .character, name: "林昭")],
+                    epistemicBeliefs: [
+                        EpistemicBelief(
+                            id: "b_shen_stance",
+                            characterID: "c_lin",
+                            topic: "沈清秋立场",
+                            believedTruth: "认为沈清秋仍不知情",
+                            knowsSecret: false,
+                            authority: .canonProseQuote,
+                            updatedAtNodeID: "root",
+                            updatedAt: t0
+                        )
+                    ]
+                ),
+                now: t0
+            )
+            try branchGraph.appendNode(
+                PlotNode(
+                    id: "n_branch_a",
+                    parentID: "root",
+                    branchLabel: "A线",
+                    delta: PlotNodeDelta(
+                        factEvents: [
+                            WorldFactEvent(
+                                id: "f_shen_revealed",
+                                entityID: "c_lin",
+                                attribute: "relation:沈清秋",
+                                value: "沈清秋已识破伪装",
+                                nodeID: "n_branch_a",
+                                authority: .canonProseQuote,
+                                quoteAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 8, quote: "沈清秋已识破伪装"),
+                                createdAt: t0.addingTimeInterval(30)
+                            )
+                        ],
+                        episodicEvents: [
+                            EpisodicEvent(
+                                id: "evt_branch_a",
+                                title: "A线暗杀危机",
+                                participantEntityIDs: ["c_lin"],
+                                status: .ongoing,
+                                nodeID: "n_branch_a",
+                                updatedAt: t0.addingTimeInterval(30)
+                            )
+                        ]
+                    ),
+                    createdAt: t0.addingTimeInterval(30)
+                )
+            )
+            try branchGraph.appendNode(
+                PlotNode(
+                    id: "n_branch_b",
+                    parentID: "root",
+                    branchLabel: "B线",
+                    createdAt: t0.addingTimeInterval(40)
+                ),
+                moveHead: false
+            )
+            var auditWS = NarrativeWorkspace(storyGraph: branchGraph)
+            try auditWS.synchronizeMaterializedHead()
+
+            let auditReport = try NarrativeDreamingAuditor.audit(
+                workspace: auditWS,
+                manuscriptPages: ["沈清秋已识破伪装。"]
+            )
+            guard let staleFinding = auditReport.findings.first(where: { $0.kind == .staleBelief }) else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+            try expect(
+                NarrativeViewSupport.canSyncLatestFact(for: staleFinding, workspace: auditWS),
+                "attribute 与 topic 非完全同名时也应检出 staleBelief 并支持同步最新事实"
+            )
+            let syncedCount = try NarrativeDreamingAuditor.applyCleanup(
+                findings: [staleFinding],
+                workspace: &auditWS
+            )
+            try expect(
+                syncedCount == 1
+                    && auditWS.currentState().beliefs(for: "c_lin").first?.believedTruth == "沈清秋已识破伪装",
+                "同步清理应将过时认知更新为最新客观事实"
+            )
+
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-episodic-check-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+            let files = FileStore(root: tempRoot)
+            try files.narrative.saveWorkspace(auditWS, projectID: "ep_store")
+            if case .loaded(let reloaded) = files.narrative.loadWorkspaceState(projectID: "ep_store") {
+                try expect(reloaded.episodicEvents["evt_branch_a"]?.title == "A线暗杀危机", "关键事件必须经加密 ledgers.json 往返持久化")
+            } else {
+                throw UnexpectedStoreStateError.notLoaded
+            }
+
+            let switchedToB = try auditWS.checkoutBranch(to: "n_branch_b", now: t0.addingTimeInterval(50))
+            try expect(switchedToB.episodicEvents["evt_branch_a"] == nil, "关键事件必须严格随剧情分支切换隔离")
+
+            return "关键事件层 + 旧档补全 + 门控伏笔 + 多目标关系 + 认知冲突核查 ok"
+        }
+
+        // 验证旧档回流隔离、ReFold 无工具提示与撤回边界清理、语境改写与局部锚点调整。
+        check("narrative.conflictFixesAndContextRewrite") {
+            let t0 = Date(timeIntervalSince1970: 1_795_400_000)
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-conflict-fixes-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+
+            var world = WorldBook()
+            world.styleTemplate = "白描短句"
+            world.characters = [CharacterCard(id: "c_ghost", name: "旧人物", identity: "旧档残余")]
+            let payload = ProjectPayload(
+                manuscript: "雾港夜雨中，林昭收起了铜钥匙。\n\n远处传来沈清秋的脚步声。",
+                world: world,
+                messages: [
+                    ChatMessage(id: "m0", role: .user, content: String(repeating: "旧要求甲。", count: 50)),
+                    ChatMessage(id: "m1", role: .assistant, content: String(repeating: "旧草稿甲。", count: 50)),
+                    ChatMessage(id: "m2", role: .user, content: String(repeating: "旧要求乙。", count: 50)),
+                    ChatMessage(id: "m3", role: .assistant, content: "短回复", createdAt: t0),
+                    ChatMessage(id: "m4", role: .user, content: "继续", createdAt: t0),
+                    ChatMessage(id: "m5", role: .assistant, content: "收到", createdAt: t0),
+                ]
+            )
+            let session = ProjectSession(
+                project: Project(id: "conflict-book", title: "冲突修复验证"),
+                payload: payload,
+                source: "",
+                translations: [],
+                store: files,
+                readOnly: true
+            )
+
+            // 1. 删除实体后默认 syncWorldChangesIntoNarrativeWorkspace 不得复活旧人物；清空仿写模板应同步清空工作区。
+            var ws = session.ensureNarrativeWorkspace()
+            ws.applyLedgerDelta(
+                PlotNodeDelta(
+                    entityPageUpserts: [EntityPage(id: "c_lin", kind: .character, name: "林昭", identity: "新人物")],
+                    directiveAdds: [AuthorDirective(id: "d_tone", verbatimRule: "保持克制冷峻", scope: .global)]
+                ),
+                sourceNodeID: ws.storyGraph.headNodeID
+            )
+            ws.applyLedgerDelta(
+                PlotNodeDelta(
+                    entityPageUpserts: [
+                        EntityPage(id: "c_ghost", kind: .character, name: "旧人物", identity: "旧档残余", enabled: false)
+                    ]
+                ),
+                sourceNodeID: ws.storyGraph.headNodeID
+            )
+            _ = ws.deleteEntityPage(id: "c_ghost")
+            ws.reFoldBoundary = ReFoldBoundary(
+                boundaryTurnIndex: 3,
+                stride: 3,
+                foldedStepNotes: [0: "[已折叠步骤 #0]", 2: "[已折叠步骤 #2]"],
+                deduplicatedStubs: [1: "step:0"]
+            )
+            session.noteNarrativeWorkspaceUpdated(ws)
+
+            session.payload.world.styleTemplate = ""
+            session.syncWorldChangesIntoNarrativeWorkspace()
+            let afterDefaultSync = session.ensureNarrativeWorkspace()
+            try expect(
+                afterDefaultSync.currentState().entityPages["c_ghost"] == nil
+                    && afterDefaultSync.preservedStyle.styleTemplate.isEmpty,
+                "默认世界同步不得复活已删实体，且清空 styleTemplate 时应清空工作区保留模板"
+            )
+
+            // 2. 无工具模式下 ReFold 不得泄露 restore_turn，且撤回消息应清理受影响区间的折叠边界与存根。
+            let noToolHistory: [LLMMessage] = [
+                .user(String(repeating: "轮次零。", count: 55)),
+                .assistant(String(repeating: "轮次一。", count: 55)),
+                .user(String(repeating: "轮次二。", count: 55)),
+                .assistant("短保留一"),
+                .user("短保留二"),
+                .assistant("短保留三"),
+                .user("短保留四"),
+                .assistant("短保留五"),
+                .user("短保留六"),
+            ]
+            let noToolPlan = ReFoldManager.apply(
+                history: noToolHistory,
+                boundary: ReFoldBoundary(boundaryTurnIndex: 3, stride: 3),
+                modelContextWindow: 32_000,
+                effectiveInputBudget: 2_000,
+                allowRestoreTool: false
+            )
+            let noToolJoined = noToolPlan.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                !noToolJoined.contains("restore_turn") && noToolPlan.foldedTurnCount > 0,
+                "禁用工具时 ReFold 存根不得出现 restore_turn 工具提示"
+            )
+
+            _ = session.withdraw(from: "m2")
+            let invalidatedBoundary = session.ensureNarrativeWorkspace().reFoldBoundary
+            try expect(
+                invalidatedBoundary.boundaryTurnIndex == 0
+                    && invalidatedBoundary.foldedStepNotes.isEmpty
+                    && invalidatedBoundary.deduplicatedStubs.isEmpty,
+                "撤回早期消息后必须清理从该位置起的 ReFoldBoundary 与旧存根"
+            )
+
+            // 3. 语境感知改写提示词应带上前/下文衔接、规则、在场角色与仿写模板。
+            var rewriteWS = session.ensureNarrativeWorkspace()
+            rewriteWS.preservedStyle = PreservedStyleDistillation(styleTemplate: "短句动作流")
+            let fullManuscript = "雾港夜雨敲着码头石阶，林昭攥紧掌心半枚残令。\n\n他在街角停步回头。\n\n对面楼上沈清秋正冷眼看着。"
+            let targetText = "他在街角停步回头。"
+            let targetRange = (fullManuscript as NSString).range(of: targetText)
+            let rewriteMessages = NarrativeContextOrchestrator.buildRewritePrompt(
+                workspace: rewriteWS,
+                manuscript: fullManuscript,
+                range: targetRange,
+                selection: targetText,
+                instruction: "写得更有压迫感",
+                settings: AppSettings()
+            )
+            let rewriteJoined = rewriteMessages.map(\.content).joined(separator: "\n")
+            try expect(
+                rewriteJoined.contains("短句动作流")
+                    && rewriteJoined.contains("保持克制冷峻")
+                    && rewriteJoined.contains("林昭")
+                    && rewriteJoined.contains("【上文衔接")
+                    && rewriteJoined.contains("【下文衔接")
+                    && rewriteJoined.contains("【待改写片段】"),
+                "语境改写提示词应注入仿写模板、写作规则、在场人物与前后文衔接片段"
+            )
+
+            // 4. 局部改写后 AnchorIndex 应删除改写区旧锚点并精确平移下游偏移。
+            var anchorIndex = AnchorIndex(
+                version: 1,
+                anchors: [
+                    MechanicalAnchor(
+                        id: "anc_before",
+                        kind: .artifactOrCount,
+                        surfaceText: "铜钥匙",
+                        span: TextSpanAnchor.make(utf16Start: 12, utf16Length: 3, quote: "铜钥匙")
+                    ),
+                    MechanicalAnchor(
+                        id: "anc_inside",
+                        kind: .timeMarker,
+                        surfaceText: "三更",
+                        span: TextSpanAnchor.make(utf16Start: 80, utf16Length: 2, quote: "三更")
+                    ),
+                    MechanicalAnchor(
+                        id: "anc_after",
+                        kind: .location,
+                        surfaceText: "松鹤楼",
+                        span: TextSpanAnchor.make(utf16Start: 200, utf16Length: 3, quote: "松鹤楼")
+                    ),
+                ],
+                indexedUTF16Length: 240
+            )
+            let editRange = NSRange(location: 75, length: 10)
+            let replacement = "次日破晓前林昭重新检查了门闩"
+            let sampleUpdated = String(repeating: "甲", count: 75)
+                + replacement
+                + String(repeating: "乙", count: 240 - 85)
+            anchorIndex.adjustForEdit(
+                range: editRange,
+                replacementUTF16Length: (replacement as NSString).length,
+                updatedText: sampleUpdated,
+                knownEntities: []
+            )
+            let delta = (replacement as NSString).length - editRange.length
+            let shiftedAfter = anchorIndex.anchors.first { $0.id == "anc_after" }
+            try expect(
+                anchorIndex.anchors.contains { $0.id == "anc_before" && $0.span.utf16Start == 12 }
+                    && !anchorIndex.anchors.contains { $0.id == "anc_inside" }
+                    && shiftedAfter?.span.utf16Start == 200 + delta
+                    && anchorIndex.indexedUTF16Length == (sampleUpdated as NSString).length,
+                "局部改写应移除窗口内旧锚点、平移下游锚点并保持前缀锚点稳定"
+            )
+
+            return "旧档隔离 + ReFold无工具与撤回清理 + 语境改写 + 锚点局部调整 ok"
+        }
+
+        // 验证 corpusEnabled 开关控制语料范文、replaceManuscript 重置锚点与阅读器定位。
+        check("narrative.phase2ReaderCorpusAndReset") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-phase2-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+
+            let projectID = "phase2-reset-\(UUID().uuidString)"
+            let posKey = ReaderStorageKey.position(projectID)
+            let bkmKey = ReaderStorageKey.bookmark(projectID)
+            UserDefaults.standard.set(128, forKey: posKey)
+            UserDefaults.standard.set(64, forKey: bkmKey)
+            defer {
+                UserDefaults.standard.removeObject(forKey: posKey)
+                UserDefaults.standard.removeObject(forKey: bkmKey)
+            }
+
+            let session = ProjectSession(
+                project: Project(id: projectID, title: "二阶段校验"),
+                payload: ProjectPayload(manuscript: "旧正文第一段。"),
+                source: "",
+                translations: [],
+                store: files,
+                readOnly: true
+            )
+            var ws = session.ensureNarrativeWorkspace()
+            ws.anchorIndex = AnchorIndex(
+                version: 3,
+                anchors: [
+                    MechanicalAnchor(
+                        id: "anc_old",
+                        kind: .location,
+                        surfaceText: "旧码头",
+                        span: TextSpanAnchor.make(utf16Start: 0, utf16Length: 3, quote: "旧码头")
+                    )
+                ],
+                indexedUTF16Length: 10
+            )
+            let centroid = CorpusEntry(id: "c_cent", source: "样本", title: "冷峻质心", text: "风声掠过砖缝。")
+            let sceneEx = CorpusEntry(id: "c_scene", source: "样本", title: "夜巷对峙", text: "雨打青石阶。")
+            ws.preservedStyle = PreservedStyleDistillation(
+                styleTemplate: "短句白描规则",
+                centroidExemplar: centroid,
+                exemplars: [centroid, sceneEx]
+            )
+            session.noteNarrativeWorkspaceUpdated(ws)
+
+            var disabledSettings = AppSettings()
+            disabledSettings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-chat")]
+            disabledSettings.activeProviderID = disabledSettings.providers[0].id
+            disabledSettings.corpusEnabled = false
+
+            let withoutCorpus = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: "林昭走进雨巷。",
+                history: [],
+                userInstruction: "夜巷对峙，继续写",
+                settings: disabledSettings,
+                enabledUniverseEntryIDs: [],
+                inputBudget: 16_000,
+                enableTools: false
+            )
+            let joinedNoCorpus = withoutCorpus.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                joinedNoCorpus.contains("短句白描规则")
+                    && !joinedNoCorpus.contains("风声掠过砖缝")
+                    && !joinedNoCorpus.contains("雨打青石阶"),
+                "关闭 corpusEnabled 时不得注入质心或场景示范语料，仅保留仿写模板"
+            )
+
+            session.replaceManuscript("全新导入的正文。")
+            let resetWS = session.ensureNarrativeWorkspace()
+            try expect(
+                resetWS.anchorIndex.anchors.isEmpty
+                    && UserDefaults.standard.object(forKey: posKey) == nil
+                    && UserDefaults.standard.object(forKey: bkmKey) == nil,
+                "replaceManuscript 应清零叙事锚点索引并清除旧书阅读定位/书签"
+            )
+
+            return "语料开关隔离 + 导入正文重置锚点与阅读键 ok"
+        }
+
+        // 验证非 BMP 代理对真实页起点切片无偏移漂移，以及五维文风检查器对白豁免与跨语域阈值。
+        check("narrative.phase3OffsetsAndStyleLint") {
+            let pages = [
+                "第零页甲乙丙丁戊己庚", // len 10
+                "第一页子丑寅卯辰巳午未", // len 11 (不等长，模拟代理对缩页)
+                "第二页终章落幕",
+            ]
+            let source = ReaderPageSource(
+                pageCount: pages.count,
+                pageSize: 12,
+                pageStartOffsets: [0, 10, 21],
+                loader: { idx in pages[idx] }
+            )
+            let crossSlice = source.text(in: NSRange(location: 8, length: 6))
+            try expect(
+                crossSlice == "己庚第一页子",
+                "不等长分页应按 pageStartOffsets 精确定位跨页切片（实得：\(crossSlice)）"
+            )
+
+            let prose = "“他推门而出，他冷笑一声。”\n他站在廊下，他回头看了一眼。她按下灯扣，她没有出声。"
+            let denseReport = ProseStyleLinter.lint(
+                prose,
+                thresholds: StyleLintThresholds(
+                    hollowPronounsPer1K: 100,
+                    demonstrativeClutterPer1K: 100,
+                    contrastiveNegationPer1K: 100,
+                    narrationEmDashPer1K: 100,
+                    barePronounChainPer1K: 1.0,
+                    minimumNarrationChars: 10
+                )
+            )
+            try expect(
+                (denseReport.metricsPer1KChars["bare_pronoun_chain"] ?? 0) > 1.0
+                    && !denseReport.flaggedSpans.contains { $0.quote.contains("冷笑") }
+                    && StyleLintProfile.webFiction.thresholds.demonstrativeClutterPer1K > StyleLintProfile.literary.thresholds.demonstrativeClutterPer1K,
+                "文风检查应检出旁白连续裸代词、豁免对白并支持分语域阈值"
+            )
+
+            return "不等长页起点定位 + 五维文风检查器 ok"
         }
     }
 

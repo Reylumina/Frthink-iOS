@@ -132,6 +132,7 @@ struct RequestSnapshotsSheet: View {
         case "corpus": name = "语料"
         case "worldbook": name = "世界书"
         case "character": name = "人物卡"
+        case "narrative": name = "叙事工作区"
         default: return nil
         }
         return "来源 · \(name)"

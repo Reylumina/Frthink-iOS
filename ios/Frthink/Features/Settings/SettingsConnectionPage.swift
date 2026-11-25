@@ -130,14 +130,6 @@ struct SettingsConnectionPage: View {
                     detail: narrativeSyncModelShortLabel
                 )
             }
-            NavigationLink {
-                SettingsSummaryModelPage(store: store)
-            } label: {
-                SettingsLabelRow(
-                    title: "摘要模型",
-                    detail: summaryModelShortLabel
-                )
-            }
         } header: {
             AppSectionHeader(title: "任务模型")
         }
@@ -202,12 +194,6 @@ struct SettingsConnectionPage: View {
               let provider = store.settings.providers.first(where: { $0.id == providerID })
         else { return "跟随当前" }
         return provider.resolvedModel.isEmpty ? provider.kind.displayName : provider.resolvedModel
-    }
-
-    private var summaryModelShortLabel: String {
-        let model = store.settings.summaryModel
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return model.isEmpty ? "跟随当前" : model
     }
 
     private var outputBudgetShortLabel: String {

@@ -25,6 +25,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         case activeFacts
         case epistemicBeliefs
         case threads
+        case episodicEvents
         case conflictWarnings
         case pyramid
         case anchorIndex
@@ -56,6 +57,9 @@ struct NarrativeWorkspace: Codable, Hashable {
         didSet { sectionRevisions.ledgers &+= 1 }
     }
     var threads: [String: ProspectiveThread] {
+        didSet { sectionRevisions.ledgers &+= 1 }
+    }
+    var episodicEvents: [String: EpisodicEvent] {
         didSet { sectionRevisions.ledgers &+= 1 }
     }
     var conflictWarnings: [StateConflictWarning] {
@@ -99,6 +103,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         activeFacts: [String: WorldFactEvent] = [:],
         epistemicBeliefs: [String: EpistemicBelief] = [:],
         threads: [String: ProspectiveThread] = [:],
+        episodicEvents: [String: EpisodicEvent] = [:],
         conflictWarnings: [StateConflictWarning] = [],
         pyramid: NarrativePyramid = NarrativePyramid(),
         anchorIndex: AnchorIndex = AnchorIndex(),
@@ -117,6 +122,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         self.activeFacts = activeFacts
         self.epistemicBeliefs = epistemicBeliefs
         self.threads = threads
+        self.episodicEvents = episodicEvents
         self.conflictWarnings = conflictWarnings
         self.pyramid = pyramid
         self.anchorIndex = anchorIndex
@@ -140,6 +146,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         activeFacts = (try? c.decode([String: WorldFactEvent].self, forKey: .activeFacts)) ?? [:]
         epistemicBeliefs = (try? c.decode([String: EpistemicBelief].self, forKey: .epistemicBeliefs)) ?? [:]
         threads = (try? c.decode([String: ProspectiveThread].self, forKey: .threads)) ?? [:]
+        episodicEvents = (try? c.decode([String: EpisodicEvent].self, forKey: .episodicEvents)) ?? [:]
         conflictWarnings = (try? c.decode([StateConflictWarning].self, forKey: .conflictWarnings)) ?? []
         pyramid = (try? c.decode(NarrativePyramid.self, forKey: .pyramid)) ?? NarrativePyramid()
         anchorIndex = (try? c.decode(AnchorIndex.self, forKey: .anchorIndex)) ?? AnchorIndex()
@@ -162,6 +169,7 @@ struct NarrativeWorkspace: Codable, Hashable {
             && lhs.activeFacts == rhs.activeFacts
             && lhs.epistemicBeliefs == rhs.epistemicBeliefs
             && lhs.threads == rhs.threads
+            && lhs.episodicEvents == rhs.episodicEvents
             && lhs.conflictWarnings == rhs.conflictWarnings
             && lhs.pyramid == rhs.pyramid
             && lhs.anchorIndex == rhs.anchorIndex
@@ -182,6 +190,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         hasher.combine(activeFacts)
         hasher.combine(epistemicBeliefs)
         hasher.combine(threads)
+        hasher.combine(episodicEvents)
         hasher.combine(conflictWarnings)
         hasher.combine(pyramid)
         hasher.combine(anchorIndex)
@@ -218,6 +227,7 @@ struct NarrativeWorkspace: Codable, Hashable {
                 factHistory: [],
                 epistemicBeliefs: epistemicBeliefs,
                 threads: threads,
+                episodicEvents: episodicEvents,
                 pyramid: pyramid,
                 conflictWarnings: conflictWarnings
             )
@@ -234,6 +244,7 @@ struct NarrativeWorkspace: Codable, Hashable {
             factHistory: [],
             epistemicBeliefs: epistemicBeliefs,
             threads: threads,
+            episodicEvents: episodicEvents,
             pyramid: pyramid,
             conflictWarnings: conflictWarnings
         )
@@ -269,6 +280,9 @@ struct NarrativeWorkspace: Codable, Hashable {
         guard entityPages.removeValue(forKey: id) != nil else { return false }
         activeFacts = activeFacts.filter { $0.value.entityID != id }
         epistemicBeliefs = epistemicBeliefs.filter { $0.value.characterID != id }
+        for key in Array(episodicEvents.keys) {
+            episodicEvents[key]?.participantEntityIDs.removeAll { $0 == id }
+        }
         if activePOVCharacterID == id {
             activePOVCharacterID = nil
         }
@@ -349,6 +363,11 @@ struct NarrativeWorkspace: Codable, Hashable {
         merged.epistemicBeliefs = branchState.epistemicBeliefs.filter { _, belief in
             live.entityPages[belief.characterID] != nil || branchState.entityPages[belief.characterID] == nil
         }
+        for key in Array(merged.episodicEvents.keys) {
+            merged.episodicEvents[key]?.participantEntityIDs.removeAll { entityID in
+                live.entityPages[entityID] == nil && branchState.entityPages[entityID] != nil
+            }
+        }
         for entityID in Array(merged.entityPages.keys) {
             let factIDs = merged.facts(for: entityID).map(\.id)
             merged.entityPages[entityID]?.currentFactIDs = factIDs
@@ -364,6 +383,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         activeFacts = state.activeFacts
         epistemicBeliefs = state.epistemicBeliefs
         threads = state.threads
+        episodicEvents = state.episodicEvents
         conflictWarnings = state.conflictWarnings
         pyramid = state.pyramid
         hasLiveLedgers = true

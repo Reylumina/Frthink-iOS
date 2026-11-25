@@ -6,9 +6,67 @@ struct StyleLintThresholds: Codable, Hashable {
     var demonstrativeClutterPer1K: Double = 6.0
     var contrastiveNegationPer1K: Double = 1.5
     var narrationEmDashPer1K: Double = 3.0
+    /// MUSE App. F 跨句式族替代检测：抑制表面词汇后若裸代词高频连续出现也会暴露 AI 味。
+    var barePronounChainPer1K: Double = 4.5
     var minimumNarrationChars: Int = 40
 
     static let literaryP90 = StyleLintThresholds()
+    static let webFictionP90 = StyleLintThresholds(
+        hollowPronounsPer1K: 5.5,
+        demonstrativeClutterPer1K: 8.0,
+        contrastiveNegationPer1K: 2.2,
+        narrationEmDashPer1K: 4.5,
+        barePronounChainPer1K: 6.0,
+        minimumNarrationChars: 40
+    )
+
+    init(
+        hollowPronounsPer1K: Double = 4.0,
+        demonstrativeClutterPer1K: Double = 6.0,
+        contrastiveNegationPer1K: Double = 1.5,
+        narrationEmDashPer1K: Double = 3.0,
+        barePronounChainPer1K: Double = 4.5,
+        minimumNarrationChars: Int = 40
+    ) {
+        self.hollowPronounsPer1K = hollowPronounsPer1K
+        self.demonstrativeClutterPer1K = demonstrativeClutterPer1K
+        self.contrastiveNegationPer1K = contrastiveNegationPer1K
+        self.narrationEmDashPer1K = narrationEmDashPer1K
+        self.barePronounChainPer1K = barePronounChainPer1K
+        self.minimumNarrationChars = minimumNarrationChars
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hollowPronounsPer1K = (try? c.decode(Double.self, forKey: .hollowPronounsPer1K)) ?? 4.0
+        demonstrativeClutterPer1K = (try? c.decode(Double.self, forKey: .demonstrativeClutterPer1K)) ?? 6.0
+        contrastiveNegationPer1K = (try? c.decode(Double.self, forKey: .contrastiveNegationPer1K)) ?? 1.5
+        narrationEmDashPer1K = (try? c.decode(Double.self, forKey: .narrationEmDashPer1K)) ?? 3.0
+        barePronounChainPer1K = (try? c.decode(Double.self, forKey: .barePronounChainPer1K)) ?? 4.5
+        minimumNarrationChars = (try? c.decode(Int.self, forKey: .minimumNarrationChars)) ?? 40
+    }
+}
+
+/// 按文风语域切换体检基线（对应 MUSE App. F：文学与网文的基线密度应分离）。
+enum StyleLintProfile: String, CaseIterable, Identifiable {
+    case literary
+    case webFiction
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .literary: return "文学 / 正剧"
+        case .webFiction: return "网文 / 快节奏"
+        }
+    }
+
+    var thresholds: StyleLintThresholds {
+        switch self {
+        case .literary: return .literaryP90
+        case .webFiction: return .webFictionP90
+        }
+    }
 }
 
 /// 纯本地确定性中文文风检查器：不发起模型调用，按旁白密度定位模板化句式，
@@ -47,6 +105,13 @@ enum ProseStyleLinter {
             key: "narration_em_dash",
             regex: try? NSRegularExpression(pattern: "——"),
             threshold: { $0.narrationEmDashPer1K }
+        ),
+        RuleSpec(
+            key: "bare_pronoun_chain",
+            regex: try? NSRegularExpression(
+                pattern: "(?:^|[。！？\\n])[他她它][^。！？\\n]{0,18}[，,][^。！？\\n]{0,12}[他她它]"
+            ),
+            threshold: { $0.barePronounChainPer1K }
         ),
     ]
 

@@ -85,6 +85,7 @@ final class ProjectSession {
     @ObservationIgnored private(set) var bodyBlocks: [BodyBlock]?
     @ObservationIgnored private(set) var bodyPageCount = 0
     @ObservationIgnored private(set) var bodyUTF16Length = 0
+    @ObservationIgnored private(set) var bodyPageStartOffsets: [Int] = []
 
     /// 编辑器窗口状态：仅保留正文末尾指定页数，起止均对齐分页边界。
     /// 避免编辑与保存时将全量文本加载至内存。
@@ -139,7 +140,9 @@ final class ProjectSession {
         }
         let pageSize = meta.pageSize ?? FileStore.bodyPageSize
         let startPage = max(0, pageCount - 2)
-        let start = startPage * pageSize
+        let start = (meta.pageStartOffsets?.indices.contains(startPage) == true)
+            ? meta.pageStartOffsets![startPage]
+            : startPage * pageSize
         guard let text = loadBodyPageRange(startPage..<pageCount) else {
             loadManuscriptIfNeeded()
             return
@@ -229,9 +232,10 @@ final class ProjectSession {
     /// 外部需要整本正文时，把窗口拼回全文并退出窗口模式。
     private func collapseEditorWindow() {
         guard let window = editorWindow else { return }
-        guard let full = store.loadBody(project.id)?.text,
-              (full as NSString).length >= window.start
-        else { return }
+        let loaded = store.loadBody(project.id)?.text
+        if loaded == nil && window.start > 0 { return }
+        let full = loaded ?? ""
+        guard (full as NSString).length >= window.start else { return }
         let prefix = (full as NSString).substring(to: window.start)
         payload.manuscript = prefix + window.text
         bodyLoaded = true
@@ -244,15 +248,27 @@ final class ProjectSession {
         scheduleBodySave()
     }
 
-    /// 阅读页分页来源是否可用。正文一旦解密/编辑过就回退全文，
-    /// 避免拿旧块索引去切新文本。
+    /// 阅读页分页来源是否可用。一旦正在窗口编辑、待落盘或刚进入全文态就回退全文，
+    /// 避免拿旧块索引去切正在重写的新页。
     var canReadByPage: Bool {
-        !bodyLoaded && bodyPageCount > 0 && !(bodyBlocks?.isEmpty ?? true)
+        !bodyLoaded
+            && editorWindow == nil
+            && !bodyDirty
+            && !saveInFlight
+            && bodyPageCount > 0
+            && !(bodyBlocks?.isEmpty ?? true)
     }
 
     /// 阅读页单页解密。只在主线程、按需调用。
     func bodyPage(_ index: Int) -> String? {
         store.loadBodyPage(project.id, index: index)
+    }
+
+    func pageStartOffset(for pageIndex: Int) -> Int {
+        if bodyPageStartOffsets.indices.contains(pageIndex) {
+            return bodyPageStartOffsets[pageIndex]
+        }
+        return max(0, pageIndex) * FileStore.bodyPageSize
     }
 
     init(
@@ -280,6 +296,7 @@ final class ProjectSession {
         self.bodyBlocks = meta?.blocks
         self.bodyPageCount = meta?.pageCount ?? 0
         self.bodyUTF16Length = meta?.utf16Length ?? project.bodyUTF16Length ?? 0
+        self.bodyPageStartOffsets = meta?.pageStartOffsets ?? []
         if payload.manuscript.isEmpty, let meta {
             self.manuscriptCharacterCount = meta.characterCount
             self.project.bodyCharacterCount = meta.characterCount
@@ -455,6 +472,7 @@ final class ProjectSession {
         let activeFacts: [String: WorldFactEvent]
         let epistemicBeliefs: [String: EpistemicBelief]
         let threads: [String: ProspectiveThread]
+        let episodicEvents: [String: EpisodicEvent]
         let conflictWarnings: [StateConflictWarning]
         let pyramid: NarrativePyramid
         let hasLiveLedgers: Bool
@@ -475,6 +493,7 @@ final class ProjectSession {
             activeFacts: workspace.activeFacts,
             epistemicBeliefs: workspace.epistemicBeliefs,
             threads: workspace.threads,
+            episodicEvents: workspace.episodicEvents,
             conflictWarnings: workspace.conflictWarnings,
             pyramid: workspace.pyramid,
             hasLiveLedgers: workspace.hasLiveLedgers,
@@ -516,6 +535,7 @@ final class ProjectSession {
         workspace.activeFacts = snapshot.activeFacts
         workspace.epistemicBeliefs = snapshot.epistemicBeliefs
         workspace.threads = snapshot.threads
+        workspace.episodicEvents = snapshot.episodicEvents
         workspace.conflictWarnings = snapshot.conflictWarnings
         workspace.pyramid = snapshot.pyramid
         workspace.hasLiveLedgers = snapshot.hasLiveLedgers
@@ -608,7 +628,9 @@ final class ProjectSession {
 
     /// 将世界书流程更新后的文风、人物与长期规则委托给导出导入层增量并入已挂载的 `NarrativeWorkspace`。
     func syncWorldChangesIntoNarrativeWorkspace(
-        settingsCorpusLibraries: [CorpusLibrary] = []
+        settingsCorpusLibraries: [CorpusLibrary] = [],
+        syncLegacyCharacters: Bool = false,
+        syncLongTermRules: Bool = false
     ) {
         guard var workspace = narrativeWorkspace else { return }
         let changed = LegacyArchiveImporter.syncWorldChanges(
@@ -616,9 +638,20 @@ final class ProjectSession {
             projectID: project.id,
             projectTitle: project.title,
             settingsCorpusLibraries: settingsCorpusLibraries,
+            syncLegacyCharacters: syncLegacyCharacters,
+            syncLongTermRules: syncLongTermRules,
             into: &workspace
         )
         if changed {
+            noteNarrativeWorkspaceUpdated(workspace)
+        }
+    }
+
+    private func invalidateReFoldBoundary(fromTurnIndex turnIndex: Int) {
+        guard var workspace = narrativeWorkspace else { return }
+        let before = workspace.reFoldBoundary
+        workspace.reFoldBoundary.invalidate(fromTurnIndex: turnIndex)
+        if workspace.reFoldBoundary != before {
             noteNarrativeWorkspaceUpdated(workspace)
         }
     }
@@ -1095,9 +1128,13 @@ final class ProjectSession {
             bodyBlocks = savedMeta.blocks
             bodyPageCount = savedMeta.pageCount ?? 0
             bodyUTF16Length = savedMeta.utf16Length
+            bodyPageStartOffsets = savedMeta.pageStartOffsets ?? []
             manuscriptCharacterCount = savedMeta.characterCount
         }
         saveInFlight = false
+        if writeResult.savedMeta != nil {
+            manuscriptRevision += 1
+        }
         resumeSaveWaiters()
         if let firstError = writeResult.firstError {
             // 保持 dirty，但不再自动重试：磁盘满时每 2 秒重试只会更糟。
@@ -1309,7 +1346,11 @@ final class ProjectSession {
 
     /// 删除单条消息，适用于用户指令与模型生成的回复。
     func deleteMessage(_ messageID: String) {
+        let removedIndex = payload.messages.firstIndex { $0.id == messageID }
         payload.messages.removeAll { $0.id == messageID }
+        if let removedIndex {
+            invalidateReFoldBoundary(fromTurnIndex: removedIndex)
+        }
         scheduleSave()
     }
 
@@ -1321,6 +1362,7 @@ final class ProjectSession {
         guard let index = payload.messages.firstIndex(where: { $0.id == messageID }) else { return [] }
         let removed = Array(payload.messages[index...])
         payload.messages.removeSubrange(index...)
+        invalidateReFoldBoundary(fromTurnIndex: index)
         scheduleSave()
         return removed
     }
@@ -1336,13 +1378,18 @@ final class ProjectSession {
         } else {
             payload.messages.append(contentsOf: messages)
         }
+        invalidateReFoldBoundary(fromTurnIndex: index ?? 0)
         scheduleSave()
     }
 
     /// 多选删除：一次移除多条消息，只发一次保存。
     func deleteMessages(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }
+        let minIndex = payload.messages.indices.first { ids.contains(payload.messages[$0].id) }
         payload.messages.removeAll { ids.contains($0.id) }
+        if let minIndex {
+            invalidateReFoldBoundary(fromTurnIndex: minIndex)
+        }
         scheduleSave()
     }
 
@@ -1350,6 +1397,7 @@ final class ProjectSession {
     func clearConversation() {
         guard !payload.messages.isEmpty else { return }
         payload.messages.removeAll()
+        invalidateReFoldBoundary(fromTurnIndex: 0)
         scheduleSave()
     }
 
@@ -1433,14 +1481,22 @@ final class ProjectSession {
         return insertIntoManuscript(separator + paragraph, at: end)
     }
 
-    /// 整段替换正文（「导入正文」用）。锚点跟着一起清掉，避免落在旧文档的偏移上。
+    /// 整段替换正文（「导入正文」用）。同步重置阅读定位、窗口状态与叙事索引，避免落在旧文档偏移上。
     func replaceManuscript(_ text: String) {
         payload.manuscript = text
+        editorWindow = nil
         bodyLoaded = true
         bodyDirty = true
         payload.continuationAnchor = nil
         payload.readerOffset = 0
         payload.readerBookmarkOffset = 0
+        UserDefaults.standard.removeObject(forKey: ReaderStorageKey.position(project.id))
+        UserDefaults.standard.removeObject(forKey: ReaderStorageKey.bookmark(project.id))
+        if var workspace = narrativeWorkspace {
+            workspace.anchorIndex = AnchorIndex()
+            workspace.latestStyleLint = nil
+            noteNarrativeWorkspaceUpdated(workspace)
+        }
         manuscriptRevision += 1
         rescanChapters()
         scheduleSave()
@@ -1507,10 +1563,12 @@ final class ProjectSession {
             bodyBlocks = meta.blocks
             bodyPageCount = meta.pageCount ?? 0
             bodyUTF16Length = meta.utf16Length
+            bodyPageStartOffsets = meta.pageStartOffsets ?? []
             manuscriptCharacterCount = meta.characterCount
         } else {
             bodyBlocks = nil
             bodyPageCount = 0
+            bodyPageStartOffsets = []
             bodyUTF16Length = (payload.manuscript as NSString).length
             manuscriptCharacterCount = payload.manuscript.count
         }
@@ -1635,6 +1693,7 @@ final class ProjectSession {
         var message = payload.messages[index]
         if message.variants.count <= 1 {
             payload.messages.remove(at: index)
+            invalidateReFoldBoundary(fromTurnIndex: index)
         } else {
             let removed = min(max(message.selectedVariant, 0), message.variants.count - 1)
             message.variants.remove(at: removed)
@@ -1655,6 +1714,7 @@ final class ProjectSession {
         guard let index = payload.messages.firstIndex(where: { $0.id == messageID })
         else { return }
         payload.messages.removeSubrange(index..<payload.messages.count)
+        invalidateReFoldBoundary(fromTurnIndex: index)
         scheduleSave()
     }
 

@@ -6,7 +6,6 @@ struct LLMMessage: Codable, Hashable {
     var role: String
     var content: String
     var reasoningContent: String? = nil
-    var isPrefix: Bool = false
     /// 模型发起的函数调用清单（工具对话轮次序列化用）。
     var toolCalls: [LLMToolCall]? = nil
     /// 工具返回消息关联的调用 ID（`role == "tool"` 时附带）。
@@ -16,10 +15,9 @@ struct LLMMessage: Codable, Hashable {
     static func user(_ s: String) -> LLMMessage { .init(role: "user", content: s) }
     static func assistant(
         _ s: String,
-        reasoningContent: String? = nil,
-        isPrefix: Bool = false
+        reasoningContent: String? = nil
     ) -> LLMMessage {
-        .init(role: "assistant", content: s, reasoningContent: reasoningContent, isPrefix: isPrefix)
+        .init(role: "assistant", content: s, reasoningContent: reasoningContent)
     }
     static func assistantToolCalls(
         _ calls: [LLMToolCall],
@@ -52,7 +50,7 @@ struct LLMToolCall: Codable, Hashable, Sendable {
     var arguments: String
 }
 
-/// 推理方言：统一封装不同服务商/模型对 `reasoning_content` 与末尾预填充键的差异。
+/// 推理方言：统一封装不同服务商/模型对 `reasoning_content` 字段的差异。
 enum ReasoningDialect {
     case deepseek
     case kimi
@@ -77,14 +75,6 @@ enum ReasoningDialect {
     }
 
     var supportsReasoningContent: Bool { self != .standard }
-
-    var prefixKey: String? {
-        switch self {
-        case .deepseek, .glm: return "prefix"
-        case .kimi: return "partial"
-        case .standard: return nil
-        }
-    }
 }
 
 /// 一次请求。
@@ -243,9 +233,6 @@ struct LLMRequest {
                     ],
                 ] as [String: Any]
             }
-        }
-        if msg.isPrefix, let prefixKey = dialect.prefixKey {
-            dict[prefixKey] = true
         }
         return dict
     }

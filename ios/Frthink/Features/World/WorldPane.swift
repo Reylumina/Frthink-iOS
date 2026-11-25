@@ -248,7 +248,7 @@ struct WorldPane: View {
 
             Divider()
 
-            Button("文风检查", systemImage: "doc.text.magnifyingglass") {
+            Button("行文观感", systemImage: "wand.and.stars") {
                 showingStyleLint = true
             }
         } label: {

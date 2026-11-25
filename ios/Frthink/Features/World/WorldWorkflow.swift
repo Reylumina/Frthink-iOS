@@ -367,7 +367,8 @@ enum WorldWorkflow {
         let complete = endCodePoint >= totalCodePoints
         session.payload.world.analysisWorldRefreshComplete = complete
         session.syncWorldChangesIntoNarrativeWorkspace(
-            settingsCorpusLibraries: store.settings.corpusLibraries
+            settingsCorpusLibraries: store.settings.corpusLibraries,
+            syncLegacyCharacters: true
         )
         session.scheduleSave()
 
@@ -431,7 +432,8 @@ enum WorldWorkflow {
         let result = try await commitCandidates(session: session, context: context)
         session.payload.world.analysisWorldRefreshComplete = true
         session.syncWorldChangesIntoNarrativeWorkspace(
-            settingsCorpusLibraries: settingsCorpusLibraries
+            settingsCorpusLibraries: settingsCorpusLibraries,
+            syncLegacyCharacters: true
         )
         session.scheduleSave()
         return result

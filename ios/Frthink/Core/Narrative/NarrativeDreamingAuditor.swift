@@ -168,10 +168,11 @@ enum NarrativeDreamingAuditor {
 
             case .staleBelief:
                 guard let belief = state.epistemicBeliefs[finding.targetID],
-                      let latestFact = state.activeFacts[belief.slotKey],
-                      !latestFact.isRetracted,
-                      latestFact.value != belief.believedTruth,
-                      (depthByNodeID[latestFact.nodeID] ?? 0) > (depthByNodeID[belief.updatedAtNodeID] ?? 0)
+                      let latestFact = matchingLatestFact(
+                          for: belief,
+                          in: state,
+                          depthByNodeID: depthByNodeID
+                      )
                 else {
                     continue
                 }
@@ -227,6 +228,60 @@ enum NarrativeDreamingAuditor {
         return cleanedCount
     }
 
+    static func matchingLatestFact(
+        for belief: EpistemicBelief,
+        in state: MaterializedNarrativeState,
+        depthByNodeID: [String: Int]
+    ) -> WorldFactEvent? {
+        let beliefDepth = depthByNodeID[belief.updatedAtNodeID] ?? 0
+
+        if let exactFact = state.activeFacts[belief.slotKey],
+           !exactFact.isRetracted,
+           let factDepth = depthByNodeID[exactFact.nodeID],
+           factDepth > beliefDepth,
+           exactFact.value != belief.believedTruth {
+            return exactFact
+        }
+
+        let cleanTopic = belief.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTruth = belief.believedTruth.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let candidates = state.facts(for: belief.characterID).compactMap { fact -> (fact: WorldFactEvent, depth: Int)? in
+            guard !fact.isRetracted,
+                  fact.authority >= .canonProseQuote,
+                  let factDepth = depthByNodeID[fact.nodeID],
+                  factDepth > beliefDepth,
+                  fact.value != belief.believedTruth else {
+                return nil
+            }
+            let rawAttr = fact.attribute.trimmingCharacters(in: .whitespacesAndNewlines)
+            let attrBody: String
+            if let colonRange = rawAttr.range(of: ":") {
+                attrBody = String(rawAttr[colonRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                attrBody = rawAttr
+            }
+
+            let topicHitsFact = cleanTopic.count >= 2 && (
+                rawAttr.localizedCaseInsensitiveContains(cleanTopic)
+                    || (!attrBody.isEmpty && attrBody.localizedCaseInsensitiveContains(cleanTopic))
+                    || fact.value.localizedCaseInsensitiveContains(cleanTopic)
+            )
+            let attrHitsBelief = attrBody.count >= 2 && (
+                cleanTopic.localizedCaseInsensitiveContains(attrBody)
+                    || cleanTruth.localizedCaseInsensitiveContains(attrBody)
+            )
+            guard topicHitsFact || attrHitsBelief else { return nil }
+            return (fact, factDepth)
+        }
+
+        return candidates.max { lhs, rhs in
+            if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
+            if lhs.fact.createdAt != rhs.fact.createdAt { return lhs.fact.createdAt < rhs.fact.createdAt }
+            return lhs.fact.id < rhs.fact.id
+        }?.fact
+    }
+
     // MARK: - 分类审计
 
     private static func auditBeliefs(
@@ -239,13 +294,12 @@ enum NarrativeDreamingAuditor {
 
         for belief in sortedBeliefs {
             let charName = state.entityPages[belief.characterID]?.name ?? belief.characterID
-            let beliefDepth = depthByNodeID[belief.updatedAtNodeID] ?? 0
 
-            if let latestFact = state.activeFacts[belief.slotKey],
-               !latestFact.isRetracted,
-               let factDepth = depthByNodeID[latestFact.nodeID],
-               factDepth > beliefDepth,
-               latestFact.value != belief.believedTruth {
+            if let latestFact = matchingLatestFact(
+                for: belief,
+                in: state,
+                depthByNodeID: depthByNodeID
+            ) {
                 out.append(
                     DreamingFinding(
                         id: stableID(prefix: "stale_conflict", key: belief.slotKey),
@@ -303,7 +357,9 @@ enum NarrativeDreamingAuditor {
         let sortedPages = state.entityPages.values.sorted { $0.id < $1.id }
 
         for page in sortedPages {
-            let activeFactCount = state.facts(for: page.id).count
+            let activeFactCount = state.facts(for: page.id)
+                .filter { !$0.attribute.hasPrefix("relation:") && !$0.attribute.hasPrefix("memory:") }
+                .count
             let duplicateBoundaries = hasDuplicateStrings(page.hardBoundaries)
 
             var reasons: [String] = []
@@ -444,7 +500,7 @@ enum NarrativeDreamingAuditor {
 
     private static func makeSummary(findings: [DreamingFinding]) -> String {
         guard !findings.isEmpty else {
-            return "核查完成，设定、角色认知与伏笔均无异常。"
+            return "核查完成，档案、角色认知与伏笔均无异常。"
         }
         let highCount = findings.filter { $0.severity == .high }.count
         let mediumCount = findings.filter { $0.severity == .medium }.count

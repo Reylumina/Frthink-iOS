@@ -371,7 +371,7 @@ struct WriterPane: View {
         Button {
             openSheet(.styleLint)
         } label: {
-            Label("文风检查", systemImage: "wand.and.stars")
+            Label("行文观感", systemImage: "wand.and.stars")
         }
         Button {
             openSheet(.storyGraph)
@@ -837,7 +837,7 @@ struct WriterPane: View {
     private func bubble(for message: ChatMessage) -> some View {
         let actions = WriterMessageActions(
             copy: { copyToClipboard(message.content) },
-            insert: { insertIntoManuscript(message.content) },
+            insert: { insertIntoManuscript(message.content, sourceMessageID: message.id) },
             append: { messageAction = .append(message) },
             regenerate: {
                 controller.regenerate(messageID: message.id, session: session, store: store)

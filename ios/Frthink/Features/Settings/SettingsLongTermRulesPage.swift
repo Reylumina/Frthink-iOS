@@ -139,6 +139,10 @@ struct SettingsLongTermRulesPage: View {
             now: now
         )
         if changed {
+            session.syncWorldChangesIntoNarrativeWorkspace(
+                settingsCorpusLibraries: store.settings.corpusLibraries,
+                syncLongTermRules: true
+            )
             session.scheduleSave()
             store.toast = "摘要已保存"
         } else {
@@ -155,6 +159,10 @@ struct SettingsLongTermRulesPage: View {
             store.toast = "没有可恢复的历史版本"
             return
         }
+        session.syncWorldChangesIntoNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries,
+            syncLongTermRules: true
+        )
         session.scheduleSave()
         store.toast = "已恢复上一个摘要版本"
         await reloadRules()

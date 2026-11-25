@@ -99,6 +99,15 @@ enum StoryChoicePlanner {
             userSections.append("【关键实体当前状态】\n" + entityLines.joined(separator: "\n"))
         }
 
+        let ongoingEvents = state.sortedEpisodicEvents()
+            .filter { $0.status == .ongoing }
+            .prefix(5)
+        if !ongoingEvents.isEmpty {
+            userSections.append(
+                "【进行中关键事件】\n" + ongoingEvents.map { "- \($0.formattedSummaryLine)" }.joined(separator: "\n")
+            )
+        }
+
         let recentScenes = state.pyramid.recentSceneCards.suffix(4)
         if !recentScenes.isEmpty {
             userSections.append("【最近场景卡】\n" + recentScenes.map { "- \($0)" }.joined(separator: "\n"))

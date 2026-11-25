@@ -1,4 +1,4 @@
-// 档案详情页：提供冲突确认、已知事实与角色认知分离展示，以及富文本档案预览。
+// 档案详情页：缓存单实体快照与关联事件，扁平化冲突/事实/认知列表行。
 
 import Foundation
 import SwiftUI
@@ -10,6 +10,10 @@ struct EntityPageDetailView: View {
     let session: ProjectSession
     let entityID: String
 
+    @State private var page: EntityPage?
+    @State private var facts: [WorldFactEvent] = []
+    @State private var beliefs: [EpistemicBelief] = []
+    @State private var relatedEvents: [EpisodicEvent] = []
     @State private var showMarkdown = false
     @State private var isEditingPage = false
     @State private var showingDeleteConfirm = false
@@ -18,7 +22,7 @@ struct EntityPageDetailView: View {
     @State private var newFactValue = ""
     @State private var errorMessage: String?
 
-    private struct WarningItem: Identifiable {
+    private struct IndexedTextItem: Identifiable {
         let index: Int
         let text: String
         var id: String {
@@ -26,14 +30,10 @@ struct EntityPageDetailView: View {
         }
     }
 
-    private var liveState: MaterializedNarrativeState? {
-        _ = session.narrativeRevision
-        return session.narrativeWorkspace?.currentState()
-    }
-
     var body: some View {
         List {
             if let page {
+                heroHeaderSection(for: page)
                 if !page.conflictWarnings.isEmpty {
                     conflictSection(for: page)
                 }
@@ -42,13 +42,16 @@ struct EntityPageDetailView: View {
                 if page.kind == .character || !beliefs.isEmpty {
                     beliefsSection
                 }
+                if !relatedEvents.isEmpty {
+                    relatedEventsSection
+                }
                 markdownPreviewSection(for: page)
-                deleteSection(for: page)
+                deleteSection
             } else {
                 Section {
                     InlineEmptyState(
                         symbol: "person.2.crop.square.stack",
-                        message: "未找到该档案。"
+                        message: "暂未找到这份档案。"
                     )
                 }
             }
@@ -61,9 +64,7 @@ struct EntityPageDetailView: View {
         .toolbar {
             if page != nil {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("编辑") {
-                        isEditingPage = true
-                    }
+                    Button("编辑") { isEditingPage = true }
                 }
             }
         }
@@ -79,13 +80,11 @@ struct EntityPageDetailView: View {
         .alert("添加已知事实", isPresented: $showingAddFact) {
             TextField("属性（如：所在地、持有物、状态）", text: $newFactAttribute)
             TextField("事实内容（如：钟楼顶层）", text: $newFactValue)
-            Button("保存") {
-                addManualFact()
-            }
-            .disabled(
-                newFactAttribute.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    || newFactValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+            Button("保存") { addManualFact() }
+                .disabled(
+                    newFactAttribute.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || newFactValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             Button("取消", role: .cancel) {}
         }
         .deleteConfirmationDialog(
@@ -99,68 +98,98 @@ struct EntityPageDetailView: View {
             store.toast = "已删除档案"
             dismiss()
         }
-        .task {
+        .task(id: session.narrativeRevision) {
             _ = session.ensureNarrativeWorkspace(
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
+            reloadSnapshot()
         }
         .narrativeErrorAlert($errorMessage)
     }
 
-    private var page: EntityPage? {
-        liveState?.entityPages[entityID]
-    }
-
-    private var facts: [WorldFactEvent] {
-        liveState?.facts(for: entityID) ?? []
-    }
-
-    private var beliefs: [EpistemicBelief] {
-        liveState?.beliefs(for: entityID) ?? []
+    private func reloadSnapshot() {
+        guard let state = session.narrativeWorkspace?.currentState(),
+              let resolved = state.entityPages[entityID] else {
+            page = nil
+            facts = []
+            beliefs = []
+            relatedEvents = []
+            return
+        }
+        page = resolved
+        facts = state.facts(for: entityID)
+        beliefs = state.beliefs(for: entityID)
+        relatedEvents = state.events(for: entityID)
     }
 
     private func conflictSection(for page: EntityPage) -> some View {
-        let items = page.conflictWarnings.enumerated().map { WarningItem(index: $0.offset, text: $0.element) }
+        let items = page.conflictWarnings.enumerated().map {
+            IndexedTextItem(index: $0.offset, text: $0.element)
+        }
         return Section {
             ForEach(items) { item in
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    HStack(spacing: Theme.Spacing.s) {
-                        StatusPill(text: "有冲突", tone: .warning)
-                        Spacer(minLength: 0)
-                        Button("保留原记录") {
-                            dismissWarning(at: item.index, in: page)
-                        }
-                        .font(Theme.labelSmall)
-                    }
-                    Text(item.text)
-                        .font(Theme.labelSmall)
-                        .foregroundStyle(.primary)
+                EntityConflictRow(text: item.text) {
+                    dismissWarning(at: item.index, in: page)
                 }
-                .padding(.vertical, Theme.Spacing.xs)
             }
-
             if items.count > 1 {
-                Button("全部忽略") {
-                    clearAllWarnings(in: page)
-                }
-                .font(Theme.labelSmall)
+                Button("全部忽略") { clearAllWarnings(in: page) }
+                    .font(Theme.labelSmall)
             }
         } header: {
             AppSectionHeader(title: "冲突待确认（\(items.count)）")
         }
     }
 
+    private func heroHeaderSection(for page: EntityPage) -> some View {
+        let subtitle = [
+            page.identity.trimmingCharacters(in: .whitespacesAndNewlines),
+            page.aliases.isEmpty ? "" : "又称 " + page.aliases.joined(separator: "、"),
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+
+        return Section {
+            HStack(spacing: Theme.Spacing.m) {
+                EntityAvatarBadge(kind: page.kind)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text(page.name)
+                            .font(Theme.heading)
+                            .foregroundStyle(.primary)
+                        if !page.enabled {
+                            StatusPill(text: "已停用", tone: .neutral)
+                        } else if page.kind == .lore, page.activationMode == .always {
+                            StatusPill(text: "常驻", tone: .accent)
+                        }
+                    }
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(Theme.labelSmall)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text(NarrativeViewSupport.entityKindLabel(page.kind))
+                            .font(Theme.labelSmall)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+        }
+    }
+
     private func overviewSection(for page: EntityPage) -> some View {
-        Section {
+        let boundaries = page.hardBoundaries.enumerated().map {
+            IndexedTextItem(index: $0.offset, text: $0.element)
+        }
+        return Section {
             AppValueRow(
                 title: "分类",
                 value: NarrativeViewSupport.entityKindLabel(page.kind)
             )
             if page.kind == .lore {
-                AppValueRow(
-                    title: "生效方式",
-                    value: page.activationMode.displayName
-                )
+                AppValueRow(title: "生效方式", value: page.activationMode.displayName)
             }
             if !page.aliases.isEmpty {
                 AppValueRow(title: "别名", value: page.aliases.joined(separator: "、"))
@@ -178,103 +207,100 @@ struct EntityPageDetailView: View {
                !page.voiceProfile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 labeledText(title: "说话风格", value: page.voiceProfile)
             }
-            if !page.hardBoundaries.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text(page.kind.boundariesLabel)
-                        .font(Theme.metadata)
-                        .foregroundStyle(.secondary)
-                    ForEach(Array(page.hardBoundaries.enumerated()), id: \.offset) { _, boundary in
-                        Text("• \(boundary)")
-                            .font(Theme.labelSmall)
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .padding(.vertical, Theme.Spacing.xs)
+            if !boundaries.isEmpty {
+                boundariesBlock(title: page.kind.boundariesLabel, items: boundaries)
             }
         } header: {
             AppSectionHeader(title: "基本信息")
         }
     }
 
+    private func boundariesBlock(title: String, items: [IndexedTextItem]) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text(title)
+                .font(Theme.metadata)
+                .foregroundStyle(.secondary)
+            ForEach(items) { item in
+                Text("• \(item.text)")
+                    .font(Theme.labelSmall)
+                    .foregroundStyle(.primary)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
     private var factsSection: some View {
         Section {
             if facts.isEmpty {
-                Text("暂无记录。")
+                Text("写到相关桥段时会自动记下近况与持有物。")
                     .font(Theme.labelSmall)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(facts) { fact in
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        HStack(spacing: Theme.Spacing.s) {
-                            Text("\(fact.attribute)：\(fact.value)")
-                                .font(Theme.label)
-                                .foregroundStyle(.primary)
-                            Spacer(minLength: 0)
-                            StatusPill(
-                                text: NarrativeViewSupport.authorityLabel(fact.authority),
-                                tone: NarrativeViewSupport.authorityTone(fact.authority)
-                            )
-                        }
-                        if let quote = fact.quoteAnchor?.quote, !quote.isEmpty {
-                            Text("原文：「\(quote)」")
-                                .font(Theme.metadata)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, Theme.Spacing.xs)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button("删除", role: .destructive) {
-                            retractFact(fact)
-                        }
+                    EntityFactRow(fact: fact) {
+                        retractFact(fact)
                     }
                 }
             }
 
-            Button("添加事实") {
+            Button("添加近况或细节") {
                 newFactAttribute = ""
                 newFactValue = ""
                 showingAddFact = true
             }
         } header: {
-            AppSectionHeader(title: "已知事实（\(facts.count)）")
+            AppSectionHeader(title: "设定与近况（\(facts.count)）")
         }
     }
 
     private var beliefsSection: some View {
         Section {
             if beliefs.isEmpty {
-                Text("暂无记录。")
+                Text("暂未记下秘密知情或信息差。")
                     .font(Theme.labelSmall)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(beliefs) { belief in
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        HStack(spacing: Theme.Spacing.s) {
-                            Text("\(belief.topic)：\(belief.believedTruth)")
-                                .font(Theme.label)
-                                .foregroundStyle(.primary)
-                            Spacer(minLength: 0)
-                            StatusPill(
-                                text: belief.knowsSecret ? "已知情" : "不知情",
-                                tone: belief.knowsSecret ? .accent : .neutral
-                            )
-                        }
-                        if let quote = belief.quoteAnchor?.quote, !quote.isEmpty {
-                            Text("原文：「\(quote)」")
-                                .font(Theme.metadata)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, Theme.Spacing.xs)
+                    EntityBeliefRow(belief: belief)
                 }
             }
         } header: {
-            AppSectionHeader(title: "角色认知（\(beliefs.count)）")
+            AppSectionHeader(title: "已知与盲区（\(beliefs.count)）")
+        }
+    }
+
+    private var relatedEventsSection: some View {
+        Section {
+            ForEach(relatedEvents) { event in
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text(event.title)
+                            .font(Theme.label)
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                        StatusPill(
+                            text: event.status.displayName,
+                            tone: event.status == .ongoing ? .accent : .success
+                        )
+                    }
+                    Text(event.formattedSummaryLine)
+                        .font(Theme.metadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .padding(.vertical, Theme.Spacing.xs)
+            }
+        } header: {
+            AppSectionHeader(title: "关联关键事件（\(relatedEvents.count)）")
         }
     }
 
     private func markdownPreviewSection(for page: EntityPage) -> some View {
-        let markdown = page.renderedMarkdown(resolvedFacts: facts, beliefs: beliefs)
+        let markdown = page.renderedMarkdown(
+            resolvedFacts: facts,
+            beliefs: beliefs,
+            relatedEvents: relatedEvents
+        )
         return Section {
             DisclosureGroup("档案预览", isExpanded: $showMarkdown) {
                 MarkdownDocumentView(markdown: markdown)
@@ -289,7 +315,7 @@ struct EntityPageDetailView: View {
         }
     }
 
-    private func deleteSection(for page: EntityPage) -> some View {
+    private var deleteSection: some View {
         Section {
             DestructiveActionRow(title: "删除该设定") {
                 showingDeleteConfirm = true
@@ -383,5 +409,79 @@ struct EntityPageDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct EntityConflictRow: View {
+    let text: String
+    let onKeep: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: Theme.Spacing.s) {
+                StatusPill(text: "有冲突", tone: .warning)
+                Spacer(minLength: 0)
+                Button("保留原记录", action: onKeep)
+                    .font(Theme.labelSmall)
+            }
+            Text(text)
+                .font(Theme.labelSmall)
+                .foregroundStyle(.primary)
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+}
+
+private struct EntityFactRow: View {
+    let fact: WorldFactEvent
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.s) {
+                Text("\(NarrativeViewSupport.humanFactLabel(for: fact.attribute))：\(fact.value)")
+                    .font(Theme.label)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                StatusPill(
+                    text: NarrativeViewSupport.authorityLabel(fact.authority),
+                    tone: NarrativeViewSupport.authorityTone(fact.authority)
+                )
+            }
+            if let quote = fact.quoteAnchor?.quote, !quote.isEmpty {
+                Text("原文：「\(quote)」")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("删除", role: .destructive, action: onDelete)
+        }
+    }
+}
+
+private struct EntityBeliefRow: View {
+    let belief: EpistemicBelief
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.s) {
+                Text("\(belief.topic)：\(belief.believedTruth)")
+                    .font(Theme.label)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 0)
+                StatusPill(
+                    text: belief.knowsSecret ? "已知情" : "不知情",
+                    tone: belief.knowsSecret ? .accent : .neutral
+                )
+            }
+            if let quote = belief.quoteAnchor?.quote, !quote.isEmpty {
+                Text("原文：「\(quote)」")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
     }
 }

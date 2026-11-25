@@ -242,14 +242,7 @@ enum WriterPromptBuilder {
             checkpoint: checkpoint
         )
         try checkpoint()
-        var finalMessages = trimmed.messages
-        if let prefillMessage = SceneMemoryBuilder.makePrefillCoTMessage(
-            snapshot: snapshot,
-            activeCharacters: dynamicSelection.characters,
-            messages: finalMessages
-        ) {
-            finalMessages.append(prefillMessage)
-        }
+        let finalMessages = trimmed.messages
         return WriterPreparedPrompt(
             messages: finalMessages,
             sourceIds: assembly.sourceIds,

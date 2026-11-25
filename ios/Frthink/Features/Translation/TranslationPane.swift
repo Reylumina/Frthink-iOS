@@ -283,9 +283,18 @@ struct TranslationPane: View {
         let current = session.sourceText
         plan = TranslationSegmenter.plan(for: current)
         planSource = current
+        let projectID = session.project.id
+        let target = TranslationSegmenter.target
+        let beforeCount = session.translations.count
+        session.translations.removeAll { segment in
+            segment.project == projectID && segment.target == target && segment.segment >= plan.count
+        }
+        if session.translations.count != beforeCount {
+            session.saveTranslations()
+        }
         cache = TranslationSegmenter.cache(
             from: session.translations,
-            project: session.project.id
+            project: projectID
         )
     }
 

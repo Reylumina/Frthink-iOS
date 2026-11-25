@@ -151,15 +151,59 @@ enum LegacyArchiveImporter {
 
             let cleanRelations = card.relationshipAttitudes.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleanRelations.isEmpty {
+                let splitRelations = parseRelationshipLines(
+                    cleanRelations,
+                    entityID: entityID,
+                    nodeID: rootID,
+                    createdAt: now
+                )
+                factEvents.append(contentsOf: splitRelations)
+            }
+
+            for entry in card.customEntries {
+                let cleanEntryTitle = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleanEntryBody = entry.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanEntryTitle.isEmpty, !cleanEntryBody.isEmpty else { continue }
                 factEvents.append(
                     WorldFactEvent(
-                        id: "import_\(entityID)_relation",
+                        id: "import_\(entityID)_custom_\(entry.id)",
                         entityID: entityID,
-                        attribute: WorldFactEvent.StandardAttribute.relation,
-                        value: cleanRelations,
+                        attribute: "custom:\(cleanEntryTitle)",
+                        value: cleanEntryBody,
                         nodeID: rootID,
                         authority: .authorDirective,
-                        createdAt: now
+                        createdAt: card.updatedAt
+                    )
+                )
+            }
+
+            for (memIdx, memory) in (card.memories ?? []).enumerated() {
+                let cleanContent = memory.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanContent.isEmpty else { continue }
+                let cleanEvidence = memory.evidence.trimmingCharacters(in: .whitespacesAndNewlines)
+                let combined = cleanEvidence.isEmpty
+                    ? cleanContent
+                    : "\(cleanContent)（依据：\(cleanEvidence)）"
+                let anchor: TextSpanAnchor? = cleanEvidence.isEmpty
+                    ? nil
+                    : TextSpanAnchor.make(
+                        pageIndex: 0,
+                        utf16Start: 0,
+                        utf16Length: (cleanEvidence as NSString).length,
+                        quote: cleanEvidence
+                    )
+                factEvents.append(
+                    WorldFactEvent(
+                        id: "import_\(entityID)_memory_\(memIdx + 1)",
+                        entityID: entityID,
+                        attribute: "memory:\(memIdx + 1)",
+                        value: combined,
+                        nodeID: rootID,
+                        authority: .authorDirective,
+                        quoteAnchor: anchor,
+                        createdAt: memory.createdAt > 0
+                            ? Date(timeIntervalSince1970: TimeInterval(memory.createdAt) / 1000)
+                            : card.updatedAt
                     )
                 )
             }
@@ -296,12 +340,44 @@ enum LegacyArchiveImporter {
             }
         }
 
+        var episodicEvents: [EpisodicEvent] = []
+        for eventCard in payload.world.events {
+            let cleanTitle = eventCard.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanTitle.isEmpty else { continue }
+            let cleanScene = eventCard.scene.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanCause = eventCard.cause.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanDev = eventCard.development.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanConsequence = eventCard.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+            let participants = eventCard.characters.compactMap { rawName -> String? in
+                let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                return entityNameToID[trimmed]
+            }
+            episodicEvents.append(
+                EpisodicEvent(
+                    id: "legacy_evt_\(eventCard.id)",
+                    title: cleanTitle,
+                    arcTitle: "",
+                    scene: cleanScene,
+                    participantEntityIDs: participants,
+                    cause: cleanCause,
+                    development: cleanDev,
+                    outcome: cleanConsequence,
+                    status: cleanConsequence.isEmpty ? .ongoing : .resolved,
+                    authority: .authorDirective,
+                    nodeID: rootID,
+                    updatedAt: eventCard.updatedAt
+                )
+            )
+        }
+
         let delta = PlotNodeDelta(
             directiveAdds: directivesAdds,
             entityPageUpserts: entityPages,
             factEvents: factEvents,
             epistemicBeliefs: epistemicBeliefs,
-            threadEvents: threadEvents
+            threadEvents: threadEvents,
+            episodicEvents: episodicEvents
         )
 
         let bodyAnchor: TextSpanAnchor? = payload.manuscript.isEmpty
@@ -449,6 +525,8 @@ enum LegacyArchiveImporter {
         projectID: String,
         projectTitle: String,
         settingsCorpusLibraries: [CorpusLibrary] = [],
+        syncLegacyCharacters: Bool = false,
+        syncLongTermRules: Bool = false,
         into workspace: inout NarrativeWorkspace,
         now: Date = Date()
     ) -> Bool {
@@ -461,15 +539,13 @@ enum LegacyArchiveImporter {
             settingsCorpusLibraries: settingsCorpusLibraries
         )
         var nextStyle = workspace.preservedStyle
-        if !payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           nextStyle.styleTemplate != payload.world.styleTemplate {
+        if nextStyle.styleTemplate != payload.world.styleTemplate {
             nextStyle.styleTemplate = payload.world.styleTemplate
         }
-        if !payload.world.styleNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           nextStyle.styleNotes != payload.world.styleNotes {
+        if nextStyle.styleNotes != payload.world.styleNotes {
             nextStyle.styleNotes = payload.world.styleNotes
         }
-        if !exemplars.isEmpty, nextStyle.exemplars != exemplars {
+        if nextStyle.exemplars != exemplars {
             nextStyle.exemplars = exemplars
             nextStyle.centroidExemplar = exemplars.first
         }
@@ -483,75 +559,83 @@ enum LegacyArchiveImporter {
         var hasDelta = false
         let rootID = workspace.storyGraph.rootNodeID
 
-        for card in payload.world.characters {
-            let cleanName = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleanName.isEmpty else { continue }
-            let existing = currentState.entityPages[card.id]
-                ?? currentState.entityPages.values.first { $0.name == cleanName }
-            let cardBoundaries = normalizedBoundaries(from: card.boundaries)
-            let candidate = EntityPage(
-                id: existing?.id ?? card.id,
-                kind: existing?.kind ?? .character,
-                name: cleanName,
-                aliases: card.aliases,
-                summary: existing?.summary ?? "",
-                identity: card.identity,
-                voiceProfile: card.voice,
-                hardBoundaries: cardBoundaries.isEmpty ? (existing?.hardBoundaries ?? []) : cardBoundaries,
-                currentFactIDs: existing?.currentFactIDs ?? [],
-                conflictWarnings: existing?.conflictWarnings ?? (card.snapshotConflicts ?? []),
-                enabled: card.enabled ?? true,
-                updatedAt: card.updatedAt
-            )
-            let semanticUnchanged = existing.map {
-                $0.name == candidate.name
-                    && $0.aliases == candidate.aliases
-                    && $0.identity == candidate.identity
-                    && $0.voiceProfile == candidate.voiceProfile
-                    && $0.hardBoundaries == candidate.hardBoundaries
-                    && $0.enabled == candidate.enabled
-                    && $0.conflictWarnings == candidate.conflictWarnings
-            } ?? false
-            if !semanticUnchanged {
-                delta.entityPageUpserts.append(candidate)
-                hasDelta = true
+        if syncLegacyCharacters {
+            for card in payload.world.characters {
+                let cleanName = card.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanName.isEmpty else { continue }
+                let existing = currentState.entityPages[card.id]
+                    ?? currentState.entityPages.values.first { $0.name == cleanName }
+                let cardBoundaries = normalizedBoundaries(from: card.boundaries)
+                let candidate = EntityPage(
+                    id: existing?.id ?? card.id,
+                    kind: existing?.kind ?? .character,
+                    name: cleanName,
+                    aliases: card.aliases,
+                    triggerKeywords: existing?.triggerKeywords ?? [],
+                    activationMode: existing?.activationMode ?? .mentioned,
+                    summary: existing?.summary ?? "",
+                    identity: card.identity,
+                    voiceProfile: card.voice,
+                    hardBoundaries: cardBoundaries.isEmpty ? (existing?.hardBoundaries ?? []) : cardBoundaries,
+                    currentFactIDs: existing?.currentFactIDs ?? [],
+                    conflictWarnings: existing?.conflictWarnings ?? (card.snapshotConflicts ?? []),
+                    enabled: card.enabled ?? true,
+                    updatedAt: card.updatedAt
+                )
+                let semanticUnchanged = existing.map {
+                    $0.name == candidate.name
+                        && $0.aliases == candidate.aliases
+                        && $0.triggerKeywords == candidate.triggerKeywords
+                        && $0.activationMode == candidate.activationMode
+                        && $0.identity == candidate.identity
+                        && $0.voiceProfile == candidate.voiceProfile
+                        && $0.hardBoundaries == candidate.hardBoundaries
+                        && $0.enabled == candidate.enabled
+                        && $0.conflictWarnings == candidate.conflictWarnings
+                } ?? false
+                if !semanticUnchanged {
+                    delta.entityPageUpserts.append(candidate)
+                    hasDelta = true
+                }
             }
         }
 
-        let effectiveRules = normalizedLongTermRules(from: payload.world)
-        let activeImportedRule = currentState.directiveLedger.directives.first {
-            $0.status == .active
-                && ($0.id == "import_long_term_rules" || $0.id.hasPrefix("import_long_term_rules_"))
-        }
-        if let existingRule = activeImportedRule {
-            if existingRule.verbatimRule != effectiveRules {
-                let replacement: AuthorDirective? = effectiveRules.isEmpty
-                    ? nil
-                    : AuthorDirective(
-                        id: "import_long_term_rules_\(UUID().uuidString.prefix(8))",
+        if syncLongTermRules {
+            let effectiveRules = normalizedLongTermRules(from: payload.world)
+            let activeImportedRule = currentState.directiveLedger.directives.first {
+                $0.status == .active
+                    && ($0.id == "import_long_term_rules" || $0.id.hasPrefix("import_long_term_rules_"))
+            }
+            if let existingRule = activeImportedRule {
+                if existingRule.verbatimRule != effectiveRules {
+                    let replacement: AuthorDirective? = effectiveRules.isEmpty
+                        ? nil
+                        : AuthorDirective(
+                            id: "import_long_term_rules_\(UUID().uuidString.prefix(8))",
+                            verbatimRule: effectiveRules,
+                            scope: .global,
+                            sourceNodeID: rootID,
+                            createdAt: now,
+                            updatedAt: now
+                        )
+                    delta.directiveSupersedes.append(
+                        DirectiveSupersede(targetID: existingRule.id, replacement: replacement)
+                    )
+                    hasDelta = true
+                }
+            } else if !effectiveRules.isEmpty {
+                delta.directiveAdds.append(
+                    AuthorDirective(
+                        id: "import_long_term_rules",
                         verbatimRule: effectiveRules,
                         scope: .global,
                         sourceNodeID: rootID,
                         createdAt: now,
                         updatedAt: now
                     )
-                delta.directiveSupersedes.append(
-                    DirectiveSupersede(targetID: existingRule.id, replacement: replacement)
                 )
                 hasDelta = true
             }
-        } else if !effectiveRules.isEmpty {
-            delta.directiveAdds.append(
-                AuthorDirective(
-                    id: "import_long_term_rules",
-                    verbatimRule: effectiveRules,
-                    scope: .global,
-                    sourceNodeID: rootID,
-                    createdAt: now,
-                    updatedAt: now
-                )
-            )
-            hasDelta = true
         }
 
         if hasDelta {
@@ -572,6 +656,7 @@ enum LegacyArchiveImporter {
         var rawExemplars: [CorpusEntry] = []
         rawExemplars.append(contentsOf: world.corpus)
         for lib in settingsCorpusLibraries {
+            guard lib.enabled else { continue }
             let matchesProjectID = !projectID.isEmpty && lib.projectID == projectID
             let matchesBookTitle = !bookLibraryName.isEmpty && lib.name == bookLibraryName
             if matchesProjectID || matchesBookTitle {
@@ -602,5 +687,64 @@ enum LegacyArchiveImporter {
         raw.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private static func parseRelationshipLines(
+        _ raw: String,
+        entityID: String,
+        nodeID: String,
+        createdAt: Date
+    ) -> [WorldFactEvent] {
+        let disallowedTargetChars = CharacterSet(charactersIn: "，。、；;！？!?（）()【】「」\"'")
+        var results: [WorldFactEvent] = []
+        var fallbackLines: [String] = []
+
+        for (idx, rawLine) in raw.split(whereSeparator: \.isNewline).enumerated() {
+            var line = String(rawLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            for prefix in ["- ", "• ", "* "] {
+                if line.hasPrefix(prefix) {
+                    line = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    break
+                }
+            }
+            if let colonRange = line.range(of: "：") ?? line.range(of: ":") {
+                let target = String(line[..<colonRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let attitude = String(line[colonRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !target.isEmpty,
+                   target.count <= 16,
+                   target.rangeOfCharacter(from: disallowedTargetChars) == nil,
+                   !attitude.isEmpty {
+                    results.append(
+                        WorldFactEvent(
+                            id: "import_\(entityID)_rel_\(idx)_\(SummaryKey.sha256Hex(target).prefix(6))",
+                            entityID: entityID,
+                            attribute: "relation:\(target)",
+                            value: attitude,
+                            nodeID: nodeID,
+                            authority: .authorDirective,
+                            createdAt: createdAt
+                        )
+                    )
+                    continue
+                }
+            }
+            fallbackLines.append(line)
+        }
+
+        if !fallbackLines.isEmpty {
+            results.append(
+                WorldFactEvent(
+                    id: "import_\(entityID)_relation",
+                    entityID: entityID,
+                    attribute: WorldFactEvent.StandardAttribute.relation,
+                    value: fallbackLines.joined(separator: "\n"),
+                    nodeID: nodeID,
+                    authority: .authorDirective,
+                    createdAt: createdAt
+                )
+            )
+        }
+        return results
     }
 }

@@ -277,7 +277,7 @@ final class AnthropicClient: LLMClient {
             try await consumeStream(
                 bytes,
                 request: req,
-                startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: req.messages),
+                startsInsideThink: false,
                 continuation: continuation
             )
         }
@@ -460,7 +460,7 @@ final class AnthropicClient: LLMClient {
             .joined() ?? ""
         let split = ThinkTagStreamSplitter.stripThinkTags(
             from: rawText,
-            startsInsideThink: ThinkTagStreamSplitter.startsInsideThink(for: request.messages)
+            startsInsideThink: false
         )
         let text = split.prose
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

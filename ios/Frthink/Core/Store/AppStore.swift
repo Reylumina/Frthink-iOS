@@ -539,6 +539,15 @@ final class AppStore {
         try client(for: narrativeSyncProvider)
     }
 
+    @MainActor
+    func syncCorpusChangesIntoOpenSessions() {
+        for session in sessions.values {
+            session.syncWorldChangesIntoNarrativeWorkspace(
+                settingsCorpusLibraries: settings.corpusLibraries
+            )
+        }
+    }
+
     func recordTokenUsage(_ tokens: Int) {
         guard tokens > 0 else { return }
         settings.tokenUsageTotal += tokens

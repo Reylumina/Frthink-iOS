@@ -55,8 +55,6 @@ struct SettingsPromptPage: View {
             Toggle("启用语料收集库", isOn: settingsBinding(store, \.corpusEnabled))
             Toggle("默认流式输出", isOn: settingsBinding(store, \.streamByDefault))
             Toggle("采纳正文后自动更新世界与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
-            Toggle("动态按需激活人物与事件卡", isOn: settingsBinding(store, \.dynamicContextActivation))
-            Toggle("预填充卡 CoT（DeepSeek / 兼容推理网关）", isOn: settingsBinding(store, \.prefillCoT))
             Picker("历史思维链回灌", selection: settingsBinding(store, \.reasoningContextPolicy)) {
                 ForEach(ReasoningContextPolicy.allCases) { policy in
                     Text(policy.displayName).tag(policy)
@@ -90,14 +88,6 @@ struct SettingsPromptPage: View {
     private var advancedTemplatesSection: some View {
         Section {
             NavigationLink {
-                WorldBuildEditorPage(store: store)
-            } label: {
-                SettingsLabelRow(
-                    title: "世界建立要求",
-                    detail: worldBuildDetail
-                )
-            }
-            NavigationLink {
                 SettingsLongTermRulesPage(store: store)
             } label: {
                 SettingsLabelRow(title: "长期规则摘要")
@@ -115,12 +105,6 @@ struct SettingsPromptPage: View {
                 store.saveSettings()
             }
         )
-    }
-
-    private var worldBuildDetail: String {
-        store.settings.worldBuildInstruction
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty ? "出厂值" : "自定义"
     }
 }
 

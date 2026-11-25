@@ -90,7 +90,22 @@ struct PlotNodeDelta: Codable, Hashable {
     var factEvents: [WorldFactEvent]
     var epistemicBeliefs: [EpistemicBelief]
     var threadEvents: [ProspectiveThreadEvent]
+    var episodicEvents: [EpisodicEvent]
+    var removedEpisodicEventIDs: [String]
     var pyramidPatch: NarrativePyramidPatch?
+
+    var isEmpty: Bool {
+        directiveAdds.isEmpty
+            && directiveSupersedes.isEmpty
+            && entityPageUpserts.isEmpty
+            && entityPageReplacements.isEmpty
+            && factEvents.isEmpty
+            && epistemicBeliefs.isEmpty
+            && threadEvents.isEmpty
+            && episodicEvents.isEmpty
+            && removedEpisodicEventIDs.isEmpty
+            && pyramidPatch == nil
+    }
 
     init(
         directiveAdds: [AuthorDirective] = [],
@@ -100,6 +115,8 @@ struct PlotNodeDelta: Codable, Hashable {
         factEvents: [WorldFactEvent] = [],
         epistemicBeliefs: [EpistemicBelief] = [],
         threadEvents: [ProspectiveThreadEvent] = [],
+        episodicEvents: [EpisodicEvent] = [],
+        removedEpisodicEventIDs: [String] = [],
         pyramidPatch: NarrativePyramidPatch? = nil
     ) {
         self.directiveAdds = directiveAdds
@@ -109,6 +126,8 @@ struct PlotNodeDelta: Codable, Hashable {
         self.factEvents = factEvents
         self.epistemicBeliefs = epistemicBeliefs
         self.threadEvents = threadEvents
+        self.episodicEvents = episodicEvents
+        self.removedEpisodicEventIDs = removedEpisodicEventIDs
         self.pyramidPatch = pyramidPatch
     }
 
@@ -121,6 +140,8 @@ struct PlotNodeDelta: Codable, Hashable {
         factEvents = (try? c.decode([WorldFactEvent].self, forKey: .factEvents)) ?? []
         epistemicBeliefs = (try? c.decode([EpistemicBelief].self, forKey: .epistemicBeliefs)) ?? []
         threadEvents = (try? c.decode([ProspectiveThreadEvent].self, forKey: .threadEvents)) ?? []
+        episodicEvents = (try? c.decode([EpisodicEvent].self, forKey: .episodicEvents)) ?? []
+        removedEpisodicEventIDs = (try? c.decode([String].self, forKey: .removedEpisodicEventIDs)) ?? []
         pyramidPatch = try? c.decodeIfPresent(NarrativePyramidPatch.self, forKey: .pyramidPatch)
     }
 }
@@ -176,6 +197,7 @@ struct MaterializedNarrativeState: Codable, Hashable {
     var factHistory: [WorldFactEvent]
     var epistemicBeliefs: [String: EpistemicBelief]
     var threads: [String: ProspectiveThread]
+    var episodicEvents: [String: EpisodicEvent]
     var pyramid: NarrativePyramid
     var conflictWarnings: [StateConflictWarning]
 
@@ -188,6 +210,7 @@ struct MaterializedNarrativeState: Codable, Hashable {
         factHistory: [WorldFactEvent] = [],
         epistemicBeliefs: [String: EpistemicBelief] = [:],
         threads: [String: ProspectiveThread] = [:],
+        episodicEvents: [String: EpisodicEvent] = [:],
         pyramid: NarrativePyramid = NarrativePyramid(),
         conflictWarnings: [StateConflictWarning] = []
     ) {
@@ -199,6 +222,7 @@ struct MaterializedNarrativeState: Codable, Hashable {
         self.factHistory = factHistory
         self.epistemicBeliefs = epistemicBeliefs
         self.threads = threads
+        self.episodicEvents = episodicEvents
         self.pyramid = pyramid
         self.conflictWarnings = conflictWarnings
     }
@@ -213,6 +237,7 @@ struct MaterializedNarrativeState: Codable, Hashable {
         factHistory = (try? c.decode([WorldFactEvent].self, forKey: .factHistory)) ?? []
         epistemicBeliefs = (try? c.decode([String: EpistemicBelief].self, forKey: .epistemicBeliefs)) ?? [:]
         threads = (try? c.decode([String: ProspectiveThread].self, forKey: .threads)) ?? [:]
+        episodicEvents = (try? c.decode([String: EpisodicEvent].self, forKey: .episodicEvents)) ?? [:]
         pyramid = (try? c.decode(NarrativePyramid.self, forKey: .pyramid)) ?? NarrativePyramid()
         conflictWarnings = (try? c.decode([StateConflictWarning].self, forKey: .conflictWarnings)) ?? []
     }
@@ -233,6 +258,22 @@ struct MaterializedNarrativeState: Codable, Hashable {
                 if lhs.topic != rhs.topic { return lhs.topic < rhs.topic }
                 return lhs.id < rhs.id
             }
+    }
+
+    func sortedEpisodicEvents() -> [EpisodicEvent] {
+        episodicEvents.values.sorted { lhs, rhs in
+            if lhs.status != rhs.status {
+                return lhs.status == .ongoing
+            }
+            if lhs.updatedAt != rhs.updatedAt {
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    func events(for entityID: String) -> [EpisodicEvent] {
+        sortedEpisodicEvents().filter { $0.participantEntityIDs.contains(entityID) }
     }
 
     /// 生成轻量顶层目录索引，供模型按需下沉查阅实体独立页，限制最大行数避免前缀膨胀。
@@ -304,6 +345,12 @@ enum NarrativeStateReducer {
         recomputeCurrentFactIDs(for: affectedEntityIDs, in: &state)
         applyEpistemicBeliefs(delta.epistemicBeliefs, nodeID: nodeID, to: &state)
         applyThreadEvents(delta.threadEvents, to: &state)
+        applyEpisodicEvents(
+            delta.episodicEvents,
+            removedIDs: delta.removedEpisodicEventIDs,
+            nodeID: nodeID,
+            to: &state
+        )
         if let patch = delta.pyramidPatch {
             applyPyramidPatch(patch, to: &state.pyramid)
         }
@@ -621,6 +668,111 @@ enum NarrativeStateReducer {
         }
         thread.updatedAtNodeID = event.nodeID
         thread.updatedAt = event.createdAt
+    }
+
+    private static func applyEpisodicEvents(
+        _ events: [EpisodicEvent],
+        removedIDs: [String],
+        nodeID: String,
+        to state: inout MaterializedNarrativeState
+    ) {
+        for removedID in removedIDs where !removedID.isEmpty {
+            state.episodicEvents.removeValue(forKey: removedID)
+        }
+
+        for incoming in events {
+            let trimmedTitle = incoming.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty else { continue }
+
+            let resolvedNodeID = incoming.nodeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nodeID
+                : incoming.nodeID
+            let incomingParticipants = deduplicatedStrings(incoming.participantEntityIDs)
+
+            let existingKey: String?
+            if !incoming.id.isEmpty, state.episodicEvents[incoming.id] != nil {
+                existingKey = incoming.id
+            } else {
+                existingKey = state.episodicEvents.first { _, candidate in
+                    candidate.title
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .caseInsensitiveCompare(trimmedTitle) == .orderedSame
+                }?.key
+            }
+
+            guard let targetKey = existingKey, var merged = state.episodicEvents[targetKey] else {
+                let assignedID = incoming.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "evt_\(SummaryKey.sha256Hex(trimmedTitle).prefix(12))"
+                    : incoming.id
+                let created = EpisodicEvent(
+                    id: assignedID,
+                    title: trimmedTitle,
+                    arcTitle: incoming.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+                    scene: incoming.scene.trimmingCharacters(in: .whitespacesAndNewlines),
+                    participantEntityIDs: incomingParticipants,
+                    cause: incoming.cause.trimmingCharacters(in: .whitespacesAndNewlines),
+                    development: incoming.development.trimmingCharacters(in: .whitespacesAndNewlines),
+                    outcome: incoming.outcome.trimmingCharacters(in: .whitespacesAndNewlines),
+                    status: incoming.status,
+                    authority: incoming.authority,
+                    quoteAnchor: incoming.quoteAnchor,
+                    nodeID: resolvedNodeID,
+                    updatedAt: incoming.updatedAt
+                )
+                state.episodicEvents[assignedID] = created
+                continue
+            }
+
+            merged.participantEntityIDs = deduplicatedStrings(merged.participantEntityIDs + incomingParticipants)
+            if incoming.authority < merged.authority {
+                if merged.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    merged.arcTitle = incoming.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if merged.scene.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    merged.scene = incoming.scene.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if merged.cause.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    merged.cause = incoming.cause.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if merged.development.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    merged.development = incoming.development.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if merged.outcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    merged.outcome = incoming.outcome.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if merged.quoteAnchor == nil {
+                    merged.quoteAnchor = incoming.quoteAnchor
+                }
+                state.episodicEvents[targetKey] = merged
+                continue
+            }
+
+            merged.title = trimmedTitle
+            let cleanArc = incoming.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanArc.isEmpty { merged.arcTitle = cleanArc }
+            let cleanScene = incoming.scene.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanScene.isEmpty { merged.scene = cleanScene }
+            let cleanCause = incoming.cause.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanCause.isEmpty { merged.cause = cleanCause }
+            let cleanDev = incoming.development.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanDev.isEmpty { merged.development = cleanDev }
+            let cleanOutcome = incoming.outcome.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanOutcome.isEmpty { merged.outcome = cleanOutcome }
+            if merged.status != .resolved || incoming.authority == .authorDirective || incoming.status == .resolved {
+                merged.status = incoming.status
+            }
+            if incoming.authority > merged.authority {
+                merged.authority = incoming.authority
+            }
+            if let anchor = incoming.quoteAnchor {
+                merged.quoteAnchor = anchor
+            }
+            merged.nodeID = resolvedNodeID
+            if incoming.updatedAt >= merged.updatedAt {
+                merged.updatedAt = incoming.updatedAt
+            }
+            state.episodicEvents[targetKey] = merged
+        }
     }
 
     private static func applyPyramidPatch(

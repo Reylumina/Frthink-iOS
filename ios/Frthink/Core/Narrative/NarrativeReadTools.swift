@@ -167,7 +167,8 @@ enum NarrativeReadTools {
 
         let fullMarkdown = page.renderedMarkdown(
             resolvedFacts: state.facts(for: page.id),
-            beliefs: state.beliefs(for: page.id)
+            beliefs: state.beliefs(for: page.id),
+            relatedEvents: state.events(for: page.id)
         )
         let cleanSection = section?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !cleanSection.isEmpty else {

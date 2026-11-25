@@ -16,13 +16,23 @@ struct WorldRequestContext {
         return Self(client: client, provider: provider)
     }
 
+    @MainActor
+    static func makeForNarrativeSync(store: AppStore) throws -> Self {
+        guard let provider = store.narrativeSyncProvider else {
+            throw LLMError.notConfigured
+        }
+        let client = try store.clientForNarrativeSync()
+        return Self(client: client, provider: provider)
+    }
+
     /// 世界任务统一的请求参数：输出预算至少 4096，截断按 `failOnLength` 处理。
     ///
     /// 统一调用此处，确保 `maxTokens` 满足大批量 JSON 结构输出需求。
     static func request(
         provider: ProviderSetting,
         messages: [LLMMessage],
-        failOnLength: Bool
+        failOnLength: Bool,
+        thinking: Bool? = nil
     ) -> LLMRequest {
         LLMRequest(
             model: provider.resolvedModel,
@@ -30,6 +40,7 @@ struct WorldRequestContext {
             stream: false,
             temperature: provider.temperature,
             maxTokens: max(provider.maxTokens, 4_096),
+            thinking: thinking,
             failOnLength: failOnLength
         )
     }
@@ -38,14 +49,16 @@ struct WorldRequestContext {
     func complete(
         _ messages: [LLMMessage],
         provider providerOverride: ProviderSetting? = nil,
-        failOnLength: Bool = false
+        failOnLength: Bool = false,
+        thinking: Bool? = nil
     ) async throws -> String {
         let target = providerOverride ?? provider
         return try await client.complete(
             Self.request(
                 provider: target,
                 messages: messages,
-                failOnLength: failOnLength
+                failOnLength: failOnLength,
+                thinking: thinking
             )
         )
     }

@@ -119,33 +119,66 @@ struct ReaderDocument {
     }
 }
 
-/// 按页取正文的缓存。页面固定 UTF-16 大小，块可能跨页。
+/// 按页取正文的缓存。兼容固定页长与精确页起点（防止非 BMP 代理对缩页后的累积漂移）。
 final class ReaderPageSource {
     private let pageCount: Int
     private let pageSize: Int
+    private let pageStartOffsets: [Int]
     private let loader: (Int) -> String?
     private let lock = NSLock()
     private var cache: [Int: String] = [:]
     private var recency: [Int] = []
     private let cacheLimit = 8
 
-    init(pageCount: Int, pageSize: Int, loader: @escaping (Int) -> String?) {
+    init(
+        pageCount: Int,
+        pageSize: Int,
+        pageStartOffsets: [Int] = [],
+        loader: @escaping (Int) -> String?
+    ) {
         self.pageCount = max(0, pageCount)
         self.pageSize = max(1, pageSize)
+        self.pageStartOffsets = pageStartOffsets
         self.loader = loader
+    }
+
+    private func pageIndex(for offset: Int) -> Int {
+        guard pageCount > 0 else { return 0 }
+        let safeOffset = max(0, offset)
+        guard pageStartOffsets.count == pageCount else {
+            return min(safeOffset / pageSize, pageCount - 1)
+        }
+        var lo = 0
+        var hi = pageCount - 1
+        while lo < hi {
+            let mid = lo + (hi - lo + 1) / 2
+            if pageStartOffsets[mid] <= safeOffset {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo
+    }
+
+    private func pageStart(for index: Int) -> Int {
+        if pageStartOffsets.count == pageCount, pageStartOffsets.indices.contains(index) {
+            return pageStartOffsets[index]
+        }
+        return index * pageSize
     }
 
     func text(in range: NSRange) -> String {
         guard pageCount > 0, range.length > 0 else { return "" }
-        let first = min(max(0, range.location / pageSize), pageCount - 1)
-        let last = min(max(first, (range.location + range.length - 1) / pageSize), pageCount - 1)
+        let first = pageIndex(for: range.location)
+        let last = max(first, pageIndex(for: range.location + range.length - 1))
         var joined = ""
         for index in first...last {
             joined += page(index)
         }
-        let pageStart = first * pageSize
+        let firstPageStart = pageStart(for: first)
         let ns = joined as NSString
-        let start = max(0, min(range.location - pageStart, ns.length))
+        let start = max(0, min(range.location - firstPageStart, ns.length))
         let length = max(0, min(range.length, ns.length - start))
         return ns.substring(with: NSRange(location: start, length: length))
     }
@@ -163,7 +196,18 @@ final class ReaderPageSource {
         var base = 0
         for index in 0..<pageCount {
             if Task.isCancelled || results.count >= ReaderSearch.limit { break }
+            if pageStartOffsets.count == pageCount {
+                base = pageStart(for: index)
+            }
             let pageText = page(index)
+            guard !pageText.isEmpty else {
+                prefix = ""
+                if pageStartOffsets.count != pageCount {
+                    base += pageSize
+                }
+                await Task.yield()
+                continue
+            }
             let prefixLength = (prefix as NSString).length
             let combined = prefix + pageText
             let pageBase = base - prefixLength
@@ -179,7 +223,9 @@ final class ReaderPageSource {
                 if results.count >= ReaderSearch.limit { break }
             }
             prefix = String(pageText.suffix(256))
-            base += (pageText as NSString).length
+            if pageStartOffsets.count != pageCount {
+                base += (pageText as NSString).length
+            }
             await Task.yield()
         }
         return results

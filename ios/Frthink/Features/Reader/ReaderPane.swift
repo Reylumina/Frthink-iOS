@@ -603,6 +603,7 @@ struct ReaderPane: View {
                 let pageSource = ReaderPageSource(
                     pageCount: session.bodyPageCount,
                     pageSize: FileStore.bodyPageSize,
+                    pageStartOffsets: session.bodyPageStartOffsets,
                     loader: { index in fileStore.loadBodyPage(projectID, index: index) }
                 )
                 document = ReaderDocument(

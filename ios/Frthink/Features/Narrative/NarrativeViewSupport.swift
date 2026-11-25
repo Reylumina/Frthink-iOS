@@ -187,9 +187,6 @@ enum NarrativeViewSupport {
         guard finding.kind == .staleBelief else { return false }
         let state = workspace.currentState()
         guard let belief = state.epistemicBeliefs[finding.targetID],
-              let latestFact = state.activeFacts[belief.slotKey],
-              !latestFact.isRetracted,
-              latestFact.value != belief.believedTruth,
               let lineage = try? workspace.storyGraph.lineage(to: workspace.storyGraph.headNodeID)
         else {
             return false
@@ -198,7 +195,11 @@ enum NarrativeViewSupport {
         for (idx, node) in lineage.enumerated() {
             depthByNodeID[node.id] = idx
         }
-        return (depthByNodeID[latestFact.nodeID] ?? 0) > (depthByNodeID[belief.updatedAtNodeID] ?? 0)
+        return NarrativeDreamingAuditor.matchingLatestFact(
+            for: belief,
+            in: state,
+            depthByNodeID: depthByNodeID
+        ) != nil
     }
 
     /// 将手动归纳出的 `longTermRules` 文本逐条同步为全局 `AuthorDirective`（保留既有不重复）。
@@ -248,6 +249,159 @@ enum NarrativeViewSupport {
             }
         }
         return text
+    }
+
+    /// 一次性按分类与名称排序返回全部已启用档案，供编辑弹窗在初始化时缓存。
+    static func sortedEnabledEntities(from session: ProjectSession) -> [EntityPage] {
+        (session.narrativeWorkspace?.currentState().entityPages.values.filter(\.enabled) ?? [])
+            .sorted { lhs, rhs in
+                if lhs.kind.rawValue != rhs.kind.rawValue {
+                    return lhs.kind.rawValue < rhs.kind.rawValue
+                }
+                return lhs.name < rhs.name
+            }
+    }
+
+    static func sortedEnabledEntities(from state: MaterializedNarrativeState?) -> [EntityPage] {
+        (state?.entityPages.values.filter(\.enabled) ?? [])
+            .sorted { lhs, rhs in
+                if lhs.kind.rawValue != rhs.kind.rawValue {
+                    return lhs.kind.rawValue < rhs.kind.rawValue
+                }
+                return lhs.name < rhs.name
+            }
+    }
+
+    /// 将内部英文属性槽位转换为自然可读的中文标签，去除工具感。
+    static func humanFactLabel(for attribute: String) -> String {
+        let trimmed = attribute.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("relation:") {
+            let target = String(trimmed.dropFirst("relation:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return target.isEmpty ? "关系" : "对\(target)"
+        }
+        if trimmed.hasPrefix("custom:") {
+            let name = String(trimmed.dropFirst("custom:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "补充设定" : name
+        }
+        if trimmed.hasPrefix("memory:") {
+            return "往事"
+        }
+        switch trimmed.lowercased() {
+        case "location": return "所在"
+        case "possession": return "持有"
+        case "condition": return "近况"
+        case "goal": return "心念目标"
+        case "status": return "眼下状态"
+        case "relation": return "人际"
+        case "personality": return "性情"
+        case "layout": return "格局"
+        case "atmosphere": return "氛围"
+        case "access": return "出入"
+        case "owner": return "归属"
+        case "capability": return "功用"
+        case "cost": return "代价"
+        case "rule": return "铁律"
+        case "faction": return "势力"
+        case "history": return "渊源"
+        case "exception": return "例外"
+        case "lore": return "设定"
+        default: return trimmed
+        }
+    }
+}
+
+/// 档案默认圆形徽章：遵循 DESIGN.md §1.4，以 44pt 系统亮色实底圆与白色符号区分四类档案。
+struct EntityAvatarBadge: View {
+    let kind: EntityKind
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 44
+
+    private var tintColor: Color {
+        switch kind {
+        case .character: return .indigo
+        case .location: return .teal
+        case .artifact: return .orange
+        case .lore: return .purple
+        }
+    }
+
+    private var symbol: String {
+        switch kind {
+        case .character: return "person.fill"
+        case .location: return "mappin.and.ellipse"
+        case .artifact: return "shippingbox.fill"
+        case .lore: return "book.closed.fill"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(tintColor)
+            Image(systemName: symbol)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 扁平化多选档案列表区块：复用于关键事件与伏笔编辑弹窗，消除深层嵌套并在标题实时显示已选数量。
+struct NarrativeEntityPickerSection: View {
+    let title: String
+    let entities: [EntityPage]
+    @Binding var selectedIDs: Set<String>
+
+    private var headerTitle: String {
+        selectedIDs.isEmpty ? "\(title)（可选）" : "\(title)（已选 \(selectedIDs.count)）"
+    }
+
+    var body: some View {
+        Section {
+            ForEach(entities) { page in
+                EntityOptionRow(
+                    page: page,
+                    isSelected: selectedIDs.contains(page.id),
+                    onToggle: { toggle(page.id) }
+                )
+            }
+        } header: {
+            AppSectionHeader(title: headerTitle)
+        }
+    }
+
+    private func toggle(_ entityID: String) {
+        if selectedIDs.contains(entityID) {
+            selectedIDs.remove(entityID)
+        } else {
+            selectedIDs.insert(entityID)
+        }
+    }
+}
+
+private struct EntityOptionRow: View {
+    let page: EntityPage
+    let isSelected: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: Theme.Spacing.s) {
+                Text(page.name)
+                    .font(Theme.labelSmall)
+                    .foregroundStyle(.primary)
+                StatusPill(text: page.kind.displayName, tone: .neutral)
+                Spacer(minLength: 0)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(Theme.labelSmall)
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -97,6 +97,7 @@ struct CorpusPane: View {
         }
         .onDisappear {
             store.saveSettings()
+            store.syncCorpusChangesIntoOpenSessions()
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {

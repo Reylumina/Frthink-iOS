@@ -29,13 +29,42 @@ struct PromptManagerPane: View {
     }
 
     private var previewBlocks: [PromptBlock] {
-        PromptIntegration.blocks(
+        var blocks = PromptIntegration.blocks(
             projectID: session?.project.id ?? "",
-            assistantSupplement: session?.payload.assistantSupplement ?? "",
+            assistantSupplement: "",
             globalPreset: store.settings.globalPreset,
             skills: skills,
             aiFlavorRules: store.settings.aiFlavorRules
         )
+        if let workspace = session?.narrativeWorkspace {
+            let state = workspace.currentState()
+            let rules = state.directiveLedger.activeDirectives()
+                .map(\.verbatimRule)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !rules.isEmpty {
+                blocks.append(
+                    PromptBlock(
+                        key: "narrative:directives",
+                        category: .agentPrompt,
+                        title: "写作规则（叙事工作区）",
+                        body: rules.joined(separator: "\n")
+                    )
+                )
+            }
+            let template = workspace.preservedStyle.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !template.isEmpty {
+                blocks.append(
+                    PromptBlock(
+                        key: "narrative:styleTemplate",
+                        category: .skill,
+                        title: "仿写模板",
+                        body: template
+                    )
+                )
+            }
+        }
+        return blocks
     }
 
     var body: some View {

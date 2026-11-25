@@ -195,27 +195,9 @@ extension SelfCheck {
             return "渐进式披露 / 因果截断 / SceneMemoryBlock ok"
         }
 
-        // 流式 <think>...</think> 剥离状态机与 Prefill 卡 CoT 注入验证
+        // 流式 <think>...</think> 剥离状态机与原生客户端请求体协议验证
         check("llm.thinkTagStreamSplitter") {
-            var prefillSplitter = ThinkTagStreamSplitter(startsInsideThink: true)
-            let p1 = prefillSplitter.push("先让林昭试探</thi")
-            let p2 = prefillSplitter.push("nk>\n她推门而入。")
-            let p3 = prefillSplitter.finish()
-            let prefillEvents = p1 + p2 + p3
-            let prefillReasoning = prefillEvents.compactMap {
-                if case .reasoning(let s) = $0 { return s }
-                return nil
-            }.joined()
-            let prefillProse = prefillEvents.compactMap {
-                if case .delta(let s) = $0 { return s }
-                return nil
-            }.joined()
-            try expect(
-                prefillReasoning == "先让林昭试探" && prefillProse == "她推门而入。",
-                "Prefill 模式遇到跨 chunk 的 </think> 应精确拆分为 reasoning 与正文 delta"
-            )
-
-            var inlineSplitter = ThinkTagStreamSplitter(startsInsideThink: false)
+            var inlineSplitter = ThinkTagStreamSplitter()
             let iEvents = inlineSplitter.push("<th") + inlineSplitter.push("ink>思考</think>\r\n正文")
                 + inlineSplitter.finish()
             let inlineReasoning = iEvents.compactMap {
@@ -231,137 +213,12 @@ extension SelfCheck {
                 "普通流式遇到 <think>...</think> 应自动剥离进 reasoning"
             )
 
-            var settings = AppSettings(
-                providers: [
-                    ProviderSetting(
-                        kind: .gemini,
-                        model: "gemini-4-argon",
-                        thinkingLevel: .off
-                    )
-                ],
-                prefillCoT: true
-            )
-            let snap = WriterPromptSnapshot(
-                action: .send(instruction: "继续写"),
-                manuscript: "",
-                messages: [],
-                world: WorldBook(),
-                assistantSupplement: "",
-                settings: settings,
-                projectID: "p1",
-                enabledUniverseEntryIDs: [],
-                bodyPromptSendWhole: true,
-                bodyPromptTailCodePoints: 1000,
-                continuationAnchor: nil,
-                explicitBodyRange: .full,
-                inputBudget: 8000
-            )
-            let geminiPrepared = WriterPromptBuilder.prepare(snap)
-            try expect(
-                geminiPrepared.messages.last?.role != "assistant",
-                "Gemini 等非白名单模型即使开启 prefillCoT 也不得注入末尾 assistant prefill"
-            )
-
-            settings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-flash", thinkingLevel: .off)]
-            var dsOffSnap = snap
-            dsOffSnap.settings = settings
-            let prepared = WriterPromptBuilder.prepare(dsOffSnap)
-            try expect(
-                ThinkTagStreamSplitter.startsInsideThink(for: prepared.messages),
-                "DeepSeek 关闭原生思考且开启 prefillCoT 时，末尾应挂未闭合 <think> assistant 预填充"
-            )
-
-            settings.providers = [ProviderSetting(kind: .anthropic, thinkingLevel: .high)]
-            var nativeSnap = snap
-            nativeSnap.settings = settings
-            let nativePrepared = WriterPromptBuilder.prepare(nativeSnap)
-            try expect(
-                nativePrepared.messages.last?.role != "assistant",
-                "Anthropic 原生思考开启时不得附加末尾 assistant prefill"
-            )
-
-            settings.providers = [ProviderSetting(kind: .deepseek, thinkingLevel: .high)]
-            var dsSnap = snap
-            dsSnap.settings = settings
-            let dsPrepared = WriterPromptBuilder.prepare(dsSnap)
-            let dsLast = dsPrepared.messages.last
-            try expect(
-                dsLast?.role == "assistant"
-                    && dsLast?.isPrefix == true
-                    && dsLast?.content.isEmpty == true
-                    && !(dsLast?.reasoningContent?.isEmpty ?? true),
-                "DeepSeek 思考模式开启 prefillCoT 时，末尾应生成 reasoning_content + prefix: true"
-            )
-            let dsBody = LLMRequest(
-                model: "deepseek-v4-pro",
-                messages: dsPrepared.messages,
-                stream: true,
-                temperature: 0.7,
-                maxTokens: 2048
-            ).jsonBody(isDeepSeek: true, kind: .deepseek, providerLevel: .high)
-            let dsJSON = String(data: dsBody, encoding: .utf8) ?? ""
-            try expect(
-                dsJSON.contains("\"prefix\":true") && dsJSON.contains("\"reasoning_content\""),
-                "DeepSeek 请求体应序列化 prefix:true 与 reasoning_content"
-            )
-
-            settings.providers = [
-                ProviderSetting(
-                    kind: .openCodeGo,
-                    model: "kimi-k3.1-pro",
-                    thinkingLevel: .high
-                )
-            ]
-            var ocSnap = snap
-            ocSnap.settings = settings
-            let ocPrepared = WriterPromptBuilder.prepare(ocSnap)
-            let ocBody = LLMRequest(
-                model: "kimi-k3.1-pro",
-                messages: ocPrepared.messages,
-                stream: true,
-                temperature: 0.7,
-                maxTokens: 2048
-            ).jsonBody(isDeepSeek: false, kind: .openCodeGo, providerLevel: .high)
-            let ocJSON = String(data: ocBody, encoding: .utf8) ?? ""
-            try expect(
-                ocJSON.contains("\"partial\":true") && ocJSON.contains("\"reasoning_content\""),
-                "OpenCode 路由 Kimi 模型开启思考预填充时应序列化 partial:true 与 reasoning_content"
-            )
-
-            // 动态场次锚点 + 400 降级剥离 + 非流式 <think> 剥离
-            var anchoredSnap = dsSnap
-            anchoredSnap.world.characters = [
-                CharacterCard(name: "林昭", identity: "剑客", enabled: true)
-            ]
-            anchoredSnap.world.activeEpistemicGaps = ["林昭尚不知客栈掌柜已换人"]
-            anchoredSnap.world.openThreads = [
-                PlotThread(title: "玄铁令牌来历", obligation: "揭示信物主人")
-            ]
-            anchoredSnap.manuscript = "林昭推门走入客栈。"
-            let anchoredPrepared = WriterPromptBuilder.prepare(anchoredSnap)
-            let anchoredReasoning = anchoredPrepared.messages.last?.reasoningContent ?? ""
-            try expect(
-                anchoredReasoning.contains("林昭")
-                    && anchoredReasoning.contains("客栈掌柜已换人")
-                    && anchoredReasoning.contains("玄铁令牌来历"),
-                "prefillCoT 应动态注入在场角色、认知差与未收伏笔锚点"
-            )
-
-            try expect(
-                OpenAICompatibleClient.isUnsupportedPrefill(
-                    status: 400,
-                    body: #"{"error":{"message":"prefix is not supported"}}"#
-                ) && OpenAICompatibleClient.strippingTrailingPrefill(from: ocPrepared.messages)?.last?.role != "assistant",
-                "不支持 prefill 的 400 响应应触发末尾预填充剥离降级"
-            )
-
             let nonStreamSplit = ThinkTagStreamSplitter.stripThinkTags(
-                from: "<think>\n内部推演</think>\n真正正文内容",
-                startsInsideThink: true
+                from: "<think>\n内部推演</think>\n真正正文内容"
             )
             try expect(
                 nonStreamSplit.reasoning == "内部推演" && nonStreamSplit.prose == "真正正文内容",
-                "非流式 stripThinkTags 应剥离重复开头 <think> 与正文"
+                "非流式 stripThinkTags 应剥离 <think> 与正文"
             )
 
             // 独立 Gemini 原生客户端协议与 baseURL 规范化自检
@@ -391,7 +248,7 @@ extension SelfCheck {
                     && geminiJSON.contains("\"thinkingConfig\""),
                 "Gemini 原生请求体应包含 systemInstruction、model 角色与 thinkingConfig"
             )
-            return "ThinkTagStreamSplitter / prefillCoT / DeepSeek & OpenCode & Gemini ok"
+            return "ThinkTagStreamSplitter / Gemini 原生协议 ok"
         }
 
         // WorldBook v2 Phase 2：世界书常驻/关键词/1 层递归触发与原序输出

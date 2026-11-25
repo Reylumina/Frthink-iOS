@@ -103,11 +103,12 @@ struct UniversePane: View {
     private func row(_ entry: UniverseEntry) -> some View {
         HStack(alignment: .center, spacing: Theme.Spacing.m) {
             Toggle("", isOn: Binding(
-                get: { isEnabled(entry) },
+                get: { entry.enabled && isEnabled(entry) },
                 set: { on in toggle(entry, on: on) }
             ))
             .labelsHidden()
             .controlSize(.small)
+            .disabled(!entry.enabled)
             .accessibilityLabel("本书启用「\(entry.title)」")
 
             NavigationLink(value: entry) {

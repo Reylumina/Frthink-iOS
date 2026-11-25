@@ -43,7 +43,7 @@ enum WorldRulesWorkflow {
 
         let context: WorldRequestContext
         do {
-            context = try WorldRequestContext.make(store: store)
+            context = try WorldRequestContext.makeForNarrativeSync(store: store)
         } catch let error as LLMError {
             switch error {
             case .notConfigured, .missingAPIKey:
@@ -52,12 +52,12 @@ enum WorldRulesWorkflow {
                 throw WorldRunError(message: "摘要未发送：\(error.localizedDescription)")
             }
         }
-        // 摘要模型留空时跟随当前供应方；填了只覆盖这次请求的 model。
+        // 已统一使用「世界更新模型」；仅在未单独配置世界更新模型且遗留填有摘要模型时做向后兼容覆写。
         var provider = context.provider
-        let summaryModel = store.settings.summaryModel
+        let legacySummaryModel = store.settings.summaryModel
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !summaryModel.isEmpty {
-            provider.model = summaryModel
+        if store.settings.narrativeSyncProviderID.isEmpty, !legacySummaryModel.isEmpty {
+            provider.model = legacySummaryModel
         }
         let messages = PromptComposer.longTermRulesMessages(
             existingLog: session.payload.world.longTermRules,
@@ -89,7 +89,8 @@ enum WorldRulesWorkflow {
             raw = try await context.complete(
                 messages,
                 provider: provider,
-                failOnLength: true
+                failOnLength: true,
+                thinking: false
             )
         } catch let error as LLMError {
             if error.isLLMCancellation { throw CancellationError() }
@@ -136,7 +137,8 @@ enum WorldRulesWorkflow {
         case .updated:
             session.payload.world = world
             session.syncWorldChangesIntoNarrativeWorkspace(
-                settingsCorpusLibraries: store.settings.corpusLibraries
+                settingsCorpusLibraries: store.settings.corpusLibraries,
+                syncLongTermRules: true
             )
             session.scheduleSave()
             return RulesOutcome(updated: true)

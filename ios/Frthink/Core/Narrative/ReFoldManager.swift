@@ -31,7 +31,8 @@ enum ReFoldManager {
         boundary: ReFoldBoundary,
         modelContextWindow: Int,
         effectiveInputBudget: Int,
-        rejectedDraftLimit: Int = 1
+        rejectedDraftLimit: Int = 1,
+        allowRestoreTool: Bool = true
     ) -> ReFoldPlan {
         guard !history.isEmpty else {
             return ReFoldPlan(
@@ -112,9 +113,10 @@ enum ReFoldManager {
         let dropRejectedSet = Set(rejectedDraftIndices).subtracting(retainedRejected)
 
         var foldedCount = 0
+        let restoreHint = allowRestoreTool ? " · 可调用 restore_turn 复原" : ""
         for idx in 0..<boundaryIdx {
             if dropRejectedSet.contains(idx) {
-                let stub = "[已折叠废弃草稿 #\(idx) · 可调用 restore_turn 复原]"
+                let stub = "[已折叠废弃草稿 #\(idx)\(restoreHint)]"
                 working[idx].content = stub
                 working[idx].toolCalls = nil
                 nextBoundary.foldedStepNotes[idx] = stub
@@ -126,7 +128,7 @@ enum ReFoldManager {
             if working[idx].role == "tool" {
                 if trimmed.count > 120 {
                     let brief = collapsedBrief(trimmed, limit: 48)
-                    let stub = "[已折叠步骤 #\(idx)（工具结果）· 可调用 restore_turn 复原] \(brief)"
+                    let stub = "[已折叠步骤 #\(idx)（工具结果）\(restoreHint)] \(brief)"
                     working[idx].content = stub
                     nextBoundary.foldedStepNotes[idx] = stub
                     foldedCount += 1
@@ -134,7 +136,7 @@ enum ReFoldManager {
             } else if trimmed.count > 140 {
                 let roleName = working[idx].role == "assistant" ? "助手" : "用户"
                 let brief = collapsedBrief(trimmed, limit: 60)
-                let stub = "[已折叠步骤 #\(idx)（\(roleName)）· 可调用 restore_turn 复原] \(brief)"
+                let stub = "[已折叠步骤 #\(idx)（\(roleName)）\(restoreHint)] \(brief)"
                 working[idx].content = stub
                 working[idx].toolCalls = nil
                 nextBoundary.foldedStepNotes[idx] = stub

@@ -1,7 +1,7 @@
 import Foundation
 
-/// 场景工作记忆与 Prefill 卡 CoT 组装器：
-/// 从 `WriterPromptBuilder` 拆出动态状态、3+2 伏笔配额、BM25 早期事实回查及白名单 CoT 预填充。
+/// 场景工作记忆组装器：
+/// 从 `WriterPromptBuilder` 拆出动态状态、3+2 伏笔配额及 BM25 早期事实回查。
 enum SceneMemoryBuilder {
 
     /// 统一场景工作记忆块（Single Compact Scene Memory Block）：
@@ -94,51 +94,5 @@ enum SceneMemoryBuilder {
             selectedThreads.append(contentsOf: remaining.prefix(5 - selectedThreads.count))
         }
         return Array(selectedThreads.prefix(5))
-    }
-
-    /// 仅对白名单模型（DeepSeek 官方，及 OpenCode / OpenAI 兼容路由的 DeepSeek/Kimi/GLM）生成末尾卡 CoT 预填充。
-    static func makePrefillCoTMessage(
-        snapshot: WriterPromptSnapshot,
-        activeCharacters: [CharacterCard],
-        messages: [LLMMessage]
-    ) -> LLMMessage? {
-        guard snapshot.settings.prefillCoT else { return nil }
-        guard messages.last?.role != "assistant" else { return nil }
-        guard let provider = snapshot.settings.activeProvider,
-              supportsReasoningContentPrefill(provider) else {
-            return nil
-        }
-
-        var anchors: [String] = []
-        let names = activeCharacters.prefix(3).map(\.name).filter { !$0.isEmpty }
-        if !names.isEmpty {
-            anchors.append("在场：\(names.joined(separator: "、"))")
-        }
-        if let gap = snapshot.world.activeEpistemicGaps.first?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !gap.isEmpty {
-            anchors.append("认知差：\(String(gap.prefix(32)))")
-        }
-        if let thread = prioritizedThreads(
-            from: snapshot.world.openThreads,
-            activeCharacters: activeCharacters
-        ).first?.title.trimmingCharacters(in: .whitespacesAndNewlines),
-           !thread.isEmpty {
-            anchors.append("未收伏笔：\(String(thread.prefix(24)))")
-        }
-        let anchorText = anchors.isEmpty ? "" : "（\(anchors.joined(separator: "；"))）"
-        let steeringSeed = "先定本段推演\(anchorText)：明确谁受动机或认知差推动、冲突如何转折、如何照应伏笔：\n1."
-
-        if provider.effectiveThinkingLevel != .off {
-            return .assistant("", reasoningContent: steeringSeed, isPrefix: true)
-        }
-        return .assistant("<think>\n\(steeringSeed)", isPrefix: true)
-    }
-
-    private static func supportsReasoningContentPrefill(_ provider: ProviderSetting) -> Bool {
-        guard provider.isDeepSeek || provider.isOpenCode || provider.kind == .openAICompatible else {
-            return false
-        }
-        return ReasoningDialect(isDeepSeek: provider.isDeepSeek, model: provider.resolvedModel).prefixKey != nil
     }
 }

@@ -17,6 +17,8 @@ struct StoryActivePathLayout {
         let id: String
         let node: PlotNode
         let isHead: Bool
+        let isFirst: Bool
+        let isLast: Bool
         let showBranchPill: Bool
         let alternateBranches: [BranchOption]
         let visibleParentSummary: String?
@@ -89,10 +91,26 @@ struct StoryActivePathLayout {
                     id: node.id,
                     node: node,
                     isHead: node.id == graph.headNodeID,
+                    isFirst: false,
+                    isLast: false,
                     showBranchPill: showBranchPill,
                     alternateBranches: alternateBranches,
                     visibleParentSummary: parentNode?.summary
                 )
+            )
+        }
+
+        let reversedRows = Array(orderedRows.reversed())
+        let finalRows: [Row] = reversedRows.enumerated().map { idx, row in
+            Row(
+                id: row.id,
+                node: row.node,
+                isHead: row.isHead,
+                isFirst: idx == 0,
+                isLast: idx == reversedRows.count - 1,
+                showBranchPill: row.showBranchPill,
+                alternateBranches: row.alternateBranches,
+                visibleParentSummary: row.visibleParentSummary
             )
         }
 
@@ -126,7 +144,7 @@ struct StoryActivePathLayout {
         let headLabel = graph.nodes[graph.headNodeID]?.branchLabel
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "主线"
         return StoryActivePathLayout(
-            rows: Array(orderedRows.reversed()),
+            rows: finalRows,
             otherBranchTips: otherTips,
             totalNodeCount: graph.nodes.count,
             currentBranchLabel: headLabel.isEmpty ? "主线" : headLabel
@@ -147,10 +165,19 @@ struct StoryGraphView: View {
     var externalThreadTrigger: Int = 0
     var externalForkTrigger: Int = 0
 
+    private struct SummaryCounts {
+        var activeThreadCount = 0
+        var readyThreadCount = 0
+        var ongoingEventCount = 0
+        var resolvedEventCount = 0
+        var eventArcCount = 0
+    }
+
     @State private var graph: StoryGraph = StoryGraph.makeInitial()
     @State private var layout: StoryActivePathLayout = StoryActivePathLayout.build(
         graph: StoryGraph.makeInitial()
     )
+    @State private var summaryCounts = SummaryCounts()
     @State private var expandedNodeIDs: Set<String> = []
     @State private var showOtherBranches = false
     @State private var pendingCheckoutNode: PlotNode?
@@ -160,19 +187,6 @@ struct StoryGraphView: View {
     @State private var addBeatParentID: String?
     @State private var showingPlantThreadSheet = false
     @State private var errorMessage: String?
-
-    private var liveState: MaterializedNarrativeState? {
-        _ = session.narrativeRevision
-        return session.narrativeWorkspace?.currentState()
-    }
-
-    private var activeThreadCount: Int {
-        liveState?.threads.values.filter { !$0.state.isTerminal }.count ?? 0
-    }
-
-    private var readyThreadCount: Int {
-        liveState?.threads.values.filter { $0.state == .ready }.count ?? 0
-    }
 
     var body: some View {
         Group {
@@ -186,6 +200,9 @@ struct StoryGraphView: View {
             }
         }
         .groupedPageBackground()
+        .sensoryFeedback(.selection, trigger: graph.headNodeID) { _, _ in
+            store.settings.hapticsEnabled
+        }
         .task(id: session.narrativeRevision) {
             reloadGraph()
         }
@@ -287,6 +304,28 @@ struct StoryGraphView: View {
     private var threadsSummarySection: some View {
         Section {
             NavigationLink {
+                EpisodicEventsView(session: session)
+            } label: {
+                HStack(spacing: Theme.Spacing.s) {
+                    Text("关键事件")
+                        .font(Theme.label)
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: Theme.Spacing.s)
+                    if summaryCounts.eventArcCount > 0 {
+                        StatusPill(text: "\(summaryCounts.eventArcCount) 条故事线", tone: .neutral)
+                    }
+                    Text(
+                        summaryCounts.ongoingEventCount == 0 && summaryCounts.resolvedEventCount == 0
+                            ? "暂无"
+                            : "进行中 \(summaryCounts.ongoingEventCount) · 已完结 \(summaryCounts.resolvedEventCount)"
+                    )
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.secondary)
+                }
+                .frame(minHeight: Theme.Layout.rowContentHeight)
+            }
+
+            NavigationLink {
                 ProspectiveThreadsView(session: session)
             } label: {
                 HStack(spacing: Theme.Spacing.s) {
@@ -294,10 +333,10 @@ struct StoryGraphView: View {
                         .font(Theme.label)
                         .foregroundStyle(.primary)
                     Spacer(minLength: Theme.Spacing.s)
-                    if readyThreadCount > 0 {
-                        StatusPill(text: "\(readyThreadCount) 可回收", tone: .accent)
+                    if summaryCounts.readyThreadCount > 0 {
+                        StatusPill(text: "\(summaryCounts.readyThreadCount) 待回收", tone: .accent)
                     }
-                    Text(activeThreadCount == 0 ? "暂无" : "\(activeThreadCount) 条")
+                    Text(summaryCounts.activeThreadCount == 0 ? "暂无" : "\(summaryCounts.activeThreadCount) 条")
                         .font(Theme.numeric)
                         .foregroundStyle(.secondary)
                 }
@@ -308,11 +347,26 @@ struct StoryGraphView: View {
 
     private var timelineSection: some View {
         Section {
-            ForEach(Array(layout.rows.enumerated()), id: \.element.id) { index, row in
-                nodeRowView(
-                    row,
-                    isFirst: index == 0,
-                    isLast: index == layout.rows.count - 1
+            ForEach(layout.rows) { row in
+                StoryActiveNodeRow(
+                    row: row,
+                    isExpanded: expandedNodeIDs.contains(row.node.id),
+                    canMergeIntoHead: canMergeNodeIntoHead(row),
+                    impactedNodes: expandedNodeIDs.contains(row.node.id)
+                        ? graph.downstreamImpactedNodes(of: row.node.id)
+                        : [],
+                    onToggleExpand: { toggleExpanded(row.node.id) },
+                    onCheckout: { pendingCheckoutNode = row.node },
+                    onCheckoutBranchTip: { checkoutNode($0) },
+                    onPlanBeatAfter: {
+                        addBeatParentID = row.node.id
+                        showingAddBeatSheet = true
+                    },
+                    onFork: {
+                        forkBranchName = ""
+                        forkingFromNode = row.node
+                    },
+                    onMergeIntoHead: { mergeIntoHead(from: row.node.id) }
                 )
                 .listRowInsets(EdgeInsets(
                     top: 0,
@@ -328,191 +382,30 @@ struct StoryGraphView: View {
         }
     }
 
+    private func canMergeNodeIntoHead(_ row: StoryActivePathLayout.Row) -> Bool {
+        guard !row.isHead else { return false }
+        let headNode = graph.nodes[graph.headNodeID]
+        return !(headNode?.allParentIDs.contains(row.node.id) ?? false)
+    }
+
+    private func toggleExpanded(_ nodeID: String) {
+        if expandedNodeIDs.contains(nodeID) {
+            expandedNodeIDs.remove(nodeID)
+        } else {
+            expandedNodeIDs.insert(nodeID)
+        }
+    }
+
     private var otherBranchesSection: some View {
         Section {
             DisclosureGroup("其他分支（\(layout.otherBranchTips.count)）", isExpanded: $showOtherBranches) {
                 ForEach(layout.otherBranchTips) { branch in
-                    Button {
+                    StoryBranchTipRow(branch: branch) {
                         pendingCheckoutNode = branch.tipNode
-                    } label: {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                            HStack(spacing: Theme.Spacing.s) {
-                                StatusPill(text: branch.branchLabel, tone: .neutral)
-                                Text("分支共 \(branch.beatCount) 幕")
-                                    .font(Theme.numericSmall)
-                                    .foregroundStyle(.secondary)
-                                Spacer(minLength: 0)
-                                Text("切换")
-                                    .font(Theme.labelSmall)
-                                    .foregroundStyle(Theme.accent)
-                            }
-                            Text(branch.tipNode.summary.isEmpty ? branch.tipNode.id : branch.tipNode.summary)
-                                .font(Theme.labelSmall)
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                        }
-                        .padding(.vertical, Theme.Spacing.xs)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-    }
-
-    private func nodeRowView(
-        _ row: StoryActivePathLayout.Row,
-        isFirst: Bool,
-        isLast: Bool
-    ) -> some View {
-        let node = row.node
-        let isExpanded = expandedNodeIDs.contains(node.id)
-        let headNode = graph.nodes[graph.headNodeID]
-        let alreadyParentOfHead = headNode?.allParentIDs.contains(node.id) ?? false
-
-        return HStack(alignment: .center, spacing: Theme.Spacing.m) {
-            StoryActiveTimelineSlot(
-                isFirst: isFirst,
-                isLast: isLast,
-                isHead: row.isHead,
-                hasFork: !row.alternateBranches.isEmpty
-            )
-
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                HStack(spacing: Theme.Spacing.s) {
-                    if row.isHead {
-                        StatusPill(text: "当前进度", tone: .accent)
-                    }
-                    if row.showBranchPill {
-                        StatusPill(text: node.branchLabel, tone: .neutral)
-                    }
-                    if !node.secondaryCausalParentIDs.isEmpty {
-                        StatusPill(text: "合流", tone: .success)
-                    }
-                    Spacer(minLength: 0)
-                    Menu {
-                        if !row.isHead {
-                            Button("切到这里继续写") {
-                                pendingCheckoutNode = node
-                            }
-                        }
-                        Button("在此幕后规划下一幕") {
-                            addBeatParentID = node.id
-                            showingAddBeatSheet = true
-                        }
-                        Button("从这里新建分支") {
-                            forkBranchName = ""
-                            forkingFromNode = node
-                        }
-                        if !row.isHead && !alreadyParentOfHead {
-                            Button("并入当前分支") {
-                                mergeIntoHead(from: node.id)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(Theme.label)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("节点操作")
-                }
-
-                Button {
-                    if isExpanded {
-                        expandedNodeIDs.remove(node.id)
-                    } else {
-                        expandedNodeIDs.insert(node.id)
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text(node.summary.isEmpty ? "初始节点" : node.summary)
-                            .font(Theme.label)
-                            .foregroundStyle(.primary)
-                            .multilineTextAlignment(.leading)
-
-                        if let quote = node.manuscriptAnchor?.quote, !quote.isEmpty {
-                            Text("「\(quote)」")
-                                .font(Theme.metadata)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(isExpanded ? nil : 2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if !row.alternateBranches.isEmpty {
-                    forkSwitcherPill(for: row)
-                }
-
-                if isExpanded {
-                    nodeCausalDetails(node, parentSummary: row.visibleParentSummary)
-                }
-            }
-            .padding(.vertical, Theme.Spacing.s)
-        }
-    }
-
-    private func forkSwitcherPill(for row: StoryActivePathLayout.Row) -> some View {
-        let count = row.alternateBranches.count
-        let title = row.isHead
-            ? "向下延伸 \(count) 条剧情"
-            : "另有 \(count) 条分支"
-
-        return Menu {
-            ForEach(row.alternateBranches) { branch in
-                Button {
-                    checkoutNode(branch.tipNode.id)
-                } label: {
-                    let tipSummary = branch.tipNode.summary.isEmpty
-                        ? branch.tipNode.id
-                        : branch.tipNode.summary
-                    Text("\(branch.branchLabel)（\(branch.beatCount) 幕）· \(tipSummary)")
-                }
-            }
-            Divider()
-            Button("从此处新建分支") {
-                forkBranchName = ""
-                forkingFromNode = row.node
-            }
-        } label: {
-            HStack(spacing: Theme.Spacing.xs) {
-                Image(systemName: "arrow.triangle.branch")
-                Text(title)
-                Image(systemName: "chevron.down")
-            }
-            .font(Theme.badge)
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, Theme.Spacing.s)
-            .padding(.vertical, Theme.Spacing.xs)
-            .background(Capsule().fill(Theme.accentSoft))
-        }
-        .buttonStyle(.borderless)
-    }
-
-    @ViewBuilder
-    private func nodeCausalDetails(_ node: PlotNode, parentSummary: String?) -> some View {
-        let impacted = graph.downstreamImpactedNodes(of: node.id)
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            if let parentSummary, !parentSummary.isEmpty {
-                Text("承接自：\(parentSummary)")
-                    .font(Theme.metadata)
-                    .foregroundStyle(.secondary)
-            }
-            if !impacted.isEmpty {
-                let names = impacted.prefix(3).map { $0.summary.isEmpty ? $0.id : $0.summary }
-                Text("后续关联：影响 \(impacted.count) 幕（\(names.joined(separator: " → "))）")
-                    .font(Theme.metadata)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("后续关联：已是当前分支末端")
-                    .font(Theme.metadata)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.top, Theme.Spacing.xs)
     }
 
     private func reloadGraph() {
@@ -521,6 +414,29 @@ struct StoryGraphView: View {
         )
         graph = workspace.storyGraph
         layout = StoryActivePathLayout.build(graph: graph)
+
+        let state = workspace.currentState()
+        var counts = SummaryCounts()
+        for thread in state.threads.values where !thread.state.isTerminal {
+            counts.activeThreadCount += 1
+            if thread.state == .ready || thread.state == .enacted {
+                counts.readyThreadCount += 1
+            }
+        }
+        var arcs = Set<String>()
+        for event in state.episodicEvents.values {
+            if event.status == .ongoing {
+                counts.ongoingEventCount += 1
+            } else {
+                counts.resolvedEventCount += 1
+            }
+            let arc = event.arcTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !arc.isEmpty {
+                arcs.insert(arc)
+            }
+        }
+        counts.eventArcCount = arcs.count
+        summaryCounts = counts
     }
 
     private func checkoutNode(_ nodeID: String) {
@@ -680,5 +596,176 @@ private struct StoryActiveTimelineSlot: View {
                     }
                 }
             }
+    }
+}
+
+private struct StoryBranchTipRow: View {
+    let branch: StoryActivePathLayout.BranchOption
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                HStack(spacing: Theme.Spacing.s) {
+                    StatusPill(text: branch.branchLabel, tone: .neutral)
+                    Text("分支共 \(branch.beatCount) 幕")
+                        .font(Theme.numericSmall)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text("切换")
+                        .font(Theme.labelSmall)
+                        .foregroundStyle(Theme.accent)
+                }
+                Text(branch.tipNode.summary.isEmpty ? branch.tipNode.id : branch.tipNode.summary)
+                    .font(Theme.labelSmall)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct StoryActiveNodeRow: View {
+    let row: StoryActivePathLayout.Row
+    let isExpanded: Bool
+    let canMergeIntoHead: Bool
+    let impactedNodes: [PlotNode]
+    let onToggleExpand: () -> Void
+    let onCheckout: () -> Void
+    let onCheckoutBranchTip: (String) -> Void
+    let onPlanBeatAfter: () -> Void
+    let onFork: () -> Void
+    let onMergeIntoHead: () -> Void
+
+    private var node: PlotNode { row.node }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            StoryActiveTimelineSlot(
+                isFirst: row.isFirst,
+                isLast: row.isLast,
+                isHead: row.isHead,
+                hasFork: !row.alternateBranches.isEmpty
+            )
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                rowHeader
+                summaryButton
+                if !row.alternateBranches.isEmpty {
+                    forkSwitcherPill
+                }
+                if isExpanded {
+                    causalDetails
+                }
+            }
+            .padding(.vertical, Theme.Spacing.s)
+        }
+    }
+
+    private var rowHeader: some View {
+        HStack(spacing: Theme.Spacing.s) {
+            if row.isHead {
+                StatusPill(text: "当前进度", tone: .accent)
+            }
+            if row.showBranchPill {
+                StatusPill(text: node.branchLabel, tone: .neutral)
+            }
+            if !node.secondaryCausalParentIDs.isEmpty {
+                StatusPill(text: "合流", tone: .success)
+            }
+            Spacer(minLength: 0)
+            actionMenu
+        }
+    }
+
+    private var actionMenu: some View {
+        Menu {
+            if !row.isHead {
+                Button("切到这里继续写", action: onCheckout)
+            }
+            Button("在此幕后规划下一幕", action: onPlanBeatAfter)
+            Button("从这里新建分支", action: onFork)
+            if canMergeIntoHead {
+                Button("并入当前分支", action: onMergeIntoHead)
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(Theme.label)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("节点操作")
+    }
+
+    private var summaryButton: some View {
+        Button(action: onToggleExpand) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                Text(node.summary.isEmpty ? "故事起点" : node.summary)
+                    .font(Theme.label)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+
+                if let quote = node.manuscriptAnchor?.quote, !quote.isEmpty {
+                    Text("「\(quote)」")
+                        .font(Theme.metadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(isExpanded ? nil : 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var forkSwitcherPill: some View {
+        let count = row.alternateBranches.count
+        let title = row.isHead ? "向下延伸 \(count) 条剧情" : "另有 \(count) 条分支"
+        return Menu {
+            ForEach(row.alternateBranches) { branch in
+                let tipSummary = branch.tipNode.summary.isEmpty ? branch.tipNode.id : branch.tipNode.summary
+                Button("\(branch.branchLabel)（\(branch.beatCount) 幕）· \(tipSummary)") {
+                    onCheckoutBranchTip(branch.tipNode.id)
+                }
+            }
+            Divider()
+            Button("从此处新建分支", action: onFork)
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "arrow.triangle.branch")
+                Text(title)
+                Image(systemName: "chevron.down")
+            }
+            .font(Theme.badge)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, Theme.Spacing.s)
+            .padding(.vertical, Theme.Spacing.xs)
+            .background(Capsule().fill(Theme.accentSoft))
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private var causalDetails: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            if let parentSummary = row.visibleParentSummary, !parentSummary.isEmpty {
+                Text("承接自：\(parentSummary)")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+            }
+            if !impactedNodes.isEmpty {
+                let names = impactedNodes.prefix(3).map { $0.summary.isEmpty ? $0.id : $0.summary }
+                Text("后续关联：影响 \(impactedNodes.count) 幕（\(names.joined(separator: " → "))）")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("后续关联：已是当前分支末端")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, Theme.Spacing.xs)
     }
 }
