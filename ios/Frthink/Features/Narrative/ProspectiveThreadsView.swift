@@ -336,7 +336,7 @@ struct PlantThreadSheet: View {
                 Text("一次性").tag(RecurrenceKind.once)
                 Text("多次呼应").tag(RecurrenceKind.recurring)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
         } header: {
             AppSectionHeader(title: "回收方式")
         }

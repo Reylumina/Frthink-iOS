@@ -1912,59 +1912,6 @@ enum SelfCheck {
             return "事件卡人物格式校验 ok"
         }
 
-        // 事件卡保存侧唯一性（APK「事件名称重复，请先整理事件卡」）。
-        check("world.eventTitleConflicts") {
-            let events = [
-                EventCard(id: "a", title: "雨夜来客"),
-                EventCard(id: "b", title: "次日清晨"),
-            ]
-            try expect(
-                WorldEventEditor.conflicts(title: " 雨夜来客 ", in: events, excluding: "b"),
-                "同名标题应被拦下"
-            )
-            try expect(
-                !WorldEventEditor.conflicts(title: "雨夜来客", in: events, excluding: "a"),
-                "改自己那张卡时不应误判冲突"
-            )
-            try expect(
-                !WorldEventEditor.conflicts(title: "   ", in: events, excluding: "b"),
-                "空标题不该拦保存"
-            )
-            return "事件卡同名拦截 ok"
-        }
-
-        // 事件卡：标题冲突且存在未保存改动时禁止滑动关闭，防止 onDisappear 静默丢弃草稿。
-        check("world.eventEditorDiscardGuard") {
-            let stored = EventCard(id: "a", title: "雨夜来客", scene: "旧书店")
-            var draft = stored
-            draft.scene = "码头"
-            try expect(
-                WorldEventEditor.shouldBlockDismissal(
-                    draft: draft,
-                    stored: stored,
-                    hasDuplicateTitle: true
-                ),
-                "有改动且标题冲突时应拦住下滑"
-            )
-            try expect(
-                !WorldEventEditor.shouldBlockDismissal(
-                    draft: draft,
-                    stored: stored,
-                    hasDuplicateTitle: false
-                ),
-                "标题不冲突时不应拦住下滑"
-            )
-            try expect(
-                !WorldEventEditor.shouldBlockDismissal(
-                    draft: stored,
-                    stored: stored,
-                    hasDuplicateTitle: true
-                ),
-                "没有改动时不应拦住下滑"
-            )
-            return "事件卡下滑丢弃保护 ok"
-        }
-
         // 规则编辑页：页面处于打开状态且 AI 更新相同字段时，若草稿未被修改则采用新值，
         // 若已被修改则保留用户编辑内容（防止「完成」操作以旧草稿覆盖 AI 生成结果）。
         check("world.ruleDraftSync") {
@@ -2118,20 +2065,6 @@ enum SelfCheck {
                 "已有事件为空时不应生成 P53 块"
             )
             return "裁剪后仍走增量契约 ok"
-        }
-
-        // 去重的 canonical_name 比较要归一：模型写大小写/空格不同时不能判无效。
-        check("world.dedupeNameKeys") {
-            let keys = WorldDedupe.candidateNameKeys([
-                CharacterCard(name: "Lin Zhao", aliases: ["林昭"]),
-                CharacterCard(name: "沈默"),
-            ])
-            try expect(keys.contains("linzhao"), "大小写/空格未归一：\(keys)")
-            try expect(
-                keys.contains(WorldMerge.normalize("LIN  ZHAO")),
-                "归一名没有覆盖模型的大小写变体"
-            )
-            return "去重名称归一 ok"
         }
 
         // 取消状态归一化：世界四类任务（刷新/事件/文风/规则）统一使用该谓词判断

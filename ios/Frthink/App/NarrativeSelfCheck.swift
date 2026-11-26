@@ -867,9 +867,9 @@ extension SelfCheck {
             try expect(extracted.droppedSpeculativeCount == 2, "必须丢弃全部臆断 todo/计划项")
             try expect(extracted.ungroundedFactCount == 1, "无原文引用的条目应计为 ungrounded")
             try expect(
-                extracted.delta.factEvents.first?.authority == .canonProseQuote
-                    && extracted.delta.factEvents.last?.authority == .inferredByAI,
-                "quote 命中正文应为 canonProseQuote，未命中应降为 inferredByAI"
+                extracted.delta.factEvents.count == 1
+                    && extracted.delta.factEvents.first?.authority == .canonProseQuote,
+                "quote 命中正文应保留为 canonProseQuote，未命中非撤回事实应被门控拦截"
             )
 
             var state = MaterializedNarrativeState(
@@ -913,8 +913,8 @@ extension SelfCheck {
                 index.anchors.contains { $0.canonicalEntityID == "c_lin" && $0.surfaceText == "林昭" }
                     && index.anchors.contains { $0.canonicalEntityID == "loc_shop" }
                     && index.anchors.contains { $0.kind == .timeMarker && $0.surfaceText.contains("第三章") }
-                    && index.anchors.contains { $0.kind == .artifactOrCount && $0.surfaceText.contains("两枚玄铁") },
-                "首页应精准抽取人物、地点、章回时间与计数物件"
+                    && !index.anchors.contains { $0.surfaceText.contains("两枚玄铁") },
+                "首页应精准抽取人物、地点与章回标记，并过滤泛量词噪声"
             )
 
             let p0Len = (p0 as NSString).length
@@ -930,8 +930,8 @@ extension SelfCheck {
             try expect(
                 !beforeP1.contains { $0.surfaceText == "阿昭" }
                     && afterP1.first?.canonicalEntityID == "c_lin"
-                    && index.anchors.contains { $0.kind == .timeMarker && $0.surfaceText == "三更" },
-                "追加页应识别别名与时间词并受因果偏移截断"
+                    && !index.anchors.contains { $0.surfaceText == "三更" },
+                "追加页应识别别名并受因果偏移截断，同时避免非章回时间噪声"
             )
             return "机械锚点抽取 + 增量追加 + 因果截断 ok"
         }
@@ -1148,18 +1148,17 @@ extension SelfCheck {
                 history: lossless,
                 boundary: ReFoldBoundary(boundaryTurnIndex: 0, stride: 3),
                 modelContextWindow: 32_000,
-                effectiveInputBudget: 400
+                effectiveInputBudget: 950
             )
             try expect(
                 plan.deduplicatedToolCount == 1
-                    && plan.updatedBoundary.boundaryTurnIndex >= 3
-                    && plan.updatedBoundary.boundaryTurnIndex % 3 == 0
-                    && plan.foldedTurnCount > 0,
-                "ReFold 应去重重复工具返回，并按步长 3 推进折叠边界"
+                    && plan.updatedBoundary.boundaryTurnIndex == 3
+                    && plan.foldedTurnCount == 3,
+                "ReFold 应去重重复工具返回，并按步长 3 非破坏性滑窗折叠"
             )
             try expect(
-                plan.messages[5].content.contains("重复工具结果"),
-                "第二次出现的相同工具返回应替换为指向首次的存根"
+                plan.messages.contains { $0.content.contains("重复工具结果") },
+                "保留区内的重复工具返回应替换为指向首次的存根"
             )
 
             let state = MaterializedNarrativeState(atNodeID: "root")
@@ -1179,8 +1178,8 @@ extension SelfCheck {
             try expect(
                 execResult.output.contains("步骤 #0")
                     && execResult.output.contains("旧日恩怨")
-                    && plan.messages[0].content.contains("已折叠步骤 #0"),
-                "restore_turn 应从无损历史恢复原文，而不修改已折叠的前部前缀"
+                    && (plan.messages.first?.content.contains("已滑出窗口步骤 #0-2") ?? false),
+                "restore_turn 应从无损历史恢复原文，同时前部滑窗只生成紧凑边界提示"
             )
             return "ReFold 去重/分块折叠 + restore_turn 无损复原 ok"
         }
@@ -2429,17 +2428,18 @@ extension SelfCheck {
                 bm25Index: bm25
             )
             let merged = composed.messages.map(\.content).joined(separator: "\n")
-            let volumeCount = composed.frozenSystemPrefix.components(separatedBy: "第一卷：雾港潮声下的暗线初现").count - 1
+            let volumeCount = merged.components(separatedBy: "第一卷：雾港潮声下的暗线初现").count - 1
             try expect(
                 !composed.usedFallbackBM25
                     && volumeCount == 1
-                    && !composed.frozenSystemPrefix.contains("- [卷纲]")
+                    && !composed.frozenSystemPrefix.contains("第一卷：雾港潮声下的暗线初现")
+                    && !composed.frozenSystemPrefix.contains("bookIndexLines")
                     && merged.contains("第一卷：雾港潮声下的暗线初现")
                     && merged.contains("林昭在旧书店识破伪造信函")
                     && merged.contains("高关联早期细节预检")
                     && merged.contains("老码头青石阶下压着半截铜钥匙")
                     && !merged.contains("赵二才是叛徒"),
-                "开启工具时仍应注入轻量词法预检、单次去重卷/章级金字塔摘要与 POV 私有认知隔离，且保持 usedFallbackBM25 为 false"
+                "开启工具时应把易变卷纲置于动态槽位以维持冻结前缀稳定性，并保持 POV 私有认知隔离"
             )
 
             var oneHopWS = ws
@@ -3186,12 +3186,22 @@ extension SelfCheck {
                             id: "b_shen_stance",
                             characterID: "c_lin",
                             topic: "沈清秋立场",
-                            believedTruth: "认为沈清秋仍不知情",
+                            believedTruth: "已知沈清秋在暗中调查",
+                            knowsSecret: true,
+                            authority: .canonProseQuote,
+                            updatedAtNodeID: "root",
+                            updatedAt: t0
+                        ),
+                        EpistemicBelief(
+                            id: "b_shen_blindspot",
+                            characterID: "c_lin",
+                            topic: "沈清秋立场盲区",
+                            believedTruth: "误以为沈清秋仍不知情",
                             knowsSecret: false,
                             authority: .canonProseQuote,
                             updatedAtNodeID: "root",
                             updatedAt: t0
-                        )
+                        ),
                     ]
                 ),
                 now: t0
@@ -3257,8 +3267,9 @@ extension SelfCheck {
             )
             try expect(
                 syncedCount == 1
-                    && auditWS.currentState().beliefs(for: "c_lin").first?.believedTruth == "沈清秋已识破伪装",
-                "同步清理应将过时认知更新为最新客观事实"
+                    && auditWS.currentState().beliefs(for: "c_lin").first(where: { $0.id == "b_shen_stance" })?.believedTruth == "沈清秋已识破伪装"
+                    && auditWS.currentState().beliefs(for: "c_lin").first(where: { $0.id == "b_shen_blindspot" })?.believedTruth == "误以为沈清秋仍不知情",
+                "同步清理应只更新已知情角色的过时认知，严禁抹平 knowsSecret=false 的角色信息差盲区"
             )
 
             let tempRoot = FileManager.default.temporaryDirectory
@@ -3523,13 +3534,18 @@ extension SelfCheck {
                 "关闭 corpusEnabled 时不得注入质心或场景示范语料，仅保留仿写模板"
             )
 
+            var wsBeforeReplace = session.ensureNarrativeWorkspace()
+            wsBeforeReplace.syncedManuscriptUTF16Offset = 128
+            session.noteNarrativeWorkspaceUpdated(wsBeforeReplace)
+
             session.replaceManuscript("全新导入的正文。")
             let resetWS = session.ensureNarrativeWorkspace()
             try expect(
                 resetWS.anchorIndex.anchors.isEmpty
+                    && resetWS.syncedManuscriptUTF16Offset == 0
                     && UserDefaults.standard.object(forKey: posKey) == nil
                     && UserDefaults.standard.object(forKey: bkmKey) == nil,
-                "replaceManuscript 应清零叙事锚点索引并清除旧书阅读定位/书签"
+                "replaceManuscript 应清零叙事锚点索引、同步进度并清除旧书阅读定位/书签"
             )
 
             return "语料开关隔离 + 导入正文重置锚点与阅读键 ok"
@@ -3574,6 +3590,315 @@ extension SelfCheck {
             )
 
             return "不等长页起点定位 + 五维文风检查器 ok"
+        }
+
+        // 验证分段同步切片（断点续切、按段落切分不丢字、到达末尾返回空）与同步位置持久化往返。
+        check("narrative.watermarkChunkSync") {
+            let paragraph1 = String(repeating: "雾港夜雨敲打着旧码头。", count: 8)
+            let paragraph2 = String(repeating: "林昭翻检灯塔铜锁。", count: 8)
+            let paragraph3 = String(repeating: "沈清秋推门走进茶室。", count: 8)
+            let fullText = [paragraph1, paragraph2, paragraph3].joined(separator: "\n\n")
+            let nsFull = fullText as NSString
+
+            let allChunks = ManuscriptSyncEngine.splitIntoSyncChunks(
+                fullText: fullText,
+                startUTF16: 0,
+                targetChunkUTF16: 120
+            )
+            let rejoined = allChunks.map(\.text).joined()
+            try expect(
+                allChunks.count >= 2 && rejoined == fullText,
+                "分段切片应保留连续边界并完整拼回全文（chunks=\(allChunks.count)）"
+            )
+
+            let resumeStart = allChunks[0].utf16End
+            let resumedChunks = ManuscriptSyncEngine.splitIntoSyncChunks(
+                fullText: fullText,
+                startUTF16: resumeStart,
+                targetChunkUTF16: 120
+            )
+            try expect(
+                resumedChunks.first?.utf16Start == resumeStart
+                    && resumedChunks.map(\.text).joined() == nsFull.substring(from: resumeStart),
+                "断点续切应精确衔接未同步尾部"
+            )
+
+            let emptyAtTail = ManuscriptSyncEngine.splitIntoSyncChunks(
+                fullText: fullText,
+                startUTF16: nsFull.length,
+                targetChunkUTF16: 120
+            )
+            try expect(emptyAtTail.isEmpty, "同步位置到达末尾时不应再生成切片")
+
+            let encoder = JSONEncoder()
+            let decoder = JSONDecoder()
+            var ws = NarrativeWorkspace()
+            ws.syncedManuscriptUTF16Offset = resumeStart
+            let encoded = try encoder.encode(ws)
+            let decoded = try decoder.decode(NarrativeWorkspace.self, from: encoded)
+            try expect(
+                decoded.syncedManuscriptUTF16Offset == resumeStart,
+                "NarrativeWorkspace 同步位置应正确往返序列化"
+            )
+
+            return "分段全书同步切片 + 同步位置序列化 ok"
+        }
+
+        // 验证上下文剪枝（消息排除/摘要替身 + 换场起点隔离前文 + 检索防回流）及旧消息兼容解码。
+        check("narrative.contextPruningAndSceneBoundary") {
+            let legacyJSON = """
+            {"id":"m_legacy","role":"assistant","variants":["旧版正文"],"selectedVariant":0,"createdAt":1700000000}
+            """.data(using: .utf8)!
+            let decoder = JSONDecoder()
+            let decodedLegacy = try decoder.decode(ChatMessage.self, from: legacyJSON)
+            try expect(
+                decodedLegacy.contextMode == .normal && decodedLegacy.prunedSummary.isEmpty,
+                "旧版 ChatMessage 缺省解码应恢复为 normal 模式与空摘要"
+            )
+
+            let excludedMsg = ChatMessage(
+                id: "m_ex",
+                role: .assistant,
+                content: "废弃支线里的铁锚与湿冷石阶",
+                contextMode: .excluded
+            )
+            var prunedMsg = ChatMessage(
+                id: "m_sum",
+                role: .assistant,
+                content: "大段繁复的前场感官与心理独白",
+                contextMode: .summaryOnly,
+                prunedSummary: "林昭深夜在旧码头修好油灯后离开。"
+            )
+            prunedMsg.setReasoning("长串前场推理过程", forVariant: 0)
+            let normalMsg = ChatMessage(id: "m_ok", role: .user, content: "次日上午两人来到茶室会面")
+
+            let converted = PromptComposer.llmMessages(
+                from: [excludedMsg, prunedMsg, normalMsg],
+                reasoningPolicy: .recentTwo
+            )
+            let convertedJoined = converted.map(\.content).joined(separator: "\n")
+            try expect(
+                converted.count == 2
+                    && !convertedJoined.contains("湿冷石阶")
+                    && !convertedJoined.contains("心理独白")
+                    && convertedJoined.contains("[前情摘要：林昭深夜在旧码头修好油灯后离开。]")
+                    && (converted.first?.reasoningContent == nil),
+                "上下文剪枝应跳过 excluded、用摘要替代 summaryOnly 并剥离其原文与思维链"
+            )
+
+            let part1 = "前夜沈清秋在旧码头仓库里的漫长独白与感官细节描写。"
+            let part2 = "清晨阳光照进茶室，沈清秋把账本推了过来。"
+            let fullBody = part1 + "\n\n" + part2
+            let boundaryOffset = (part1 + "\n\n" as NSString).length
+
+            var scopedWorkspace = NarrativeWorkspace()
+            scopedWorkspace.entityPages["c_shen"] = EntityPage(
+                id: "c_shen",
+                kind: .character,
+                name: "沈清秋",
+                enabled: true
+            )
+            scopedWorkspace.anchorIndex = AnchorIndex(
+                anchors: [
+                    MechanicalAnchor(
+                        kind: .location,
+                        surfaceText: "旧码头",
+                        canonicalEntityID: "c_shen",
+                        span: TextSpanAnchor(
+                            pageIndex: 0,
+                            utf16Start: 6,
+                            utf16Length: 9,
+                            quote: "旧码头仓库里的漫长独白",
+                            paragraphHash: "p0"
+                        )
+                    )
+                ],
+                indexedUTF16Length: (fullBody as NSString).length
+            )
+            var boundaryBM25 = ManuscriptIndex.IncrementalBM25Index()
+            _ = boundaryBM25.updatePage(index: 0, text: fullBody, utf16Start: 0)
+
+            var settings = AppSettings()
+            settings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-chat")]
+            settings.activeProviderID = settings.providers[0].id
+
+            let scoped = NarrativeContextOrchestrator.compose(
+                workspace: scopedWorkspace,
+                manuscript: fullBody,
+                history: converted,
+                userInstruction: "写两人在茶室里的对话交锋，不要提及旧码头",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                sceneBoundaryOffset: boundaryOffset,
+                inputBudget: 16_000,
+                enableTools: false,
+                bm25Index: boundaryBM25
+            )
+            let scopedJoined = scoped.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                !scopedJoined.contains("漫长独白与感官细节描写")
+                    && !scopedJoined.contains("旧码头仓库里的漫长独白")
+                    && scopedJoined.contains("沈清秋把账本推了过来"),
+                "换场起点应隔离前场正文原文与前场锚点/检索，同时保留新场正文"
+            )
+
+            let atEndBoundary = (fullBody as NSString).length
+            let atEndComposed = NarrativeContextOrchestrator.compose(
+                workspace: scopedWorkspace,
+                manuscript: fullBody,
+                history: [],
+                userInstruction: "旧码头与沈清秋接下来的安排",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                sceneBoundaryOffset: atEndBoundary,
+                inputBudget: 16_000,
+                enableTools: false,
+                bm25Index: boundaryBM25
+            )
+            let atEndJoined = atEndComposed.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                !atEndJoined.contains("漫长独白与感官细节描写")
+                    && !atEndJoined.contains("旧码头仓库里的漫长独白"),
+                "新场正文尚为空时，BM25 与机械锚点检索不得把边界前的前场原文回流进提示词"
+            )
+
+            let fallbackComposed = NarrativeContextOrchestrator.compose(
+                workspace: scopedWorkspace,
+                manuscript: fullBody,
+                history: [],
+                userInstruction: "旧码头",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                sceneBoundaryOffset: boundaryOffset,
+                tailCodePointLimitOverride: 8,
+                inputBudget: 16_000,
+                enableTools: false,
+                bm25Index: nil
+            )
+            let fallbackJoined = fallbackComposed.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                !fallbackJoined.contains("漫长独白与感官细节描写"),
+                "无增量 BM25 缓存时，兜底历史摘录也必须受换场起点限制"
+            )
+
+            let emptySceneTail = NarrativeContextOrchestrator.effectiveTailText(
+                manuscript: fullBody,
+                continuationAnchor: nil,
+                sceneBoundaryOffset: atEndBoundary,
+                tailTier: .standard
+            )
+            try expect(
+                emptySceneTail.tailText.isEmpty,
+                "刚将正文末尾设为新场起点时，活跃正文窗口应为空而不回流旧场景原文"
+            )
+
+            return "上下文剪枝 + 换场起点隔离 + 检索防回流 ok"
+        }
+
+        // 验证自动换场信号解析（主观插曲不落入客观事实）、消息自动收起与 ReFoldBoundary 同步清理、以及 Few-Shot 对白防滚雪球。
+        check("narrative.autoScenePruningAndDialogueBalance") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-auto-prune-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+
+            let subjectiveJSON = """
+            {"new_entities":[],"facts":[{"entity_id":"c_lin","attribute":"location","value":"异界高塔","quote":"仿佛置身异界高塔"}],"beliefs":[],"threads":[],"events":[],"scene_card":"心理插曲","scene_transition":{"shifted":true,"previous_layer":"subjective_insert","time_anchor":"抵达港口未满半日","neutral_bridge":"林昭因疲惫产生短暂恍惚，很快回到旅馆休息。"}}
+            """
+            let parsed = try NarrativeDeltaExtractor.parseDelta(
+                from: subjectiveJSON,
+                excerpt: "他恍惚间仿佛置身异界高塔。",
+                nodeID: "n_sub",
+                knownEntities: [EntityPage(id: "c_lin", kind: .character, name: "林昭")]
+            )
+            try expect(
+                parsed.sceneTransition?.shouldAutoPrune == true
+                    && parsed.sceneTransition?.previousLayer == .subjectiveInsert
+                    && parsed.delta.factEvents.isEmpty
+                    && (parsed.sceneTransition?.formattedBridge.contains("抵达港口未满半日") == true),
+                "主观插曲不应写入客观 factEvents，且应保留时间锚点与桥接摘要"
+            )
+
+            try expect(
+                NarrativeCommitCoordinator.hasExplicitSceneBreakPrefix("第十二章 雾散之后\n正文内容")
+                    && NarrativeCommitCoordinator.hasExplicitSceneBreakPrefix("***\n新的一天")
+                    && !NarrativeCommitCoordinator.hasExplicitSceneBreakPrefix("他推开窗看了一眼外面的雨。"),
+                "显式分章/分隔符识别应准确区分换场与普通句段"
+            )
+
+            let manualMsg = ChatMessage(
+                id: "m_manual",
+                role: .assistant,
+                content: "手工气泡",
+                contextMode: .summaryOnly,
+                prunedSummary: "保留作者手写摘要"
+            )
+            let oldMsg1 = ChatMessage(id: "m_old1", role: .user, content: "旧场指令一")
+            let oldMsg2 = ChatMessage(id: "m_old2", role: .assistant, content: "旧场回复二")
+            let newMsg = ChatMessage(id: "m_new", role: .assistant, content: "新场回复三")
+            let payload = ProjectPayload(
+                manuscript: "前情。新场正文。",
+                messages: [manualMsg, oldMsg1, oldMsg2, newMsg]
+            )
+            let session = ProjectSession(
+                project: Project(id: "auto-prune-book", title: "自动剪枝验证"),
+                payload: payload,
+                source: "",
+                translations: [],
+                store: files,
+                readOnly: true
+            )
+            var ws = session.ensureNarrativeWorkspace()
+            ws.reFoldBoundary = ReFoldBoundary(
+                boundaryTurnIndex: 3,
+                stride: 3,
+                foldedStepNotes: [1: "[已折叠步骤 #1]"]
+            )
+            session.noteNarrativeWorkspaceUpdated(ws)
+
+            let prunedCount = session.autoPruneMessagesBefore(
+                messageID: "m_new",
+                bridgeSummary: "[次日清晨] 旧场冲突已收尾。"
+            )
+            try expect(
+                prunedCount == 2
+                    && session.payload.messages[0].prunedSummary == "保留作者手写摘要"
+                    && session.payload.messages[1].contextMode == .excluded
+                    && session.payload.messages[2].contextMode == .summaryOnly
+                    && session.payload.messages[2].prunedSummary == "[次日清晨] 旧场冲突已收尾。"
+                    && session.payload.messages[3].contextMode == .normal
+                    && (session.narrativeWorkspace?.reFoldBoundary.boundaryTurnIndex ?? -1) <= 1,
+                "自动收起前场气泡应保留手工摘要与新场消息，并同步收敛 ReFoldBoundary"
+            )
+
+            let heavyDialogue = PromptAssembly.Corpus(
+                libraryID: "lib",
+                libraryName: "样章",
+                entryID: "e_dlg",
+                entryName: "雨夜茶室交谈",
+                category: "仿写样本",
+                text: "“你来了。”“我一直都在。”“茶凉了。”“再续一壶就是。”“外头还在下雨吗？”“下了整夜。”"
+            )
+            let proseSample = PromptAssembly.Corpus(
+                libraryID: "lib",
+                libraryName: "样章",
+                entryID: "e_prose",
+                entryName: "旧巷石阶白描",
+                category: "仿写样本",
+                text: "石阶被夜露浸得发暗，檐角的铁风铃动了一下，远处传来收摊车轮碾过青石板的声音。他收紧袖口，沿着墙根往前走。"
+            )
+            let suppressedRef = StyleDistiller.styleReferenceBlock(
+                from: [heavyDialogue, proseSample],
+                maxSamples: 1,
+                instructionText: "减少对话，重点写他穿过长巷赶路。",
+                queryText: "“走吧。”他关上门，沿着潮湿长巷往北走去。"
+            )
+            try expect(
+                suppressedRef.injectedEntryIDs == ["e_prose"],
+                "Few-Shot 样本筛选应抑制高对白正反馈并响应减少对话要求"
+            )
+
+            return "自动换场剪枝 + 主观隔离 + Few-Shot 对白均衡 ok"
         }
     }
 

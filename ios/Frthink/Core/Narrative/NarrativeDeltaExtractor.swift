@@ -15,20 +15,54 @@ enum NarrativeDeltaParseError: Error, LocalizedError, Equatable {
     }
 }
 
-/// 单步叙事增量抽取结果：除增量载荷外，记录被丢弃的臆断计划条数与无原文引用降权条数。
+/// 后台增量抽取判定的前一段叙事层级。
+enum SceneNarrativeLayer: String, Codable, Hashable {
+    /// 同场客观正文的连续推进。
+    case canonOngoing = "canon_ongoing"
+    /// 前一场客观戏份已明确收尾并切换至新场景。
+    case canonClosed = "canon_closed"
+    /// 非现实/主观心理或回忆插曲，不代表当前物理世界已发生的客观改变。
+    case subjectiveInsert = "subjective_insert"
+}
+
+/// 场景切换与前情衔接信号：在现有单步抽取中顺带判定是否发生换场，并强制保留显式时间锚点。
+struct SceneTransitionSignal: Codable, Hashable {
+    var shifted: Bool
+    var previousLayer: SceneNarrativeLayer
+    var timeAnchor: String
+    var neutralBridge: String
+
+    var shouldAutoPrune: Bool {
+        shifted || previousLayer != .canonOngoing
+    }
+
+    var formattedBridge: String {
+        let cleanTime = timeAnchor.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBridge = neutralBridge.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanTime.isEmpty && !cleanBridge.isEmpty {
+            return "[\(cleanTime)] \(cleanBridge)"
+        }
+        return cleanBridge.isEmpty ? cleanTime : cleanBridge
+    }
+}
+
+/// 单步叙事增量抽取结果：除增量载荷外，记录被丢弃的臆断计划条数、无原文引用降权条数与换场信号。
 struct NarrativeDeltaExtractionResult: Codable, Hashable {
     var delta: PlotNodeDelta
     var droppedSpeculativeCount: Int
     var ungroundedFactCount: Int
+    var sceneTransition: SceneTransitionSignal?
 
     init(
         delta: PlotNodeDelta = PlotNodeDelta(),
         droppedSpeculativeCount: Int = 0,
-        ungroundedFactCount: Int = 0
+        ungroundedFactCount: Int = 0,
+        sceneTransition: SceneTransitionSignal? = nil
     ) {
         self.delta = delta
         self.droppedSpeculativeCount = droppedSpeculativeCount
         self.ungroundedFactCount = ungroundedFactCount
+        self.sceneTransition = sceneTransition
     }
 }
 
@@ -54,7 +88,7 @@ enum NarrativeDeltaExtractor {
         let systemPrompt = """
         你是一个冷静、只记录已发生事实的叙事状态抽取器。
         给定一段刚刚采纳落盘的小说正文，以及当前已知实体列表和未决伏笔列表，请只抽取这段正文里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
-        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"events":[{"id":"","title":"","arc":"","scene":"","participants":[""],"cause":"","development":"","outcome":"","status":"ongoing|resolved","quote":""}],"scene_card":""}
+        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"events":[{"id":"","title":"","arc":"","scene":"","participants":[""],"cause":"","development":"","outcome":"","status":"ongoing|resolved","quote":""}],"scene_card":"","scene_transition":{"shifted":false,"previous_layer":"canon_ongoing|canon_closed|subjective_insert","time_anchor":"","neutral_bridge":""}}
         硬性约束：
         1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化、关键事件与伏笔状态迁移。
         2. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确名字的重要实体（龙套路人无需收录），并严格区分四类：`character`（人物）、`location`（物理地点）、`artifact`（可持有物件）、`lore`（世界观体系、势力、规则或历史概念；`trigger_keywords` 填正文中能带出该词条的关键词，不要把戏外作者写作规范归入 `lore`）。
@@ -64,6 +98,7 @@ enum NarrativeDeltaExtractor {
         6. events 仅在正文发生、推进或完结实质性剧情事件时填写；同一场景的连续推进必须复用「进行中关键事件」的 id（更新 development / outcome），不要把同一场戏拆成多条碎片事件；完结时将 status 设为 resolved。
         7. threads 推进或收束时优先复用已知 thread_id；若一次性伏笔（once）在本段正文已经彻底兑现或解答，直接输出 action 为 satisfied。
         8. 若本段没有任何需要记录的状态变化，对应数组留空即可。
+        9. scene_transition 仅在明确发生场次边界切换（时间跳跃、地点转移、叙事视角切分或上一冲突完结）时置 shifted 为 true，同一场戏连续对话动作保持 false；time_anchor 必须保留明确时间点与停留时长线索；neutral_bridge 用 1 句客观中性事实概括前情结果（剥离感官与情绪渲染）；若本段属于主观心理或回忆插曲而未实际改变物理世界，将 previous_layer 设为 subjective_insert 且不得向 facts 写入客观变更。
         """
 
         var lines: [String] = []
@@ -145,6 +180,7 @@ enum NarrativeDeltaExtractor {
             "threads", "thread_events",
             "events", "episodic_events", "episodicEvents",
             "scene_card", "sceneCard",
+            "scene_transition", "sceneTransition",
         ]
         if !object.keys.contains(where: { allowedTopKeys.contains($0) }) && droppedSpeculativeCount == 0 {
             throw NarrativeDeltaParseError.invalidStructure("缺少 facts / beliefs / threads / scene_card 字段")
@@ -180,9 +216,26 @@ enum NarrativeDeltaExtractor {
                 pageIndex: pageIndex,
                 baseUTF16Offset: baseUTF16Offset
             )
-            let authority: AuthorityRank = anchor != nil ? .canonProseQuote : .inferredByAI
-            if anchor == nil {
+            // 写前原文证据门控：未命中原文引用且非撤回事件的推测性事实拒绝写入活跃账本，防止错误锁定。
+            guard let anchor else {
                 ungroundedCount += 1
+                if !retracted {
+                    continue
+                }
+                factEvents.append(
+                    WorldFactEvent(
+                        id: "\(nodeID)_fact_\(idx)_\(SummaryKey.sha256Hex("\(entityID):\(attribute):\(value)").prefix(8))",
+                        entityID: entityID,
+                        attribute: attribute,
+                        value: value,
+                        nodeID: nodeID,
+                        authority: .inferredByAI,
+                        quoteAnchor: nil,
+                        isRetracted: true,
+                        createdAt: now
+                    )
+                )
+                continue
             }
             factEvents.append(
                 WorldFactEvent(
@@ -191,7 +244,7 @@ enum NarrativeDeltaExtractor {
                     attribute: attribute,
                     value: value,
                     nodeID: nodeID,
-                    authority: authority,
+                    authority: .canonProseQuote,
                     quoteAnchor: anchor,
                     isRetracted: retracted,
                     createdAt: now
@@ -300,10 +353,12 @@ enum NarrativeDeltaExtractor {
         let patch: NarrativePyramidPatch? = sceneCard.isEmpty
             ? nil
             : NarrativePyramidPatch(addedRecentSceneCards: [sceneCard])
+        let transition = parseSceneTransition(from: object)
+        let effectiveFacts = transition?.previousLayer == .subjectiveInsert ? [] : factEvents
 
         let delta = PlotNodeDelta(
             entityPageUpserts: newEntityPages,
-            factEvents: factEvents,
+            factEvents: effectiveFacts,
             epistemicBeliefs: epistemicBeliefs,
             threadEvents: threadEvents,
             episodicEvents: episodicEvents,
@@ -312,11 +367,51 @@ enum NarrativeDeltaExtractor {
         return NarrativeDeltaExtractionResult(
             delta: delta,
             droppedSpeculativeCount: droppedSpeculativeCount,
-            ungroundedFactCount: ungroundedCount
+            ungroundedFactCount: ungroundedCount,
+            sceneTransition: transition
         )
     }
 
     // MARK: - 内部解析辅助
+
+    private static func parseSceneTransition(from object: [String: Any]) -> SceneTransitionSignal? {
+        guard let raw = (object["scene_transition"] as? [String: Any])
+            ?? (object["sceneTransition"] as? [String: Any])
+        else {
+            return nil
+        }
+        let shifted = parseBool(raw["shifted"]) ?? false
+        let rawLayer = NarrativeJSONScanner.firstNonEmptyString(
+            raw,
+            keys: ["previous_layer", "previousLayer"]
+        ).lowercased()
+        let previousLayer: SceneNarrativeLayer
+        switch rawLayer {
+        case "canon_closed", "closed", "closed_scene":
+            previousLayer = .canonClosed
+        case "subjective_insert", "subjective", "flashback", "dream":
+            previousLayer = .subjectiveInsert
+        default:
+            previousLayer = .canonOngoing
+        }
+        let timeAnchor = NarrativeJSONScanner.firstNonEmptyString(
+            raw,
+            keys: ["time_anchor", "timeAnchor"]
+        )
+        let neutralBridge = NarrativeJSONScanner.firstNonEmptyString(
+            raw,
+            keys: ["neutral_bridge", "neutralBridge"]
+        )
+        if !shifted && previousLayer == .canonOngoing && timeAnchor.isEmpty && neutralBridge.isEmpty {
+            return nil
+        }
+        return SceneTransitionSignal(
+            shifted: shifted,
+            previousLayer: previousLayer,
+            timeAnchor: timeAnchor,
+            neutralBridge: neutralBridge
+        )
+    }
 
     private static func parseNewEntities(
         from object: [String: Any],

@@ -4,13 +4,12 @@
 import SwiftUI
 
 struct WriterBodyRangeSheet: View {
+    @Environment(AppStore.self) private var store
     @Bindable var session: ProjectSession
     @Environment(\.dismiss) private var dismiss
 
     private static let values: [Int] = [
-        0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000, 9_000, 10_000,
-        15_000, 20_000, 25_000, 30_000, 40_000, 50_000, 75_000, 100_000,
-        125_000, 250_000, 500_000, 750_000, 1_000_000,
+        0, 4_000, 8_000, 16_000, 32_000, 64_000, 128_000, 256_000, 500_000, 1_000_000,
     ]
 
     private var currentValue: Int {
@@ -43,33 +42,55 @@ struct WriterBodyRangeSheet: View {
     private var currentLabel: String {
         let size = session.manuscriptCharacterCount
         if session.payload.bodyPromptSendWhole {
-            return "全文 · \(size.formatted()) 字"
+            return "全文（\(size.formatted()) 字）"
         }
-        return "末尾 \(session.payload.bodyPromptTailCodePoints.formatted()) 字 · 正文 \(size.formatted()) 字"
+        return "末尾 \(formatCompactChars(session.payload.bodyPromptTailCodePoints)) / 正文 \(size.formatted()) 字"
+    }
+
+    private func formatCompactChars(_ count: Int) -> String {
+        if count >= 1_000_000, count % 1_000_000 == 0 {
+            return "\(count / 1_000_000)M 字"
+        }
+        if count >= 1_000, count % 1_000 == 0 {
+            return "\(count / 1_000)K 字"
+        }
+        return "\(count.formatted()) 字"
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    AppValueRow(title: "发送范围", value: currentLabel)
-                        .contentTransition(.numericText())
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        HStack {
+                            Text("发送范围")
+                                .font(Theme.label)
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                            Text(currentLabel)
+                                .font(Theme.numeric)
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText())
+                        }
 
-                    TactileSlider(
-                        value: indexBinding,
-                        in: 0...Double(Self.values.count - 1),
-                        step: 1
-                    )
-                    .accessibilityLabel("正文发送范围")
-                    .accessibilityValue(currentLabel)
+                        TactileSlider(
+                            value: indexBinding,
+                            in: 0...Double(Self.values.count - 1),
+                            step: 1,
+                            hapticsEnabled: store.settings.hapticsEnabled
+                        )
+                        .accessibilityLabel("正文发送范围")
+                        .accessibilityValue(currentLabel)
 
-                    HStack {
-                        Text("发全文")
-                        Spacer(minLength: 0)
-                        Text("末尾最多 \(Self.values.last ?? 0) 字")
+                        HStack {
+                            Text("发全文")
+                            Spacer(minLength: 0)
+                            Text(formatCompactChars(Self.values.last ?? 1_000_000))
+                        }
+                        .font(Theme.badge)
+                        .foregroundStyle(.secondary)
                     }
-                    .font(Font.caption)
-                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, Theme.Spacing.xs)
                 }
             }
             .navigationTitle("正文发送范围")

@@ -168,6 +168,7 @@ enum NarrativeDreamingAuditor {
 
             case .staleBelief:
                 guard let belief = state.epistemicBeliefs[finding.targetID],
+                      belief.knowsSecret,
                       let latestFact = matchingLatestFact(
                           for: belief,
                           in: state,
@@ -295,7 +296,8 @@ enum NarrativeDreamingAuditor {
         for belief in sortedBeliefs {
             let charName = state.entityPages[belief.characterID]?.name ?? belief.characterID
 
-            if let latestFact = matchingLatestFact(
+            if belief.knowsSecret,
+               let latestFact = matchingLatestFact(
                 for: belief,
                 in: state,
                 depthByNodeID: depthByNodeID

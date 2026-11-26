@@ -56,7 +56,6 @@ struct ReaderDisplaySettingsSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.colorSchemeContrast) private var contrast
     @State private var confirmingReset = false
 
     private static let previewLine = "夜色像被谁拧暗了一格，走廊尽头的灯还亮着。"
@@ -70,31 +69,53 @@ struct ReaderDisplaySettingsSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    AppValueRow(title: "字号", value: "\(Int(fontSize)) pt")
-                        .contentTransition(.numericText())
-                    IconSliderRow(
-                        value: $fontSize,
-                        range: 13...28,
-                        step: 1,
-                        leadingSymbol: "textformat.size.smaller",
-                        leadingFont: .footnote,
-                        trailingSymbol: "textformat.size.larger",
-                        trailingFont: .title3
-                    )
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        HStack {
+                            Text("字号")
+                                .font(Theme.label)
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                            Text("\(Int(fontSize)) pt")
+                                .font(Theme.numeric)
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText())
+                        }
+                        IconSliderRow(
+                            value: $fontSize,
+                            range: 13...28,
+                            step: 1,
+                            leadingSymbol: "textformat.size.smaller",
+                            leadingFont: .footnote,
+                            trailingSymbol: "textformat.size.larger",
+                            trailingFont: .title3
+                        )
+                    }
+                    .padding(.vertical, Theme.Spacing.xs)
                 }
 
                 Section {
-                    AppValueRow(title: "行距", value: String(format: "%.1f", lineHeight))
-                        .contentTransition(.numericText())
-                    IconSliderRow(
-                        value: $lineHeight,
-                        range: 1.2...2.0,
-                        step: 0.1,
-                        leadingSymbol: "text.alignleft",
-                        leadingFont: .caption,
-                        trailingSymbol: "arrow.up.and.down.text.horizontal",
-                        trailingFont: .footnote
-                    )
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        HStack {
+                            Text("行距")
+                                .font(Theme.label)
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                            Text(String(format: "%.1f", lineHeight))
+                                .font(Theme.numeric)
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText())
+                        }
+                        IconSliderRow(
+                            value: $lineHeight,
+                            range: 1.2...2.0,
+                            step: 0.1,
+                            leadingSymbol: "text.alignleft",
+                            leadingFont: .caption,
+                            trailingSymbol: "arrow.up.and.down.text.horizontal",
+                            trailingFont: .footnote
+                        )
+                    }
+                    .padding(.vertical, Theme.Spacing.xs)
                 }
 
                 Section {
@@ -127,21 +148,11 @@ struct ReaderDisplaySettingsSheet: View {
     }
 
     private var previewBlock: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.medium, style: .continuous)
-        return Text(Self.previewLine)
+        Text(Self.previewLine)
             .font(ReaderStyle.bodyFont(size: previewFontSize))
             .foregroundStyle(ReaderStyle.ink(dark: false))
             .lineSpacing(ReaderStyle.lineSpacing(size: previewFontSize, lineHeight: lineHeight))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Spacing.m)
-            .background(ReaderStyle.page(dark: false))
-            .clipShape(shape)
-            // 内容表面默认不描边；增强对比度时补一圈系统分隔线（§1.5、§5.6）。
-            .overlay {
-                if contrast == .increased {
-                    shape.strokeBorder(Theme.separator, lineWidth: 1)
-                }
-            }
             .themeAnimation(Theme.motionSelection, value: fontSize)
             .themeAnimation(Theme.motionSelection, value: lineHeight)
             .padding(.vertical, Theme.Spacing.xs)

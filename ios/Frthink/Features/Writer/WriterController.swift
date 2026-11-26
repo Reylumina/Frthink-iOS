@@ -504,6 +504,7 @@ final class WriterController {
             bodyPromptSendWhole: session.payload.bodyPromptSendWhole,
             bodyPromptTailCodePoints: session.payload.bodyPromptTailCodePoints,
             continuationAnchor: session.payload.continuationAnchor,
+            sceneBoundaryOffset: session.payload.sceneBoundaryOffset,
             explicitBodyRange: bodyRange,
             inputBudget: plan.effectiveInputBudget,
             stickyCharacterIDs: Set(stickyCharacterTurns.keys),

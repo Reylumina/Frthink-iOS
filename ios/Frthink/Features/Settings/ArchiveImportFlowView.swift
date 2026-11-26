@@ -151,7 +151,7 @@ struct ArchiveImportFlowView: View {
         if book.worldbookCount > 0 { parts.append("世界书 \(book.worldbookCount) 条") }
         if book.eventCount > 0 { parts.append("事件卡 \(book.eventCount) 张") }
         if book.sourceCharacters > 0 { parts.append("原文 \(book.sourceCharacters.formatted()) 字") }
-        return parts.isEmpty ? "正文为空" : parts.joined(separator: " · ")
+        return parts.isEmpty ? "正文为空" : parts.joined(separator: "，")
     }
 
     private func resultSummary(_ outcome: ArchiveImportOutcome) -> String {
@@ -249,7 +249,7 @@ private struct ArchiveImportSettingsCard: View {
             Text("全局设置")
                 .font(Theme.sectionTitle)
                 .foregroundStyle(.secondary)
-            Text(highlights.joined(separator: " · "))
+            Text(highlights.joined(separator: "，"))
                 .font(Font.footnote)
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)

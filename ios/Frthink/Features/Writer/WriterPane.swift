@@ -70,16 +70,30 @@ struct WriterPane: View {
         _undoState = State(initialValue: WriterUndoState(manager: manager))
     }
 
-    private enum WriterSheet: String, Identifiable {
+    private enum WriterSheet: Identifiable, Hashable {
         case manuscript
         case materials
         case snapshots
         case bodyRange
+        case sceneBoundary
         case styleLint
         case storyGraph
         case storyChoices
+        case pruneMessage(ChatMessage)
 
-        var id: String { rawValue }
+        var id: String {
+            switch self {
+            case .manuscript: return "manuscript"
+            case .materials: return "materials"
+            case .snapshots: return "snapshots"
+            case .bodyRange: return "bodyRange"
+            case .sceneBoundary: return "sceneBoundary"
+            case .styleLint: return "styleLint"
+            case .storyGraph: return "storyGraph"
+            case .storyChoices: return "storyChoices"
+            case .pruneMessage(let message): return "prune-\(message.id)"
+            }
+        }
     }
 
     /// 已经读进内存、等着确认替换正文的文件。
@@ -402,6 +416,12 @@ struct WriterPane: View {
         } label: {
             Label("正文发送范围…", systemImage: "text.alignleft")
         }
+        Button {
+            openSheet(.sceneBoundary)
+        } label: {
+            Label("换场起点…", systemImage: "scope")
+        }
+        .disabled(controller.isBusy)
         // 多选操作模式入口。
         Button {
             if let last = windowedMessages.last {
@@ -1010,6 +1030,11 @@ struct WriterPane: View {
 
     // MARK: - 浮层与锚点
 
+    func openPruneSheet(for message: ChatMessage) {
+        dismissKeyboard()
+        activeSheet = .pruneMessage(message)
+    }
+
     private func openSheet(_ sheet: WriterSheet) {
         dismissKeyboard()
         // 呈现全屏正文前初始化窗口编辑状态，避免全量正文提前加载。
@@ -1034,6 +1059,12 @@ struct WriterPane: View {
             RequestSnapshotsSheet(session: session)
         case .bodyRange:
             WriterBodyRangeSheet(session: session)
+        case .sceneBoundary:
+            SceneBoundarySheet(
+                session: session,
+                cursorOffset: cursorOffset,
+                cursorPlaced: cursorPlaced
+            )
         case .styleLint:
             NavigationStack {
                 StyleLintCardView(session: session)
@@ -1064,6 +1095,8 @@ struct WriterPane: View {
                     _ = controller.send(instruction, session: session, store: store)
                 }
             )
+        case .pruneMessage(let message):
+            MessagePruneSummarySheet(session: session, message: message)
         }
     }
 

@@ -210,12 +210,20 @@ final class OpenAICompatibleClient: LLMClient {
         var sawDone = false
         var undecodableLines = 0
         var reportedPromptTokens = 0
+        var reportedCachedTokens = 0
         var reportedCompletionTokens = 0
         var reportedTotalTokens = 0
         var accumulatedOutput = ""
         var accumulatedReasoning = ""
         var emittedToolCalls: [LLMToolCall] = []
         defer {
+            if reportedPromptTokens > 0 || reportedCachedTokens > 0 {
+                LLMTokenUsage.recordCacheObservation(
+                    provider: provider.kind.rawValue,
+                    promptTokens: reportedPromptTokens,
+                    cachedTokens: reportedCachedTokens
+                )
+            }
             let tokens = LLMTokenUsage.resolveTotal(
                 reportedPrompt: reportedPromptTokens,
                 reportedCompletion: reportedCompletionTokens,
@@ -361,6 +369,9 @@ final class OpenAICompatibleClient: LLMClient {
         if let usage = chunk.usage ?? chunk.response?.usage {
             if let p = usage.resolvedPromptTokens, p > 0 {
                 reportedPromptTokens = p
+            }
+            if let cached = usage.resolvedCachedTokens, cached > 0 {
+                reportedCachedTokens = max(reportedCachedTokens, cached)
             }
             if let c = usage.resolvedCompletionTokens, c > 0 {
                 reportedCompletionTokens = c
@@ -523,6 +534,13 @@ final class OpenAICompatibleClient: LLMClient {
             toolCalls: toolCalls,
             emittedAnything: hasPayload
         )
+        if let promptTokens = usage?.resolvedPromptTokens, promptTokens > 0 {
+            LLMTokenUsage.recordCacheObservation(
+                provider: provider.kind.rawValue,
+                promptTokens: promptTokens,
+                cachedTokens: usage?.resolvedCachedTokens ?? 0
+            )
+        }
         if tokens > 0 {
             onUsage?(tokens)
         }
@@ -743,14 +761,21 @@ final class OpenAICompatibleClient: LLMClient {
     }
 
     private struct UsagePayload: Decodable {
+        struct PromptTokensDetails: Decodable {
+            let cached_tokens: Int?
+        }
+
         let prompt_tokens: Int?
         let completion_tokens: Int?
         let total_tokens: Int?
         let input_tokens: Int?
         let output_tokens: Int?
+        let prompt_tokens_details: PromptTokensDetails?
+        let prompt_cache_hit_tokens: Int?
 
         var resolvedPromptTokens: Int? { prompt_tokens ?? input_tokens }
         var resolvedCompletionTokens: Int? { completion_tokens ?? output_tokens }
+        var resolvedCachedTokens: Int? { prompt_tokens_details?.cached_tokens ?? prompt_cache_hit_tokens }
         var resolvedTotalTokens: Int? {
             if let total_tokens, total_tokens > 0 { return total_tokens }
             let p = resolvedPromptTokens ?? 0

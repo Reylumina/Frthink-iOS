@@ -126,6 +126,11 @@ struct WriterMaterialsSheet: View {
             } else {
                 AppValueRow(title: "续写锚点", value: "正文末尾")
             }
+            if let boundary = session.payload.sceneBoundaryOffset, boundary > 0 {
+                AppValueRow(title: "换场起点", value: "第 \(boundary.formatted()) 字起")
+            } else {
+                AppValueRow(title: "换场起点", value: "不限")
+            }
             AppValueRow(
                 title: "提示词回看",
                 value: "\(session.payload.requestSnapshots.count) 条记录"

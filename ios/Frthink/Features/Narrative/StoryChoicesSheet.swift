@@ -122,6 +122,7 @@ struct StoryChoicesSheet: View {
                 }
                 .font(Theme.labelSmall.weight(.semibold))
             }
+            .buttonStyle(.borderless)
             .padding(.top, Theme.Spacing.xs)
         }
         .padding(.vertical, Theme.Spacing.xs)

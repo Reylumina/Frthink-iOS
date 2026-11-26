@@ -46,7 +46,7 @@ struct WriterSelectionBar: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
 
-            Text("多选 · \(selectedCount)")
+            Text("已选 \(selectedCount) 项")
                 .font(Font.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
 

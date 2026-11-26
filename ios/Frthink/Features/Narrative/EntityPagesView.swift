@@ -3,13 +3,18 @@
 import Foundation
 import SwiftUI
 
+private final class EntityExtractTaskToken {
+    var value: UUID?
+}
+
 struct EntityPagesView: View {
     @Environment(AppStore.self) private var store
     let session: ProjectSession
     var embeddedInWorld: Bool = false
     var externalSelectedKind: Binding<EntityKind?>? = nil
     var externalCreateTrigger: Int = 0
-    var externalExtractTrigger: Int = 0
+    var isExtractingExternal: Bool = false
+    var onExtractEntities: (() -> Void)? = nil
 
     @State private var sortedEntities: [EntityPage] = []
     @State private var factCountsByEntity: [String: Int] = [:]
@@ -19,7 +24,6 @@ struct EntityPagesView: View {
     @State private var showingCreateSheet = false
     @State private var pendingDeletePage: EntityPage?
     @State private var isExtracting = false
-    @State private var extractTrigger = 0
     @State private var errorMessage: String?
     #if DEBUG
     @State private var launchEntityID: String?
@@ -93,13 +97,6 @@ struct EntityPagesView: View {
         .onChange(of: externalCreateTrigger) { _, _ in
             showingCreateSheet = true
         }
-        .onChange(of: externalExtractTrigger) { _, _ in
-            extractTrigger &+= 1
-        }
-        .task(id: extractTrigger) {
-            guard extractTrigger > 0 else { return }
-            await extractFromManuscript()
-        }
         .narrativeErrorAlert($errorMessage, title: "操作失败")
         #if DEBUG
         .navigationDestination(item: $launchEntityID) { id in
@@ -110,7 +107,7 @@ struct EntityPagesView: View {
 
     private var entityList: some View {
         List {
-            if isExtracting {
+            if !embeddedInWorld && isExtracting {
                 Section {
                     AppStatusLine(kind: .progress, text: "正在从正文提取档案…")
                 }
@@ -154,9 +151,9 @@ struct EntityPagesView: View {
                     showingCreateSheet = true
                 }
                 Button("从正文提取档案", systemImage: "arrow.clockwise") {
-                    extractTrigger &+= 1
+                    triggerExtractFromManuscript()
                 }
-                .disabled(isExtracting || !hasManuscriptContent)
+                .disabled(isExtracting || isExtractingExternal || !hasManuscriptContent)
             } label: {
                 Image(systemName: "plus")
             }
@@ -257,9 +254,9 @@ struct EntityPagesView: View {
         } else if hasManuscriptContent {
             InlineEmptyState(
                 symbol: "person.2.crop.square.stack",
-                message: "暂无档案，可从正文提取或手动新建。",
-                actionTitle: "从正文提取",
-                action: { extractTrigger &+= 1 }
+                message: "暂无档案，可同步正文或手动新建。",
+                actionTitle: "同步正文到世界",
+                action: { triggerExtractFromManuscript() }
             )
         } else {
             InlineEmptyState(
@@ -281,6 +278,23 @@ struct EntityPagesView: View {
             settingsCorpusLibraries: store.settings.corpusLibraries
         )
         store.toast = updated.enabled ? "已启用「\(updated.name)」" : "已停用「\(updated.name)」"
+    }
+
+    private func triggerExtractFromManuscript() {
+        if let onExtractEntities {
+            onExtractEntities()
+            return
+        }
+        guard !isExtracting, !isExtractingExternal else { return }
+        let projectID = session.project.id
+        let tokenBox = EntityExtractTaskToken()
+        let task = Task { @MainActor in
+            await self.extractFromManuscript()
+            if let token = tokenBox.value {
+                self.store.finishWorldTask(for: projectID, token: token)
+            }
+        }
+        tokenBox.value = store.registerWorldTask(task, for: projectID)
     }
 
     private func extractFromManuscript() async {
@@ -362,7 +376,7 @@ struct EntityPagesView: View {
         var parts: [String] = []
         if facts > 0 { parts.append("\(facts) 条事实") }
         if beliefs > 0 { parts.append("\(beliefs) 条认知") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: "，")
     }
 
     private func reloadState() {

@@ -24,6 +24,8 @@ struct WriterPromptSnapshot {
     var bodyPromptSendWhole: Bool
     var bodyPromptTailCodePoints: Int
     var continuationAnchor: Int?
+    /// 本场正文起始位置（UTF-16 偏移）；非 nil 时仅将本场起点之后的正文放入活跃正文窗口。
+    var sceneBoundaryOffset: Int? = nil
     /// 调用方显式指定的正文范围（预算重试的末尾片段）；`.full` 表示按设置推导。
     var explicitBodyRange: PromptLibrary.BodyRange
     /// 历史裁剪与预算检查共用的有效输入预算。
@@ -285,7 +287,9 @@ enum WriterPromptBuilder {
             )
             userInstruction = instruction
         case .continueWriting:
-            if let last = snapshot.messages.last, last.role == .assistant {
+            if let last = snapshot.messages.last,
+               last.role == .assistant,
+               last.contextMode == .normal {
                 history = PromptComposer.llmMessages(
                     from: snapshot.messages.dropLast(),
                     reasoningPolicy: reasoningPolicy
@@ -324,6 +328,7 @@ enum WriterPromptBuilder {
             settings: snapshot.settings,
             enabledUniverseEntryIDs: snapshot.enabledUniverseEntryIDs,
             continuationAnchor: snapshot.continuationAnchor,
+            sceneBoundaryOffset: snapshot.sceneBoundaryOffset,
             tailTier: tailTier,
             tailCodePointLimitOverride: tailCodePointOverride,
             inputBudget: snapshot.inputBudget,
@@ -380,6 +385,7 @@ enum WriterPromptBuilder {
             baselineTailText = NarrativeContextOrchestrator.effectiveTailText(
                 manuscript: snapshot.manuscript,
                 continuationAnchor: snapshot.continuationAnchor,
+                sceneBoundaryOffset: snapshot.sceneBoundaryOffset,
                 tailTier: tailTier,
                 tailCodePointLimitOverride: overrideCount
             ).tailText
@@ -405,6 +411,7 @@ enum WriterPromptBuilder {
         next.manuscript = trimmed
         if next.narrativeWorkspace != nil {
             next.continuationAnchor = nil
+            next.sceneBoundaryOffset = nil
         }
         next.explicitBodyRange = .tail(count: trimmed.unicodeScalars.count)
         let prepared = try prepareCancellable(next)
@@ -427,16 +434,37 @@ enum WriterPromptBuilder {
             return (snapshot.manuscript, snapshot.explicitBodyRange)
         }
         let whole = snapshot.manuscript
+        let prefix: String
+        let baseRange: PromptLibrary.BodyRange
         if let anchor = snapshot.continuationAnchor,
            anchor > 0, anchor <= (whole as NSString).length {
-            let prefix = (whole as NSString).substring(to: anchor)
-            return (prefix, .anchorPrefix(count: prefix.count))
+            prefix = (whole as NSString).substring(to: anchor)
+            baseRange = .anchorPrefix(count: prefix.count)
+        } else {
+            prefix = whole
+            baseRange = .full
         }
-        if snapshot.bodyPromptSendWhole {
-            return (whole, .full)
+
+        let nsPrefix = prefix as NSString
+        let scopedText: String
+        if let boundary = snapshot.sceneBoundaryOffset, boundary > 0 {
+            if boundary >= nsPrefix.length {
+                return ("", .tail(count: 0))
+            }
+            let safeStart = nsPrefix.rangeOfComposedCharacterSequence(at: boundary).location
+            scopedText = nsPrefix.substring(from: safeStart)
+        } else {
+            scopedText = prefix
+        }
+
+        if snapshot.bodyPromptSendWhole || baseRange != .full {
+            let finalRange: PromptLibrary.BodyRange = (scopedText == prefix)
+                ? baseRange
+                : .tail(count: scopedText.count)
+            return (scopedText, finalRange)
         }
         let limit = max(256, snapshot.bodyPromptTailCodePoints)
-        return (PromptComposer.codePointTail(whole, limit: limit), .tail(count: limit))
+        return (PromptComposer.codePointTail(scopedText, limit: limit), .tail(count: limit))
     }
 
     // MARK: - 历史

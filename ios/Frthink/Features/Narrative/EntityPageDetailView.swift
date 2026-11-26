@@ -147,7 +147,7 @@ struct EntityPageDetailView: View {
             page.aliases.isEmpty ? "" : "又称 " + page.aliases.joined(separator: "、"),
         ]
         .filter { !$0.isEmpty }
-        .joined(separator: " · ")
+        .joined(separator: "、")
 
         return Section {
             HStack(spacing: Theme.Spacing.m) {

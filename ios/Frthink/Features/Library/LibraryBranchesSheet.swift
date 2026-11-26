@@ -101,7 +101,7 @@ struct LibraryBranchesSheet: View {
 
     /// 分支序号与最近编辑时间合并显示，保持与书架格式一致。
     private func subtitle(for branch: Project) -> String {
-        "第 \(branch.branchOrder + 1) 条 · " + LibraryFormat.updatedText(branch.updatedAt)
+        "第 \(branch.branchOrder + 1) 条，" + LibraryFormat.updatedText(branch.updatedAt)
     }
 
     /// 复制当前分支（即新建分支）：`duplicate` 会将副本关联至同一个分支根节点。

@@ -87,6 +87,7 @@ enum ManuscriptIndex {
             queryTerms: [String],
             instructionText: String = "",
             causalLimit: Int? = nil,
+            minUTF16Offset: Int = 0,
             excludeTrailingUTF16: Int = 0,
             maxResults: Int = 3,
             maxTokens: Int = 600
@@ -118,7 +119,9 @@ enum ManuscriptIndex {
             for page in sortedPages {
                 if let limit = effectiveLimit, page.utf16Start >= limit { break }
                 let pageEnd = page.utf16Start + page.utf16Length
-                let fullPageIncluded = effectiveLimit == nil || pageEnd <= (effectiveLimit ?? pageEnd)
+                if minUTF16Offset > 0, pageEnd <= minUTF16Offset { continue }
+                let fullPageIncluded = (effectiveLimit == nil || pageEnd <= (effectiveLimit ?? pageEnd))
+                    && minUTF16Offset <= page.utf16Start
 
                 if fullPageIncluded {
                     for (token, count) in page.pageDF {
@@ -132,7 +135,9 @@ enum ManuscriptIndex {
                     }
                 } else {
                     for (localIdx, window) in page.windows.enumerated() {
-                        let globalWindowEnd = page.utf16Start + window.utf16Start + window.utf16Length
+                        let globalWindowStart = page.utf16Start + window.utf16Start
+                        let globalWindowEnd = globalWindowStart + window.utf16Length
+                        if minUTF16Offset > 0, globalWindowStart < minUTF16Offset { continue }
                         if let limit = effectiveLimit, globalWindowEnd > limit { continue }
                         let tokens = page.windowTokens[localIdx]
                         totalTokenCount += tokens.count

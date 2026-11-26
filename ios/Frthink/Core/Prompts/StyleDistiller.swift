@@ -151,10 +151,12 @@ enum StyleDistiller {
         var selectedIndices: [Int] = []
         var used: Set<Int> = []
 
-        // 第 1 段：最贴近全书风格质心的饱满代表段，锚定主基调。
+        // 第 1 段：最贴近全书风格质心的饱满代表段，锚定主基调（避开极端高对白样本以免常驻拉偏对话比例）。
         if let first = chunks.indices.max(by: { a, b in
-            let sa = (1.0 - distance(vectors[a], centroid)) * min(1.0, Double(chunks[a].count) / 260.0)
-            let sb = (1.0 - distance(vectors[b], centroid)) * min(1.0, Double(chunks[b].count) / 260.0)
+            let dialoguePenaltyA = vectors[a][4] > 0.55 ? 0.65 : 1.0
+            let dialoguePenaltyB = vectors[b][4] > 0.55 ? 0.65 : 1.0
+            let sa = (1.0 - distance(vectors[a], centroid)) * min(1.0, Double(chunks[a].count) / 260.0) * dialoguePenaltyA
+            let sb = (1.0 - distance(vectors[b], centroid)) * min(1.0, Double(chunks[b].count) / 260.0) * dialoguePenaltyB
             return sa < sb
         }) {
             selectedIndices.append(first)
@@ -361,7 +363,7 @@ enum StyleDistiller {
         }
         let body = """
         <style_reference_only do_not_continue="true">
-        以下节选仅用于效仿句式节奏、用词质感与对白留白；严禁将其视为前文结尾，严禁续写其中的人物或剧情。
+        以下节选仅用于效仿句式节奏与用词质感；不要照搬样本的对话密度，严禁将其视为前文结尾，严禁续写其中的人物或剧情。
         \(sections.joined(separator: "\n\n"))
         </style_reference_only>
         """
@@ -429,7 +431,8 @@ enum StyleDistiller {
                     guard let score = exemplarMatchScore(
                         entry,
                         queryTokens: queryTokens,
-                        queryFingerprint: queryFP
+                        queryFingerprint: queryFP,
+                        keywordSource: keywordSource
                     ) else {
                         // MUSE (2609.15188): 语域严重错配的范例会拉低全维度表现，宁缺毋滥。
                         return nil
@@ -461,7 +464,7 @@ enum StyleDistiller {
             let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
             let technique = isPlaceholder
-                ? "保持本书的句式节奏、描写分寸与对白留白。"
+                ? "保持本书的句式节奏与描写分寸。"
                 : rawTitle
             let pairCost = TokenEstimator.estimate(technique) + TokenEstimator.estimate(entry.text) + 40
             if let tokenBudget, !selected.isEmpty, usedTokens + pairCost > tokenBudget {
@@ -479,11 +482,25 @@ enum StyleDistiller {
     private static func exemplarMatchScore(
         _ entry: PromptAssembly.Corpus,
         queryTokens: Set<String>,
-        queryFingerprint: LinguisticFingerprint
+        queryFingerprint: LinguisticFingerprint,
+        keywordSource: String
     ) -> Double? {
         let entryTokens = Set(ManuscriptIndex.tokenize(entry.entryName))
         let overlapCount = queryTokens.intersection(entryTokens).count
         let textFP = analyzeFingerprint(entry.text)
+
+        let suppressDialogue = ["减少对话", "少对话", "少写对话", "减少对白", "少对白", "不要对话"]
+            .contains { keywordSource.contains($0) }
+        if suppressDialogue && textFP.dialogueRatio > 0.30 {
+            return nil
+        }
+
+        let explicitDialogueRequest = ["对话", "对白", "交谈", "争吵", "质问", "谈话"]
+            .contains { keywordSource.contains($0) }
+        if !explicitDialogueRequest && textFP.dialogueRatio > 0.65 && overlapCount == 0 {
+            return nil
+        }
+
         let dialogueSim = 1.0 - min(1.0, abs(queryFingerprint.dialogueRatio - textFP.dialogueRatio) * 2.0)
         if overlapCount == 0 && dialogueSim < 0.35 {
             return nil
@@ -503,14 +520,21 @@ enum StyleDistiller {
 
         var registerBonus = 0.0
         let label = entry.entryName
-        if queryFingerprint.dialogueRatio >= 0.55 && (label.contains("对白") || label.contains("对话")) {
+        if explicitDialogueRequest && (label.contains("对白") || label.contains("对话")) {
             registerBonus += 0.4
         }
         if queryFingerprint.shortSentenceRatio >= 0.45
             && (label.contains("短句") || label.contains("节奏") || label.contains("动作")) {
             registerBonus += 0.4
         }
-        let dialogueExcessPenalty = textFP.dialogueRatio > queryFingerprint.dialogueRatio + 0.25 ? -0.5 : 0.0
+        let dialogueExcessPenalty: Double
+        if !explicitDialogueRequest && textFP.dialogueRatio > 0.45 {
+            dialogueExcessPenalty = -(textFP.dialogueRatio - 0.45) * 1.5
+        } else if textFP.dialogueRatio > queryFingerprint.dialogueRatio + 0.25 {
+            dialogueExcessPenalty = -0.5
+        } else {
+            dialogueExcessPenalty = 0.0
+        }
         return Double(overlapCount) * 1.5
             + dialogueSim * 0.6
             + shortRatioSim * 0.3

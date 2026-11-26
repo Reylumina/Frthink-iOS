@@ -36,6 +36,7 @@ struct TactileSlider: View {
     @ScaledMetric(relativeTo: .body) private var thumbActiveDiameter: CGFloat = 22
     @ScaledMetric(relativeTo: .body) private var trackRestHeight: CGFloat = 6
     @ScaledMetric(relativeTo: .body) private var trackActiveHeight: CGFloat = 10
+    @ScaledMetric(relativeTo: .body) private var sliderHeight: CGFloat = 32
 
     private var span: Double {
         max(0.0001, range.upperBound - range.lowerBound)
@@ -123,7 +124,7 @@ struct TactileSlider: View {
                     }
             )
         }
-        .frame(height: Theme.Layout.hitTarget)
+        .frame(height: sliderHeight)
         .animation(Theme.motion(Theme.motionSelection, reduceMotion: reduceMotion), value: isDragging)
         .animation(Theme.motion(Theme.motionSelection, reduceMotion: reduceMotion), value: clampedValue)
         .sensoryFeedback(.selection, trigger: currentStepIndex) { _, _ in

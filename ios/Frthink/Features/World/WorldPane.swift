@@ -14,16 +14,19 @@ enum WorldTab: String, CaseIterable, Identifiable, Hashable {
 enum WorldBusy: Equatable {
     case distillingStyle
     case updatingRules
+    case syncingManuscript(progressText: String?)
 
     var label: String {
         switch self {
         case .distillingStyle: return "正在提炼文风…"
         case .updatingRules: return "正在从最近对话归纳规则…"
+        case .syncingManuscript(let progressText):
+            return progressText ?? "正在同步正文到档案与剧情…"
         }
     }
 }
 
-/// 世界任务登记令牌的持有盒。
+/// 后台任务登记令牌的持有盒。
 ///
 /// 用于在任务注册与生命周期结束间传递令牌，避免闭包捕获局部可变状态。
 private final class WorldTaskToken {
@@ -37,10 +40,8 @@ struct WorldPane: View {
     @State private var tab: WorldTab = .entities
     @State private var entityKindFilter: EntityKind? = nil
     @State private var entityCreateTrigger = 0
-    @State private var entityExtractTrigger = 0
     @State private var plotBeatTrigger = 0
     @State private var plotThreadTrigger = 0
-    @State private var plotForkTrigger = 0
     @State private var ruleCreateTrigger = 0
 
     @State private var showingAudit = false
@@ -87,6 +88,11 @@ struct WorldPane: View {
         session.manuscriptCharacterCount > 0 || session.bodyPageCount > 0
     }
 
+    private var isSyncingManuscript: Bool {
+        if case .syncingManuscript = busy { return true }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Picker("世界分栏", selection: $tab) {
@@ -107,15 +113,17 @@ struct WorldPane: View {
                     embeddedInWorld: true,
                     externalSelectedKind: $entityKindFilter,
                     externalCreateTrigger: entityCreateTrigger,
-                    externalExtractTrigger: entityExtractTrigger
+                    isExtractingExternal: isSyncingManuscript,
+                    onExtractEntities: {
+                        startManuscriptSync(rescanFromStart: false)
+                    }
                 )
             case .plot:
                 StoryGraphView(
                     session: session,
                     embeddedInWorld: true,
                     externalBeatTrigger: plotBeatTrigger,
-                    externalThreadTrigger: plotThreadTrigger,
-                    externalForkTrigger: plotForkTrigger
+                    externalThreadTrigger: plotThreadTrigger
                 )
             case .rules:
                 WorldRulesHubView(
@@ -205,14 +213,19 @@ struct WorldPane: View {
             Button("新建档案", systemImage: "plus") {
                 entityCreateTrigger &+= 1
             }
-            Button("从正文提取档案", systemImage: "arrow.clockwise") {
-                entityExtractTrigger &+= 1
+            Divider()
+            Button("同步未提取正文", systemImage: "arrow.triangle.2.circlepath") {
+                startManuscriptSync(rescanFromStart: false)
             }
-            .disabled(!hasManuscriptContent)
+            .disabled(busy != nil || !hasManuscriptContent)
+            Button("重扫全书正文", systemImage: "arrow.counterclockwise") {
+                startManuscriptSync(rescanFromStart: true)
+            }
+            .disabled(busy != nil || !hasManuscriptContent)
         } label: {
             Image(systemName: "plus")
         }
-        .accessibilityLabel("添加档案")
+        .accessibilityLabel("添加或同步档案")
     }
 
     private var plotAddMenu: some View {
@@ -223,9 +236,15 @@ struct WorldPane: View {
             Button("新建伏笔", systemImage: "flag") {
                 plotThreadTrigger &+= 1
             }
-            Button("从当前幕分叉", systemImage: "arrow.triangle.branch") {
-                plotForkTrigger &+= 1
+            Divider()
+            Button("同步未提取正文", systemImage: "arrow.triangle.2.circlepath") {
+                startManuscriptSync(rescanFromStart: false)
             }
+            .disabled(busy != nil || !hasManuscriptContent)
+            Button("重扫全书正文", systemImage: "arrow.counterclockwise") {
+                startManuscriptSync(rescanFromStart: true)
+            }
+            .disabled(busy != nil || !hasManuscriptContent)
         } label: {
             Image(systemName: "plus")
         }
@@ -430,6 +449,29 @@ struct WorldPane: View {
                 store: self.store,
                 refreshTemplate: refreshTemplate
             )
+        }
+    }
+
+    private func startManuscriptSync(rescanFromStart: Bool) {
+        let initialText = rescanFromStart ? "正在从头重扫全书正文…" : "正在同步未提取正文…"
+        startWorldTask(
+            kind: .syncingManuscript(progressText: initialText),
+            cancelled: "已暂停同步，下次可从断点继续。"
+        ) {
+            let result = try await ManuscriptSyncEngine.syncManuscript(
+                session: self.session,
+                store: self.store,
+                rescanFromStart: rescanFromStart,
+                onProgress: { progress in
+                    self.busy = .syncingManuscript(
+                        progressText: "正在同步正文（\(progress.completedChunks)/\(progress.totalChunks) 段）…"
+                    )
+                }
+            )
+            if result.processedChunks == 0 {
+                return "正文已全部同步，无需重复提取。"
+            }
+            return "已同步 \(result.processedChunks) 段正文（新增档案 \(result.entitiesAdded)，事件 \(result.eventsUpdated)，伏笔 \(result.threadsUpdated)）。"
         }
     }
 

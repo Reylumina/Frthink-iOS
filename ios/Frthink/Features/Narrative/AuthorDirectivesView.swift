@@ -196,7 +196,7 @@ private struct SupersededDirectiveRow: View {
                 .font(Theme.labelSmall)
                 .foregroundStyle(.secondary)
                 .strikethrough()
-            StatusPill(text: "已停用 · \(scopeLabel)", tone: .neutral)
+            StatusPill(text: "\(scopeLabel)（已停用）", tone: .neutral)
         }
         .padding(.vertical, Theme.Spacing.xs)
     }
@@ -296,7 +296,7 @@ struct AddAuthorDirectiveSheet: View {
                     Text(kind.rawValue).tag(kind)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             if scopeKind == .branch {
                 AppValueRow(title: "绑定分支", value: currentBranchLabel)

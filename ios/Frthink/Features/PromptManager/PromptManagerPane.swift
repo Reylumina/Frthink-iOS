@@ -47,7 +47,7 @@ struct PromptManagerPane: View {
                     PromptBlock(
                         key: "narrative:directives",
                         category: .agentPrompt,
-                        title: "写作规则（叙事工作区）",
+                        title: "写作规则",
                         body: rules.joined(separator: "\n")
                     )
                 )

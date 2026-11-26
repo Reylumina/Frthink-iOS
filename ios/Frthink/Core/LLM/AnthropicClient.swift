@@ -294,11 +294,19 @@ final class AnthropicClient: LLMClient {
         var sawStop = false
         var undecodableLines = 0
         var inputTokens = 0
+        var cachedReadTokens = 0
         var outputTokens = 0
         var accumulatedOutput = ""
         var accumulatedReasoning = ""
         var emittedToolCalls: [LLMToolCall] = []
         defer {
+            if inputTokens > 0 || cachedReadTokens > 0 {
+                LLMTokenUsage.recordCacheObservation(
+                    provider: provider.kind.rawValue,
+                    promptTokens: inputTokens,
+                    cachedTokens: cachedReadTokens
+                )
+            }
             let tokens = LLMTokenUsage.resolveTotal(
                 reportedPrompt: inputTokens,
                 reportedCompletion: outputTokens,
@@ -344,6 +352,9 @@ final class AnthropicClient: LLMClient {
                     + (usage.cache_read_input_tokens ?? 0)
                 if promptSum > 0 {
                     inputTokens = max(inputTokens, promptSum)
+                }
+                if let cachedRead = usage.cache_read_input_tokens, cachedRead > 0 {
+                    cachedReadTokens = max(cachedReadTokens, cachedRead)
                 }
                 if let out = usage.output_tokens, out > 0 {
                     outputTokens = max(outputTokens, out)
@@ -555,6 +566,13 @@ final class AnthropicClient: LLMClient {
             toolCalls: toolCalls,
             emittedAnything: hasPayload
         )
+        if promptTokens > 0 {
+            LLMTokenUsage.recordCacheObservation(
+                provider: provider.kind.rawValue,
+                promptTokens: promptTokens,
+                cachedTokens: u?.cache_read_input_tokens ?? 0
+            )
+        }
         if tokens > 0 {
             onUsage?(tokens)
         }

@@ -178,7 +178,7 @@ struct SettingsConnectionPage: View {
     private var activeProviderName: String {
         guard let provider = store.settings.activeProvider else { return "尚未选择AI服务商" }
         let model = provider.resolvedModel
-        return "\(provider.displayTitle) · \(model.isEmpty ? "未填写模型" : model)"
+        return "\(provider.displayTitle)（\(model.isEmpty ? "未填写模型" : model)）"
     }
 
     private var translationModelShortLabel: String {
@@ -308,7 +308,7 @@ private struct TaskProviderPicker: View {
                         preset: provider.resolvedPreset,
                         title: provider.model.isEmpty
                             ? provider.displayTitle
-                            : "\(provider.displayTitle) · \(provider.model)",
+                            : "\(provider.displayTitle)（\(provider.model)）",
                         selected: selectedProviderID == provider.id
                     ) {
                         select(provider.id)

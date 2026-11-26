@@ -392,7 +392,7 @@ enum LegacyArchiveImporter {
         var graph = StoryGraph.makeInitial(
             rootID: rootID,
             branchLabel: "主线",
-            summary: "存档导入基线",
+            summary: "故事起点",
             initialDelta: delta,
             manuscriptAnchor: bodyAnchor,
             now: now

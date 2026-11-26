@@ -21,7 +21,7 @@ enum ReFoldManager {
             return min(safeBudget, 120_000)
         }
         if modelContextWindow >= 128_000 {
-            return min(safeBudget, 32_000)
+            return min(safeBudget, 64_000)
         }
         return min(safeBudget, 12_000)
     }
@@ -79,19 +79,23 @@ enum ReFoldManager {
             while boundaryIdx + stride <= maxFoldableEnd, estimatedAfterFold > horizon {
                 let nextIdx = boundaryIdx + stride
                 let savedTokens = (boundaryIdx..<nextIdx).reduce(0) { sum, idx in
-                    let cost = TokenEstimator.estimate(working[idx].content)
-                    return sum + max(0, cost - 48)
+                    sum + TokenEstimator.estimate(working[idx].content)
                 }
                 boundaryIdx = nextIdx
                 estimatedAfterFold = max(0, estimatedAfterFold - savedTokens)
             }
         }
 
+        // 确保滑窗边界不会落在 orphan tool 结果中间，避免破坏 assistant(toolCalls) -> tool 配对。
+        while boundaryIdx > 0 && boundaryIdx < working.count && working[boundaryIdx].role == "tool" {
+            boundaryIdx += 1
+        }
+
         nextBoundary.boundaryTurnIndex = boundaryIdx
 
         // 清理超出当前历史长度或折回边界之外的旧存根，避免撤回/清空对话后键位错配。
-        nextBoundary.deduplicatedStubs = nextBoundary.deduplicatedStubs.filter { $0.key < working.count }
-        nextBoundary.foldedStepNotes = nextBoundary.foldedStepNotes.filter { $0.key < boundaryIdx }
+        nextBoundary.deduplicatedStubs = nextBoundary.deduplicatedStubs.filter { $0.key < working.count && $0.key >= boundaryIdx }
+        nextBoundary.foldedStepNotes = [:]
 
         guard boundaryIdx > 0 else {
             return ReFoldPlan(
@@ -102,55 +106,22 @@ enum ReFoldManager {
             )
         }
 
-        // 统计折叠区内连续未采纳草稿位置，仅保留末尾 `rejectedDraftLimit` 份供对比。
-        var rejectedDraftIndices: [Int] = []
-        for idx in 0..<boundaryIdx where working[idx].role == "assistant" {
-            if idx + 1 < boundaryIdx, working[idx + 1].role == "assistant" {
-                rejectedDraftIndices.append(idx)
-            }
-        }
-        let retainedRejected = Set(rejectedDraftIndices.suffix(max(0, rejectedDraftLimit)))
-        let dropRejectedSet = Set(rejectedDraftIndices).subtracting(retainedRejected)
-
-        var foldedCount = 0
+        // 采用非破坏性滑窗：整段折叠 0..<boundaryIdx 为单条紧凑区间提示，不再把用户/助手消息硬截断为 60 字碎片。
         let restoreHint = allowRestoreTool ? " · 可调用 restore_turn 复原" : ""
-        for idx in 0..<boundaryIdx {
-            if dropRejectedSet.contains(idx) {
-                let stub = "[已折叠废弃草稿 #\(idx)\(restoreHint)]"
-                working[idx].content = stub
-                working[idx].toolCalls = nil
-                nextBoundary.foldedStepNotes[idx] = stub
-                foldedCount += 1
-                continue
-            }
+        let rangeStub = "[已滑出窗口步骤 #0-\(boundaryIdx - 1)（共 \(boundaryIdx) 条早期交互）\(restoreHint)]"
+        nextBoundary.foldedStepNotes[0] = rangeStub
 
-            let trimmed = working[idx].content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if working[idx].role == "tool" {
-                if trimmed.count > 120 {
-                    let brief = collapsedBrief(trimmed, limit: 48)
-                    let stub = "[已折叠步骤 #\(idx)（工具结果）\(restoreHint)] \(brief)"
-                    working[idx].content = stub
-                    nextBoundary.foldedStepNotes[idx] = stub
-                    foldedCount += 1
-                }
-            } else if trimmed.count > 140 {
-                let roleName = working[idx].role == "assistant" ? "助手" : "用户"
-                let brief = collapsedBrief(trimmed, limit: 60)
-                let stub = "[已折叠步骤 #\(idx)（\(roleName)）\(restoreHint)] \(brief)"
-                working[idx].content = stub
-                working[idx].toolCalls = nil
-                nextBoundary.foldedStepNotes[idx] = stub
-                foldedCount += 1
-            } else if let existing = nextBoundary.foldedStepNotes[idx], !existing.isEmpty {
-                working[idx].content = existing
-                foldedCount += 1
-            }
+        var remaining = Array(working[boundaryIdx...])
+        // 清理紧接边界之后的孤立连续冗余旧草稿，同时保留其余交互完整原文。
+        if rejectedDraftLimit == 0 {
+            remaining.removeAll { $0.role == "tool" && $0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         }
+        let resultMessages = [.user(rangeStub)] + remaining
 
         return ReFoldPlan(
-            messages: working,
+            messages: resultMessages,
             updatedBoundary: nextBoundary,
-            foldedTurnCount: foldedCount,
+            foldedTurnCount: boundaryIdx,
             deduplicatedToolCount: deduplicatedToolCount
         )
     }
@@ -193,13 +164,5 @@ enum ReFoldManager {
             lines.append("[步骤 #\(idx) · \(msg.role)]\n\(msg.content)")
         }
         return lines.joined(separator: "\n\n")
-    }
-
-    private static func collapsedBrief(_ text: String, limit: Int) -> String {
-        let singleLine = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard singleLine.count > limit else { return singleLine }
-        return String(singleLine.prefix(limit)) + "…"
     }
 }

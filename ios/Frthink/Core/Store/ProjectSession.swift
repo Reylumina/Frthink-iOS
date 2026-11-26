@@ -1245,11 +1245,106 @@ final class ProjectSession {
 
     /// 章节扫描防抖并在后台执行，避免长文敲字时主线程正则卡顿。
     func updateManuscript(_ text: String) {
+        let previousText = payload.manuscript
         payload.manuscript = text
+        adjustOffsetsForManuscriptEdit(oldText: previousText, newText: text)
         bodyLoaded = true
         bodyDirty = true
         scheduleBodySave()
         scheduleChapterScan()
+    }
+
+    /// 正文前中段增删改写时同步平移/裁剪基于 UTF-16 偏移的锚点、场景边界与事件索引，防止偏移静默漂移。
+    private func adjustOffsetsForManuscriptEdit(oldText: String, newText: String) {
+        guard oldText != newText, !textHasPureTailAppend(oldText: oldText, newText: newText) else {
+            return
+        }
+        let oldUTF16 = Array(oldText.utf16)
+        let newUTF16 = Array(newText.utf16)
+        let oldLen = oldUTF16.count
+        let newLen = newUTF16.count
+        let minLen = min(oldLen, newLen)
+
+        var prefix = 0
+        while prefix < minLen, oldUTF16[prefix] == newUTF16[prefix] {
+            prefix += 1
+        }
+        if prefix > 0, prefix < minLen {
+            let unit = oldUTF16[prefix]
+            if unit >= 0xDC00 && unit <= 0xDFFF {
+                prefix -= 1
+            }
+        }
+
+        var oldEnd = oldLen
+        var newEnd = newLen
+        while oldEnd > prefix, newEnd > prefix, oldUTF16[oldEnd - 1] == newUTF16[newEnd - 1] {
+            oldEnd -= 1
+            newEnd -= 1
+        }
+
+        let oldEditLength = oldEnd - prefix
+        let newEditLength = newEnd - prefix
+        let delta = newEditLength - oldEditLength
+
+        func shift(_ offset: Int) -> Int {
+            if offset >= oldEnd {
+                return max(0, offset + delta)
+            }
+            if offset > prefix {
+                return prefix
+            }
+            return offset
+        }
+
+        if let anchor = payload.continuationAnchor, anchor > prefix {
+            payload.continuationAnchor = shift(anchor)
+        }
+        if let boundary = payload.sceneBoundaryOffset, boundary > prefix {
+            payload.sceneBoundaryOffset = shift(boundary)
+        }
+
+        guard var workspace = narrativeWorkspace else { return }
+        var workspaceChanged = false
+
+        if workspace.syncedManuscriptUTF16Offset > prefix {
+            workspace.syncedManuscriptUTF16Offset = shift(workspace.syncedManuscriptUTF16Offset)
+            workspaceChanged = true
+        }
+
+        let safePageSize = max(1, FileStore.bodyPageSize)
+        var updatedNodes = workspace.storyGraph.nodes
+        var nodesChanged = false
+        for (nodeID, var node) in updatedNodes {
+            guard var anchor = node.manuscriptAnchor, anchor.utf16Start > prefix else { continue }
+            anchor.utf16Start = shift(anchor.utf16Start)
+            anchor.pageIndex = anchor.utf16Start / safePageSize
+            node.manuscriptAnchor = anchor
+            updatedNodes[nodeID] = node
+            nodesChanged = true
+        }
+        if nodesChanged {
+            workspace.storyGraph.nodes = updatedNodes
+            workspaceChanged = true
+        }
+
+        if !workspace.anchorIndex.anchors.isEmpty {
+            workspace.anchorIndex.adjustForEdit(
+                range: NSRange(location: prefix, length: oldEditLength),
+                replacementUTF16Length: newEditLength,
+                updatedText: newText,
+                knownEntities: Array(workspace.currentState().entityPages.values)
+            )
+            workspaceChanged = true
+        }
+
+        if workspaceChanged {
+            noteNarrativeWorkspaceUpdated(workspace)
+        }
+    }
+
+    private func textHasPureTailAppend(oldText: String, newText: String) -> Bool {
+        !oldText.isEmpty && newText.count >= oldText.count && newText.hasPrefix(oldText)
     }
 
     /// 全屏编辑页关闭后，通知只读正文视图重新灌一次文字。
@@ -1488,6 +1583,7 @@ final class ProjectSession {
         bodyLoaded = true
         bodyDirty = true
         payload.continuationAnchor = nil
+        payload.sceneBoundaryOffset = nil
         payload.readerOffset = 0
         payload.readerBookmarkOffset = 0
         UserDefaults.standard.removeObject(forKey: ReaderStorageKey.position(project.id))
@@ -1495,6 +1591,7 @@ final class ProjectSession {
         if var workspace = narrativeWorkspace {
             workspace.anchorIndex = AnchorIndex()
             workspace.latestStyleLint = nil
+            workspace.syncedManuscriptUTF16Offset = 0
             noteNarrativeWorkspaceUpdated(workspace)
         }
         manuscriptRevision += 1
@@ -1595,6 +1692,65 @@ final class ProjectSession {
             payload.continuationAnchor = offset
         } else {
             payload.continuationAnchor = nil
+        }
+        scheduleSave()
+    }
+
+    /// 更新单条对话消息的上下文参与策略（正常发送 / 仅发摘要 / 排除）。
+    func setMessageContextMode(
+        _ mode: MessageContextMode,
+        summary: String = "",
+        for messageID: String
+    ) {
+        guard let idx = payload.messages.firstIndex(where: { $0.id == messageID }) else { return }
+        payload.messages[idx].contextMode = mode
+        if mode == .summaryOnly {
+            payload.messages[idx].prunedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if mode == .normal {
+            payload.messages[idx].prunedSummary = ""
+        }
+        invalidateReFoldBoundary(fromTurnIndex: idx)
+        scheduleSave()
+    }
+
+    /// 自动换场剪枝：仅收起目标消息之前仍为 `.normal` 状态的旧场气泡，绝不覆盖用户手工设定或伤及新消息。
+    @discardableResult
+    func autoPruneMessagesBefore(messageID: String?, bridgeSummary: String) -> Int {
+        guard let messageID,
+              let targetIdx = payload.messages.firstIndex(where: { $0.id == messageID }),
+              targetIdx > 0
+        else {
+            return 0
+        }
+        let normalIndices = (0..<targetIdx).filter { idx in
+            let msg = payload.messages[idx]
+            return msg.contextMode == .normal
+                && !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !normalIndices.isEmpty, let firstIdx = normalIndices.first else { return 0 }
+
+        let cleanBridge = bridgeSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastNormalIdx = normalIndices[normalIndices.count - 1]
+        for idx in normalIndices {
+            if idx == lastNormalIdx && !cleanBridge.isEmpty {
+                payload.messages[idx].contextMode = .summaryOnly
+                payload.messages[idx].prunedSummary = cleanBridge
+            } else {
+                payload.messages[idx].contextMode = .excluded
+            }
+        }
+        invalidateReFoldBoundary(fromTurnIndex: firstIdx)
+        scheduleSave()
+        return normalIndices.count
+    }
+
+    /// 设置或取消当前场次正文起点：仅将起点之后的新场正文放入活跃上下文窗口。
+    func setSceneBoundaryOffset(_ offset: Int?) {
+        let length = manuscriptLength
+        if let offset, offset >= 0, offset <= length {
+            payload.sceneBoundaryOffset = offset
+        } else {
+            payload.sceneBoundaryOffset = nil
         }
         scheduleSave()
     }

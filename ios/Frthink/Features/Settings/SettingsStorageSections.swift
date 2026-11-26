@@ -18,7 +18,7 @@ struct SettingsStorageSection: View {
             )
             AppValueRow(
                 title: "书项目",
-                value: "\(store.projects.count) 本 · 回收站 \(store.trashedProjects.count) 本"
+                value: "\(store.projects.count) 本（回收站 \(store.trashedProjects.count)）"
             )
 
             Button {

@@ -17,6 +17,7 @@ extension WriterPane {
         let copyAction = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
             copyToClipboard(message.content)
         }
+        let pruneActions = contextPruningMenuActions(for: message)
         let withdrawAction = UIAction(
             title: "撤回",
             image: UIImage(systemName: "arrow.uturn.backward"),
@@ -31,7 +32,7 @@ extension WriterPane {
         ) { _ in
             messageAction = .deleteMessage(message)
         }
-        return [[copyAction], [withdrawAction, deleteAction]]
+        return [[copyAction], pruneActions, [withdrawAction, deleteAction]]
     }
 
     private func assistantMenuSections(for message: ChatMessage) -> [[UIMenuElement]] {
@@ -58,6 +59,8 @@ extension WriterPane {
                 }
             )
         }
+
+        let pruneActions = contextPruningMenuActions(for: message)
 
         var secondary: [UIMenuElement] = [
             UIAction(
@@ -90,7 +93,61 @@ extension WriterPane {
         ) { _ in
             messageAction = .delete(message)
         }
-        return [primary, secondary, [deleteAction]]
+        return [primary, pruneActions, secondary, [deleteAction]]
+    }
+
+    private func contextPruningMenuActions(for message: ChatMessage) -> [UIMenuElement] {
+        let isBusy = controller.isBusy
+        let disabled: UIMenuElement.Attributes = isBusy ? .disabled : []
+        switch message.contextMode {
+        case .normal:
+            return [
+                UIAction(
+                    title: "折叠为摘要…",
+                    image: UIImage(systemName: "arrow.down.right.and.arrow.up.left"),
+                    attributes: disabled
+                ) { _ in
+                    openPruneSheet(for: message)
+                },
+                UIAction(
+                    title: "不发给模型",
+                    image: UIImage(systemName: "eye.slash"),
+                    attributes: disabled
+                ) { _ in
+                    session.setMessageContextMode(.excluded, for: message.id)
+                    store.toast = "已设为此条不发给模型"
+                },
+            ]
+        case .summaryOnly:
+            return [
+                UIAction(
+                    title: "编辑摘要…",
+                    image: UIImage(systemName: "text.badge.checkmark"),
+                    attributes: disabled
+                ) { _ in
+                    openPruneSheet(for: message)
+                },
+                UIAction(
+                    title: "恢复发送原文",
+                    image: UIImage(systemName: "arrow.uturn.backward.circle"),
+                    attributes: disabled
+                ) { _ in
+                    session.setMessageContextMode(.normal, for: message.id)
+                    store.toast = "已恢复发送原文"
+                },
+            ]
+        case .excluded:
+            return [
+                UIAction(
+                    title: "恢复发送原文",
+                    image: UIImage(systemName: "eye"),
+                    attributes: disabled
+                ) { _ in
+                    session.setMessageContextMode(.normal, for: message.id)
+                    store.toast = "已恢复发送原文"
+                },
+            ]
+        }
     }
 
     private func withdrawUserMessage(_ message: ChatMessage) {

@@ -488,6 +488,8 @@ struct AppSettings: Codable {
     var reinforceStyleAtTail: Bool
     /// 采纳正文后是否在后台静默运行 Sleep-Time 状态与伏笔同步子 Agent。
     var sleepTimeStateSync: Bool
+    /// 后台检测到换场或叙事层切换时，自动收起前场正文与旧气泡（保留本地历史并可一键还原）。
+    var autoSceneContextPruning: Bool
     /// 历史思维链回灌策略。
     var reasoningContextPolicy: ReasoningContextPolicy
     /// 是否按注意力/关键词动态激活人物卡与事件卡（含 3 轮 Sticky 黏性）。
@@ -584,6 +586,7 @@ struct AppSettings: Codable {
         corpusLibraries: [CorpusLibrary] = [],
         reinforceStyleAtTail: Bool = true,
         sleepTimeStateSync: Bool = true,
+        autoSceneContextPruning: Bool = true,
         reasoningContextPolicy: ReasoningContextPolicy = .recentTwo,
         dynamicContextActivation: Bool = true
     ) {
@@ -622,6 +625,7 @@ struct AppSettings: Codable {
         self.corpusLibraries = corpusLibraries
         self.reinforceStyleAtTail = reinforceStyleAtTail
         self.sleepTimeStateSync = sleepTimeStateSync
+        self.autoSceneContextPruning = autoSceneContextPruning
         self.reasoningContextPolicy = reasoningContextPolicy
         self.dynamicContextActivation = dynamicContextActivation
     }
@@ -703,6 +707,8 @@ struct AppSettings: Codable {
             (try? c.decode(Bool.self, forKey: .reinforceStyleAtTail)) ?? true
         sleepTimeStateSync =
             (try? c.decode(Bool.self, forKey: .sleepTimeStateSync)) ?? true
+        autoSceneContextPruning =
+            (try? c.decode(Bool.self, forKey: .autoSceneContextPruning)) ?? true
         reasoningContextPolicy =
             (try? c.decode(ReasoningContextPolicy.self, forKey: .reasoningContextPolicy))
             ?? .recentTwo

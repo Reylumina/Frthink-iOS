@@ -17,15 +17,11 @@ enum SettingsCategory: String, Hashable, CaseIterable {
 /// 供 CI 截图 / 深链使用的三级页。正常流程仍从二级页点进去。
 enum SettingsEditorRoute: String, Hashable {
     case provider = "provider"
-    case worldBuild = "worldbuild"
     case modelResponse = "modelresponse"
     case contextBudget = "contextbudget"
 
     var category: SettingsCategory {
-        switch self {
-        case .provider, .modelResponse, .contextBudget: return .connection
-        case .worldBuild: return .prompts
-        }
+        .connection
     }
 }
 
@@ -110,7 +106,7 @@ struct SettingsView: View {
                 case .provider:
                     previewProvider = store.settings.activeProvider
                         ?? store.settings.providers.first
-                case .worldBuild, .modelResponse, .contextBudget:
+                case .modelResponse, .contextBudget:
                     path.append(editor)
                 }
             } else if let launch = SettingsView.launchCategory {
@@ -199,8 +195,6 @@ struct SettingsView: View {
         case .provider:
             // 正常流程用 sheet；走到这里说明是异常深链，退回连接页。
             SettingsConnectionPage(store: store)
-        case .worldBuild:
-            WorldBuildEditorPage(store: store)
         case .modelResponse:
             SettingsModelResponsePage(store: store)
         case .contextBudget:

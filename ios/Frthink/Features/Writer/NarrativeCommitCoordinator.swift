@@ -9,6 +9,7 @@ struct NarrativeCommitReceipt {
     let committedNode: PlotNode
     let previousLedgerSnapshot: MaterializedNarrativeState
     let styleLint: StyleLintReport
+    let previousSceneBoundaryOffset: Int?
 }
 
 /// 写作台「采纳后落盘」协调器：
@@ -17,7 +18,7 @@ struct NarrativeCommitReceipt {
 @MainActor
 enum NarrativeCommitCoordinator {
 
-    private static let deltaExtractionTemperature: Double = 0.15
+    static let deltaExtractionTemperature: Double = 0.15
     private static var syncTasks: [String: (token: UUID, task: Task<Void, Never>)] = [:]
 
     /// 采纳正文后的同步落盘主入口，并将符合条件的节拍登记至待同步队列按需后台提取。
@@ -127,13 +128,21 @@ enum NarrativeCommitCoordinator {
             persistSynchronously: persistSynchronously
         )
 
+        let previousSceneBoundaryOffset = session.payload.sceneBoundaryOffset
+        if store.settings.autoSceneContextPruning,
+           hasExplicitSceneBreakPrefix(trimmed),
+           safeOffset > (session.payload.sceneBoundaryOffset ?? 0) {
+            session.setSceneBoundaryOffset(safeOffset)
+        }
+
         let receipt = NarrativeCommitReceipt(
             projectID: session.project.id,
             previousHeadNodeID: previousHeadID,
             committedNodeID: nodeID,
             committedNode: node,
             previousLedgerSnapshot: stateBeforeCommit,
-            styleLint: lintReport
+            styleLint: lintReport,
+            previousSceneBoundaryOffset: previousSceneBoundaryOffset
         )
 
         if store.settings.sleepTimeStateSync, trimmed.count >= 40 {
@@ -149,7 +158,7 @@ enum NarrativeCommitCoordinator {
         return receipt
     }
 
-    /// 撤销对应采纳提交：中止挂起冷同步、从剧情线移除本次提交子树并无损退回三账本现状快照。
+    /// 撤销对应采纳提交：中止挂起冷同步、从剧情线移除本次提交子树并无损退回三账本现状快照与换场起点。
     static func undoCommit(_ receipt: NarrativeCommitReceipt, session: ProjectSession) {
         cancelPendingSync(projectID: receipt.projectID)
         guard var workspace = session.narrativeWorkspace else { return }
@@ -159,7 +168,25 @@ enum NarrativeCommitCoordinator {
             try? workspace.storyGraph.checkout(nodeID: receipt.previousHeadNodeID)
         }
         workspace.restoreLedgerSnapshot(from: receipt.previousLedgerSnapshot)
+        session.setSceneBoundaryOffset(receipt.previousSceneBoundaryOffset)
         session.noteNarrativeWorkspaceUpdated(workspace)
+    }
+
+    /// 判断采纳正文首行是否带有显式换场或分章标记（零延迟本地边界识别）。
+    static func hasExplicitSceneBreakPrefix(_ text: String) -> Bool {
+        let firstLine = text
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+        guard !firstLine.isEmpty else { return false }
+        if firstLine == "***" || firstLine == "---" || firstLine == "===" || firstLine == "——" {
+            return true
+        }
+        if firstLine.hasPrefix("# ") {
+            return true
+        }
+        let chapterPattern = #"^(第[零一二三四五六七八九十百千万0-9]+[章节回幕卷部篇]|序章|楔子|尾声)"#
+        return firstLine.range(of: chapterPattern, options: .regularExpression) != nil
     }
 
     /// 重做对应采纳提交：将已撤销的剧情节拍放回图谱并重施其记录的三账本增量。
@@ -229,7 +256,8 @@ enum NarrativeCommitCoordinator {
                 baseUTF16Offset: slice.baseUTF16Offset,
                 client: client,
                 provider: provider,
-                session: session
+                session: session,
+                store: store
             )
             syncedCount += 1
         }
@@ -339,7 +367,8 @@ enum NarrativeCommitCoordinator {
                     baseUTF16Offset: baseUTF16Offset,
                     client: client,
                     provider: provider,
-                    session: session
+                    session: session,
+                    store: store
                 )
                 await consolidatePyramidIfNeeded(
                     client: client,
@@ -361,7 +390,8 @@ enum NarrativeCommitCoordinator {
         baseUTF16Offset: Int,
         client: any LLMClient,
         provider: ProviderSetting,
-        session: ProjectSession
+        session: ProjectSession,
+        store: AppStore? = nil
     ) async throws {
         guard let currentWorkspace = session.narrativeWorkspace,
               currentWorkspace.storyGraph.nodes[nodeID] != nil
@@ -430,10 +460,35 @@ enum NarrativeCommitCoordinator {
         latestWorkspace.storyGraph.nodes[nodeID] = targetNode
         latestWorkspace.applyLedgerDelta(updatedDelta, sourceNodeID: nodeID)
         latestWorkspace.pendingSyncNodeIDs.removeAll { $0 == nodeID }
+        latestWorkspace.syncedManuscriptUTF16Offset = max(
+            latestWorkspace.syncedManuscriptUTF16Offset,
+            baseUTF16Offset + (excerpt as NSString).length
+        )
         session.noteNarrativeWorkspaceUpdated(latestWorkspace)
+
+        if let store,
+           store.settings.autoSceneContextPruning,
+           let transition = extraction.sceneTransition,
+           transition.shouldAutoPrune {
+            var didPrune = false
+            if baseUTF16Offset > (session.payload.sceneBoundaryOffset ?? 0) {
+                session.setSceneBoundaryOffset(baseUTF16Offset)
+                didPrune = true
+            }
+            if let sourceMessageID = targetNode.sourceMessageID,
+               session.autoPruneMessagesBefore(
+                   messageID: sourceMessageID,
+                   bridgeSummary: transition.formattedBridge
+               ) > 0 {
+                didPrune = true
+            }
+            if didPrune {
+                store.toast = "检测到换场，已自动收起前场上下文"
+            }
+        }
     }
 
-    private static func consolidatePyramidIfNeeded(
+    static func consolidatePyramidIfNeeded(
         client: any LLMClient,
         provider: ProviderSetting,
         session: ProjectSession
@@ -559,7 +614,7 @@ enum NarrativeCommitCoordinator {
         }
     }
 
-    private static func compactLineSnippet(_ text: String, limit: Int) -> String {
+    static func compactLineSnippet(_ text: String, limit: Int) -> String {
         let singleLine = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

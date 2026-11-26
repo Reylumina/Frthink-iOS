@@ -49,7 +49,7 @@ enum ArchiveImportStage: Equatable {
             return "解压并校验存档结构…"
         case .restoring(let index, let total, let title):
             let safeTitle = title.isEmpty ? Project.untitledTitle : title
-            return "第 \(index + 1)/\(total) 本 · \(safeTitle)"
+            return "第 \(index + 1)/\(total) 本：\(safeTitle)"
         case .mergingSettings:
             return "预设、技能、世界书与预算…"
         }

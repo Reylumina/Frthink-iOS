@@ -30,12 +30,22 @@ struct EpisodicEventsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        List {
-            filterSection
-            contentSection
+        VStack(spacing: 0) {
+            Picker("筛选", selection: $filterScope) {
+                ForEach(FilterScope.allCases) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.s)
+
+            List {
+                contentSection
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
         .groupedPageBackground()
         .themeAnimation(Theme.motionSelection, value: filterScope)
         .sensoryFeedback(.success, trigger: hapticTrigger) { _, _ in
@@ -69,17 +79,6 @@ struct EpisodicEventsView: View {
             reloadSnapshot()
         }
         .narrativeErrorAlert($errorMessage)
-    }
-
-    private var filterSection: some View {
-        Section {
-            Picker("筛选", selection: $filterScope) {
-                ForEach(FilterScope.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
     }
 
     @ViewBuilder
@@ -379,7 +378,7 @@ private struct EpisodicEventEditorSheet: View {
                     Text(item.displayName).tag(item)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
         } header: {
             AppSectionHeader(title: "基本信息")
         }

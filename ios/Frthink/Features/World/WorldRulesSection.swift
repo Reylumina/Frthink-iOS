@@ -107,14 +107,9 @@ struct WorldRulesHubView: View {
 
     @State private var showingAddRuleSheet = false
     @State private var fingerprint: StyleDistiller.LinguisticFingerprint?
-    @State private var errorMessage: String?
 
     private var trimmedTemplate: String {
         session.payload.world.styleTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var trimmedSupplement: String {
-        session.payload.assistantSupplement.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var hasManuscriptContent: Bool {
@@ -124,9 +119,6 @@ struct WorldRulesHubView: View {
     var body: some View {
         List {
             styleTemplateSection
-            if !trimmedSupplement.isEmpty {
-                legacySupplementSection
-            }
             AuthorDirectivesListContent(
                 session: session,
                 showingAddSheet: $showingAddRuleSheet
@@ -144,7 +136,6 @@ struct WorldRulesHubView: View {
         .task(id: "\(session.project.id)-\(session.manuscriptCharacterCount)-\(session.bodyPageCount)") {
             fingerprint = await StyleFingerprintLoader.load(for: session, fileStore: store.fileStore)
         }
-        .narrativeErrorAlert($errorMessage)
     }
 
     private var styleTemplateSection: some View {
@@ -216,63 +207,12 @@ struct WorldRulesHubView: View {
         }
     }
 
-    private var legacySupplementSection: some View {
-        Section {
-            NavigationLink {
-                SettingsTextEditorPage(
-                    title: "原项目补充指令",
-                    text: session.payload.assistantSupplement,
-                    placeholder: "补充指令"
-                ) { text in
-                    guard session.payload.assistantSupplement != text else { return }
-                    session.payload.assistantSupplement = text
-                    session.scheduleSave()
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                    Text("原项目补充指令")
-                        .font(Theme.label)
-                        .foregroundStyle(.primary)
-                    Text(trimmedSupplement)
-                        .font(Theme.labelSmall)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(.vertical, Theme.Spacing.xs)
-            }
-
-            Button("转为写作规则") {
-                migrateSupplementToDirective()
-            }
-        } header: {
-            AppSectionHeader(title: "待迁移指令")
-        }
-    }
-
-    private func migrateSupplementToDirective() {
-        let rule = trimmedSupplement
-        guard !rule.isEmpty else { return }
-        let directive = AuthorDirective(verbatimRule: rule, scope: .global)
-        do {
-            _ = try session.commitNarrativeDelta(
-                PlotNodeDelta(directiveAdds: [directive]),
-                summary: "迁入原补充指令",
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            session.payload.assistantSupplement = ""
-            session.scheduleSave()
-            store.toast = "已转为写作规则"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     private func compactMetricsLine(for fp: StyleDistiller.LinguisticFingerprint) -> String {
         let avgSent = String(format: "%.1f", fp.averageSentenceLength)
         let shortPct = Int((fp.shortSentenceRatio * 100).rounded())
         let dlgPct = Int((fp.dialogueRatio * 100).rounded())
         let avgPara = Int(fp.averageParagraphLength.rounded())
-        return "句均 \(avgSent) 字 · 短句 \(shortPct)% · 对白 \(dlgPct)% · 段均 \(avgPara) 字"
+        return "句均 \(avgSent) 字，短句 \(shortPct)%，对白 \(dlgPct)%，段均 \(avgPara) 字"
     }
 
     private func previewText(for markdown: String) -> String {

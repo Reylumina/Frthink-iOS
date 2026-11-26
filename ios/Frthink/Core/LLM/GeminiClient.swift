@@ -251,6 +251,7 @@ final class GeminiClient: LLMClient {
         var emittedAnything = false
         var undecodableLines = 0
         var reportedPromptTokens = 0
+        var reportedCachedTokens = 0
         var reportedCompletionTokens = 0
         var reportedTotalTokens = 0
         var accumulatedOutput = ""
@@ -260,6 +261,13 @@ final class GeminiClient: LLMClient {
         var splitter = ThinkTagStreamSplitter(startsInsideThink: false)
         var collectedToolCalls: [LLMToolCall] = []
         defer {
+            if reportedPromptTokens > 0 || reportedCachedTokens > 0 {
+                LLMTokenUsage.recordCacheObservation(
+                    provider: provider.kind.rawValue,
+                    promptTokens: reportedPromptTokens,
+                    cachedTokens: reportedCachedTokens
+                )
+            }
             let tokens = LLMTokenUsage.resolveTotal(
                 reportedPrompt: reportedPromptTokens,
                 reportedCompletion: reportedCompletionTokens,
@@ -301,6 +309,9 @@ final class GeminiClient: LLMClient {
             if let usage = chunk.usageMetadata {
                 if let p = usage.promptTokenCount, p > 0 {
                     reportedPromptTokens = p
+                }
+                if let ct = usage.cachedContentTokenCount, ct > 0 {
+                    reportedCachedTokens = max(reportedCachedTokens, ct)
                 }
                 let c = (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0)
                 if c > 0 {
@@ -475,6 +486,13 @@ final class GeminiClient: LLMClient {
             toolCalls: toolCalls,
             emittedAnything: hasPayload
         )
+        if promptTokens > 0 {
+            LLMTokenUsage.recordCacheObservation(
+                provider: provider.kind.rawValue,
+                promptTokens: promptTokens,
+                cachedTokens: u?.cachedContentTokenCount ?? 0
+            )
+        }
         if tokens > 0 {
             onUsage?(tokens)
         }
@@ -528,6 +546,7 @@ final class GeminiClient: LLMClient {
             let candidatesTokenCount: Int?
             let thoughtsTokenCount: Int?
             let totalTokenCount: Int?
+            let cachedContentTokenCount: Int?
         }
 
         let candidates: [Candidate]?

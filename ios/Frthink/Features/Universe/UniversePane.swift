@@ -373,7 +373,7 @@ private struct UniverseEntryFields: View {
                         Text(kind.displayName).tag(kind)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
             }
 
             AppTextField(

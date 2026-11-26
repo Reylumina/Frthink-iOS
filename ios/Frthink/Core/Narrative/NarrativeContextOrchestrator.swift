@@ -370,7 +370,17 @@ enum NarrativeContextOrchestrator {
         if !page.hardBoundaries.isEmpty {
             detailParts.append("\(boundaryLabel)：\(page.hardBoundaries.joined(separator: "；"))")
         }
+        let povBlindSpots: [EpistemicBelief]
+        if let povCharacterID {
+            povBlindSpots = state.beliefs(for: povCharacterID).filter { !$0.knowsSecret }
+        } else {
+            povBlindSpots = []
+        }
         for fact in state.facts(for: page.id) {
+            if !povBlindSpots.isEmpty,
+               isFactMaskedByPOVBlindSpot(fact, page: page, povBlindSpots: povBlindSpots) {
+                continue
+            }
             detailParts.append("\(fact.attribute)=\(fact.value)")
         }
         if page.kind == .character {
@@ -387,6 +397,39 @@ enum NarrativeContextOrchestrator {
 
         let header = "- \(page.name)（\(page.kind.rawValue)/\(page.id)）"
         return detailParts.isEmpty ? header : "\(header)：" + detailParts.joined(separator: "｜")
+    }
+
+    /// 若当前处于某角色的 POV 视角且该角色在特定主题上处于盲区/误认（`!knowsSecret`），
+    /// 必须在送入模型前硬裁剪对应的全知客观事实，避免提示词泄密引发“知识的诅咒”。
+    private static func isFactMaskedByPOVBlindSpot(
+        _ fact: WorldFactEvent,
+        page: EntityPage,
+        povBlindSpots: [EpistemicBelief]
+    ) -> Bool {
+        let rawAttr = fact.attribute.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attrBody: String
+        if let colonRange = rawAttr.range(of: ":") {
+            attrBody = String(rawAttr[colonRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            attrBody = rawAttr
+        }
+        let pageName = page.name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return povBlindSpots.contains { belief in
+            if belief.slotKey == fact.slotKey {
+                return true
+            }
+            let topic = belief.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard topic.count >= 2 else { return false }
+            let sameSubject = belief.characterID == fact.entityID
+                || (!pageName.isEmpty && topic.localizedCaseInsensitiveContains(pageName))
+            guard sameSubject else { return false }
+
+            return rawAttr.localizedCaseInsensitiveContains(topic)
+                || (!attrBody.isEmpty && attrBody.localizedCaseInsensitiveContains(topic))
+                || (attrBody.count >= 2 && topic.localizedCaseInsensitiveContains(attrBody))
+                || fact.value.localizedCaseInsensitiveContains(topic)
+        }
     }
 
     /// 从就绪伏笔的关联实体及在场实体的关系事实出发，做纯符号一跳扩展，补全最多 2 个离场关键实体。
@@ -537,6 +580,7 @@ enum NarrativeContextOrchestrator {
     static func effectiveTailText(
         manuscript: String,
         continuationAnchor: Int?,
+        sceneBoundaryOffset: Int? = nil,
         tailTier: ManuscriptTailTier,
         tailCodePointLimitOverride: Int? = nil
     ) -> (causalPrefix: String, causalCutoff: Int?, tailText: String) {
@@ -550,8 +594,20 @@ enum NarrativeContextOrchestrator {
             causalPrefix = manuscript
             causalCutoff = nil
         }
+        let nsPrefix = causalPrefix as NSString
+        let activeSceneText: String
+        if let boundary = sceneBoundaryOffset, boundary > 0 {
+            if boundary >= nsPrefix.length {
+                activeSceneText = ""
+            } else {
+                let safeStart = nsPrefix.rangeOfComposedCharacterSequence(at: boundary).location
+                activeSceneText = nsPrefix.substring(from: safeStart)
+            }
+        } else {
+            activeSceneText = causalPrefix
+        }
         let limit = max(1, tailCodePointLimitOverride ?? tailTier.rawValue)
-        let tailText = PromptComposer.codePointTail(causalPrefix, limit: limit)
+        let tailText = activeSceneText.isEmpty ? "" : PromptComposer.codePointTail(activeSceneText, limit: limit)
         return (causalPrefix, causalCutoff, tailText)
     }
 
@@ -563,6 +619,7 @@ enum NarrativeContextOrchestrator {
         settings: AppSettings,
         enabledUniverseEntryIDs: [String],
         continuationAnchor: Int? = nil,
+        sceneBoundaryOffset: Int? = nil,
         tailTier: ManuscriptTailTier = .standard,
         tailCodePointLimitOverride: Int? = nil,
         inputBudget: Int,
@@ -588,15 +645,16 @@ enum NarrativeContextOrchestrator {
             skills: settings.skills,
             universes: enabledUniverses,
             preservedStyle: effectiveStyle,
-            bookIndexLines: bookIndex,
-            volumeOneLiners: state.pyramid.volumeOneLiners,
+            bookIndexLines: [],
+            volumeOneLiners: [],
             alwaysOnLorePages: alwaysOnLorePages
         )
 
-        // 按继续写作锚点执行严格因果截断，杜绝锚点之后的正文进入下文工作区。
+        // 按继续写作锚点执行严格因果截断，并按换场边界过滤前场正文原文。
         let tailSlice = effectiveTailText(
             manuscript: manuscript,
             continuationAnchor: continuationAnchor,
+            sceneBoundaryOffset: sceneBoundaryOffset,
             tailTier: tailTier,
             tailCodePointLimitOverride: tailCodePointLimitOverride
         )
@@ -635,8 +693,21 @@ enum NarrativeContextOrchestrator {
             allowRestoreTool: enableTools
         )
 
-        // 构建尾部动态工作区：逐字规则 -> Query-Cone 最小状态 -> 场次正文 Tail -> 尾部动态文风样本 -> 工具回退预检。
+        // 构建尾部动态工作区：动态卷纲与索引 -> 逐字规则 -> Query-Cone 最小状态 -> 场次正文 Tail -> 尾部动态文风样本 -> 工具回退预检。
         var tailSections: [String] = []
+
+        let cleanVolumes = state.pyramid.volumeOneLiners
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !cleanVolumes.isEmpty {
+            let cappedVolumes = Array(cleanVolumes.prefix(12))
+            tailSections.append("【全书卷纲脉络】\n" + cappedVolumes.map { "- \($0)" }.joined(separator: "\n"))
+        }
+
+        if !bookIndex.isEmpty {
+            let cappedIndex = Array(bookIndex.prefix(200))
+            tailSections.append("【全书实体与伏笔索引目录（细节可按需调用 read_entity_page / grep_manuscript 查阅）】\n" + cappedIndex.joined(separator: "\n"))
+        }
 
         let currentBranchID = workspace.storyGraph.nodes[workspace.storyGraph.headNodeID]?.branchLabel
         let authorityRules = state.directiveLedger.renderedAuthorityBlock(
@@ -693,6 +764,7 @@ enum NarrativeContextOrchestrator {
             scanText: scanText,
             cleanInstruction: cleanInstruction,
             causalCutoff: causalCutoff,
+            sceneBoundaryOffset: sceneBoundaryOffset,
             inputBudget: inputBudget,
             enableTools: enableTools,
             bm25Index: bm25Index
@@ -829,6 +901,7 @@ enum NarrativeContextOrchestrator {
         scanText: String,
         cleanInstruction: String,
         causalCutoff: Int?,
+        sceneBoundaryOffset: Int?,
         inputBudget: Int,
         enableTools: Bool,
         bm25Index: ManuscriptIndex.IncrementalBM25Index?
@@ -839,6 +912,13 @@ enum NarrativeContextOrchestrator {
         let recallBudget = enableTools
             ? min(350, max(160, inputBudget / 12))
             : min(600, max(200, inputBudget / 8))
+        // 换场边界激活时仅允许检索本场起点的正文，避免前场高刺激原文回流（前情交由档案与摘要承接）。
+        let minOffset: Int
+        if let boundary = sceneBoundaryOffset, boundary > 0 {
+            minOffset = causalCutoff.map { min(boundary, $0) } ?? boundary
+        } else {
+            minOffset = 0
+        }
 
         let excerpts: [ManuscriptIndex.Excerpt]
         if let bm25Index, bm25Index.cachedPageCount > 0 {
@@ -846,10 +926,26 @@ enum NarrativeContextOrchestrator {
                 queryTerms: onStageNames,
                 instructionText: cleanInstruction,
                 causalLimit: causalCutoff,
+                minUTF16Offset: minOffset,
                 excludeTrailingUTF16: (tailText as NSString).length,
                 maxResults: maxExcerpts,
                 maxTokens: recallBudget
             )
+        } else if minOffset > 0 {
+            let prefixNS = causalPrefix as NSString
+            if minOffset >= prefixNS.length {
+                excerpts = []
+            } else {
+                excerpts = ManuscriptIndex.recallHistoricalExcerpts(
+                    fullManuscript: prefixNS.substring(from: minOffset),
+                    activeWindowText: tailText,
+                    queryTerms: onStageNames,
+                    instructionText: cleanInstruction,
+                    causalLimit: nil,
+                    maxResults: maxExcerpts,
+                    maxTokens: recallBudget
+                )
+            }
         } else {
             excerpts = ManuscriptIndex.recallHistoricalExcerpts(
                 fullManuscript: causalPrefix,
@@ -866,6 +962,9 @@ enum NarrativeContextOrchestrator {
         let rawHits = workspace.anchorIndex
             .anchors(beforeUTF16: causalCutoff)
             .filter { anchor in
+                if minOffset > 0, anchor.span.utf16Start < minOffset {
+                    return false
+                }
                 guard tailText.isEmpty || !tailText.contains(anchor.span.quote) else {
                     return false
                 }
@@ -891,6 +990,13 @@ enum NarrativeContextOrchestrator {
             guard seenAnchorKeys.insert(dedupKey).inserted else { continue }
             anchorHits.append(hit)
             if anchorHits.count >= maxAnchors { break }
+        }
+        // 按正文时间顺序重排锚点，防止高分早段内容与后段发生时序倒错。
+        anchorHits.sort {
+            if $0.span.utf16Start != $1.span.utf16Start {
+                return $0.span.utf16Start < $1.span.utf16Start
+            }
+            return $0.id < $1.id
         }
 
         var lines: [String] = []

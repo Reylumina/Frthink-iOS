@@ -21,7 +21,7 @@ struct SettingsModelResponsePage: View {
     var body: some View {
         Form {
             Section {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack {
                         Text("温度")
                         Spacer(minLength: 0)
@@ -41,7 +41,7 @@ struct SettingsModelResponsePage: View {
                         }
                     )
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, Theme.Spacing.xs)
 
                 AppValueRow(
                     title: "回复上限",
@@ -104,6 +104,7 @@ struct SettingsContextBudgetPage: View {
     let store: AppStore
     @State private var inputBudget = 0
     @State private var outputBudget = 0
+    @State private var didEdit = false
 
     var body: some View {
         Form {
@@ -121,7 +122,11 @@ struct SettingsContextBudgetPage: View {
                     title: "输入预算",
                     values: Self.inputValues,
                     value: $inputBudget,
-                    onCommit: commitBudgets
+                    hapticsEnabled: store.settings.hapticsEnabled,
+                    onCommit: {
+                        didEdit = true
+                        commitBudgets()
+                    }
                 )
             }
 
@@ -130,7 +135,11 @@ struct SettingsContextBudgetPage: View {
                     title: "单轮输出上限",
                     values: Self.outputValues,
                     value: $outputBudget,
-                    onCommit: commitBudgets
+                    hapticsEnabled: store.settings.hapticsEnabled,
+                    onCommit: {
+                        didEdit = true
+                        commitBudgets()
+                    }
                 )
             }
 
@@ -153,6 +162,7 @@ struct SettingsContextBudgetPage: View {
 
     /// 拖动结束或离开页面时提交一次，避免每个 tick 重写整份 settings.json。
     private func commitBudgets() {
+        guard didEdit else { return }
         var changed = false
         if store.settings.inputBudgetTokens != inputBudget {
             store.settings.inputBudgetTokens = inputBudget
@@ -166,13 +176,11 @@ struct SettingsContextBudgetPage: View {
     }
 
     private static let inputValues = [
-        0, 1_024, 2_048, 4_096, 8_192, 16_384, 32_768,
-        65_536, 131_072, 262_144, 524_288, 750_000, 1_000_000,
+        16_384, 32_768, 65_536, 131_072, 262_144, 524_288, 1_000_000,
     ]
 
     private static let outputValues = [
-        1_024, 2_048, 4_096, 8_192, 12_000, 16_000,
-        20_000, 30_000, 40_000, 50_000, 75_000, 100_000,
+        8_192, 16_384, 24_576, 32_768, 49_152, 65_536, 100_000,
     ]
 
     private func effectiveWindow(for model: String) -> Int {
@@ -208,9 +216,9 @@ struct SettingsAppearanceSection: View {
                     Text(theme.displayName).tag(theme)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 HStack {
                     Text("正文字号")
                     Spacer(minLength: 0)
@@ -229,7 +237,7 @@ struct SettingsAppearanceSection: View {
                     }
                 )
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, Theme.Spacing.xs)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Text("夜色像被谁拧暗了一格，走廊尽头的灯还亮着。")
@@ -241,7 +249,7 @@ struct SettingsAppearanceSection: View {
                     .themeAnimation(Theme.motionSelection, value: fontSize)
                     .accessibilityLabel("正文预览，\(Int(fontSize)) 点")
             }
-            .padding(.vertical, 2)
+            .padding(.vertical, Theme.Spacing.xs)
         } header: {
             AppSectionHeader(title: "主题与正文")
         }
@@ -297,6 +305,7 @@ struct TokenSliderRow: View {
     let title: String
     let values: [Int]
     @Binding var value: Int
+    var hapticsEnabled: Bool = true
     /// 拖动结束时提交，调用方负责一次性写盘。
     var onCommit: (() -> Void)? = nil
 
@@ -317,6 +326,7 @@ struct TokenSliderRow: View {
                 value: indexBinding,
                 in: 0...Double(max(values.count - 1, 1)),
                 step: 1,
+                hapticsEnabled: hapticsEnabled,
                 onEditingChanged: { editing in
                     if !editing { onCommit?() }
                 }
@@ -334,7 +344,7 @@ struct TokenSliderRow: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Theme.Spacing.xs)
     }
 
     private var selectedIndex: Int {
@@ -354,10 +364,20 @@ struct TokenSliderRow: View {
     }
 
     private var displayValue: String {
-        value == 0 ? "跟随模型" : value.formatted()
+        label(for: value)
     }
 
     private func label(for value: Int) -> String {
-        value == 0 ? "跟随模型" : value.formatted()
+        if value == 0 { return "跟随模型" }
+        if value >= 1_000_000, value % 1_000_000 == 0 {
+            return "\(value / 1_000_000)M"
+        }
+        if value % 1_024 == 0 {
+            return "\(value / 1_024)K"
+        }
+        if value >= 1_000, value % 1_000 == 0 {
+            return "\(value / 1_000)K"
+        }
+        return value.formatted()
     }
 }

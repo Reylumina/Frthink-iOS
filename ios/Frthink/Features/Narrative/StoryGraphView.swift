@@ -163,7 +163,6 @@ struct StoryGraphView: View {
     var embeddedInWorld: Bool = false
     var externalBeatTrigger: Int = 0
     var externalThreadTrigger: Int = 0
-    var externalForkTrigger: Int = 0
 
     private struct SummaryCounts {
         var activeThreadCount = 0
@@ -181,8 +180,6 @@ struct StoryGraphView: View {
     @State private var expandedNodeIDs: Set<String> = []
     @State private var showOtherBranches = false
     @State private var pendingCheckoutNode: PlotNode?
-    @State private var forkingFromNode: PlotNode?
-    @State private var forkBranchName = ""
     @State private var showingAddBeatSheet = false
     @State private var addBeatParentID: String?
     @State private var showingPlantThreadSheet = false
@@ -213,12 +210,6 @@ struct StoryGraphView: View {
         .onChange(of: externalThreadTrigger) { _, _ in
             showingPlantThreadSheet = true
         }
-        .onChange(of: externalForkTrigger) { _, _ in
-            if let head = graph.nodes[graph.headNodeID] {
-                forkBranchName = ""
-                forkingFromNode = head
-            }
-        }
         .sheet(isPresented: $showingAddBeatSheet) {
             AddPlotBeatSheet(
                 session: session,
@@ -243,25 +234,6 @@ struct StoryGraphView: View {
             }
         } message: { target in
             Text("后续续写将承接「\(target.summary.isEmpty ? target.id : target.summary)」，不改动现有正文。")
-        }
-        .alert(
-            "新建剧情分支",
-            isPresented: Binding.isPresent($forkingFromNode),
-            presenting: forkingFromNode
-        ) { origin in
-            TextField("分支名称（如：夜探支线）", text: $forkBranchName)
-            Button("创建分支") {
-                forkBranch(from: origin.id, label: forkBranchName)
-                forkingFromNode = nil
-                forkBranchName = ""
-            }
-            .disabled(forkBranchName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("取消", role: .cancel) {
-                forkingFromNode = nil
-                forkBranchName = ""
-            }
-        } message: { origin in
-            Text("将在「\(origin.summary.isEmpty ? origin.id : origin.summary)」之后分出一条新支线。")
         }
     }
 
@@ -288,12 +260,6 @@ struct StoryGraphView: View {
                 Button("新建伏笔", systemImage: "flag") {
                     showingPlantThreadSheet = true
                 }
-                if let head = graph.nodes[graph.headNodeID] {
-                    Button("从当前幕分叉", systemImage: "arrow.triangle.branch") {
-                        forkBranchName = ""
-                        forkingFromNode = head
-                    }
-                }
             } label: {
                 Image(systemName: "plus")
             }
@@ -317,7 +283,7 @@ struct StoryGraphView: View {
                     Text(
                         summaryCounts.ongoingEventCount == 0 && summaryCounts.resolvedEventCount == 0
                             ? "暂无"
-                            : "进行中 \(summaryCounts.ongoingEventCount) · 已完结 \(summaryCounts.resolvedEventCount)"
+                            : "进行中 \(summaryCounts.ongoingEventCount)，已完结 \(summaryCounts.resolvedEventCount)"
                     )
                     .font(Theme.numericSmall)
                     .foregroundStyle(.secondary)
@@ -351,7 +317,6 @@ struct StoryGraphView: View {
                 StoryActiveNodeRow(
                     row: row,
                     isExpanded: expandedNodeIDs.contains(row.node.id),
-                    canMergeIntoHead: canMergeNodeIntoHead(row),
                     impactedNodes: expandedNodeIDs.contains(row.node.id)
                         ? graph.downstreamImpactedNodes(of: row.node.id)
                         : [],
@@ -361,12 +326,7 @@ struct StoryGraphView: View {
                     onPlanBeatAfter: {
                         addBeatParentID = row.node.id
                         showingAddBeatSheet = true
-                    },
-                    onFork: {
-                        forkBranchName = ""
-                        forkingFromNode = row.node
-                    },
-                    onMergeIntoHead: { mergeIntoHead(from: row.node.id) }
+                    }
                 )
                 .listRowInsets(EdgeInsets(
                     top: 0,
@@ -377,15 +337,9 @@ struct StoryGraphView: View {
             }
         } header: {
             AppSectionHeader(
-                title: "当前路径 · \(layout.currentBranchLabel)（\(layout.rows.count) / \(layout.totalNodeCount) 幕）"
+                title: "当前路径：\(layout.currentBranchLabel)（\(layout.rows.count) / \(layout.totalNodeCount) 幕）"
             )
         }
-    }
-
-    private func canMergeNodeIntoHead(_ row: StoryActivePathLayout.Row) -> Bool {
-        guard !row.isHead else { return false }
-        let headNode = graph.nodes[graph.headNodeID]
-        return !(headNode?.allParentIDs.contains(row.node.id) ?? false)
     }
 
     private func toggleExpanded(_ nodeID: String) {
@@ -447,34 +401,6 @@ struct StoryGraphView: View {
             )
             reloadGraph()
             store.toast = "已切换当前进度"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func forkBranch(from nodeID: String, label: String) {
-        do {
-            try session.forkNarrativeBranch(
-                from: nodeID,
-                label: label,
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            reloadGraph()
-            store.toast = "已创建分支：\(label.trimmingCharacters(in: .whitespacesAndNewlines))"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func mergeIntoHead(from parentID: String) {
-        do {
-            try session.addNarrativeCausalEdge(
-                from: parentID,
-                to: graph.headNodeID,
-                settingsCorpusLibraries: store.settings.corpusLibraries
-            )
-            reloadGraph()
-            store.toast = "已并入当前分支"
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -631,14 +557,11 @@ private struct StoryBranchTipRow: View {
 private struct StoryActiveNodeRow: View {
     let row: StoryActivePathLayout.Row
     let isExpanded: Bool
-    let canMergeIntoHead: Bool
     let impactedNodes: [PlotNode]
     let onToggleExpand: () -> Void
     let onCheckout: () -> Void
     let onCheckoutBranchTip: (String) -> Void
     let onPlanBeatAfter: () -> Void
-    let onFork: () -> Void
-    let onMergeIntoHead: () -> Void
 
     private var node: PlotNode { row.node }
 
@@ -687,10 +610,6 @@ private struct StoryActiveNodeRow: View {
                 Button("切到这里继续写", action: onCheckout)
             }
             Button("在此幕后规划下一幕", action: onPlanBeatAfter)
-            Button("从这里新建分支", action: onFork)
-            if canMergeIntoHead {
-                Button("并入当前分支", action: onMergeIntoHead)
-            }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(Theme.label)
@@ -727,12 +646,10 @@ private struct StoryActiveNodeRow: View {
         return Menu {
             ForEach(row.alternateBranches) { branch in
                 let tipSummary = branch.tipNode.summary.isEmpty ? branch.tipNode.id : branch.tipNode.summary
-                Button("\(branch.branchLabel)（\(branch.beatCount) 幕）· \(tipSummary)") {
+                Button("\(branch.branchLabel)（\(branch.beatCount) 幕）：\(tipSummary)") {
                     onCheckoutBranchTip(branch.tipNode.id)
                 }
             }
-            Divider()
-            Button("从此处新建分支", action: onFork)
         } label: {
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: "arrow.triangle.branch")

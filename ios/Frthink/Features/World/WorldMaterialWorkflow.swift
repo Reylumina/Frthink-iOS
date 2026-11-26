@@ -1,7 +1,6 @@
 import Foundation
 
 /// 素材归纳：从正文已归纳偏移继续，产出事件卡和文风笔记。
-/// 与 `WorldWorkflow`（世界刷新/人物卡）分开，避免两套职责互相牵连。
 @MainActor
 enum WorldMaterialWorkflow {
 

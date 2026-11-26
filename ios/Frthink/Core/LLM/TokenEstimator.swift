@@ -78,34 +78,43 @@ enum TokenEstimator {
         // 优先使用模型目录中声明的精确数值（如 DeepSeek 系列为 1M）。
         if let known = ModelCatalog.contextWindow(for: model) { return known }
         let m = model.lowercased()
-        if m.contains("deepseek") { return 64_000 }
-        if m.contains("claude") { return 200_000 }
         if m.contains("gemini") { return 1_000_000 }
-        if m.contains("gpt-4") { return 128_000 }
-        if m.contains("qwen") { return 32_000 }
-        if m.contains("glm") { return 128_000 }
+        if m.contains("gpt-5") { return 256_000 }
+        if m.contains("claude") { return 200_000 }
+        if m.contains("deepseek") || m.contains("qwen") || m.contains("gpt-4") || m.contains("glm") {
+            return 128_000
+        }
         return 64_000
     }
 
-    /// 将正文截断至指定 token 预算范围内，从文本末尾向前保留。通过二分查找确定最长有效后缀。
+    /// 将正文截断至指定 token 预算范围内，从文本末尾向前保留。单遍 O(N) 反向累加码点权重避免反复切片。
     static func trimTail(_ text: String, toTokens budget: Int) -> String {
         guard budget > 0 else { return "" }
+        guard !text.isEmpty else { return "" }
         guard estimate(text) > budget else { return text }
-        var low = 0
-        var high = text.count
-        var best = ""
-        while low <= high {
-            let mid = (low + high) / 2
-            let start = text.index(text.endIndex, offsetBy: -mid)
-            let candidate = String(text[start...])
-            if estimate(candidate) <= budget {
-                best = candidate
-                low = mid + 1
-            } else {
-                high = mid - 1
+
+        let maxWeight = Double(max(0, budget - 6)) / 1.2
+        guard maxWeight > 0 else { return "" }
+
+        let scalars = text.unicodeScalars
+        var idx = scalars.endIndex
+        var acc = 0.0
+        while idx > scalars.startIndex {
+            let prev = scalars.index(before: idx)
+            let w = weight(of: scalars[prev])
+            if acc + w > maxWeight {
+                break
             }
+            acc += w
+            idx = prev
         }
-        return best
+        let safeStart: String.Index
+        if idx < text.endIndex {
+            safeStart = text.rangeOfComposedCharacterSequence(at: idx).lowerBound
+        } else {
+            safeStart = idx
+        }
+        return String(text[safeStart...])
     }
 }
 

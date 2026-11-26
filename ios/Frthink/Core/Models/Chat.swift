@@ -1,5 +1,15 @@
 import Foundation
 
+/// 单条对话消息在上下文组装中的参与策略（非破坏性，不影响本地展示与存档）。
+enum MessageContextMode: String, Codable, Hashable {
+    /// 正常发送完整内容。
+    case normal
+    /// 发送中性事实摘要，隔离原感官/细节描写对注意力的干扰。
+    case summaryOnly
+    /// 暂时不发给模型，但仍保留在本地对话流中。
+    case excluded
+}
+
 /// 码字机里的一条消息。
 ///
 /// 分支/版本用 `variants` 表达：同一条助手回复重新生成时追加一个变体，
@@ -21,6 +31,14 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var model: String?
     /// 各版本对应的思考过程（思维链），与 `variants` 下标一一对应；nil 表示未记录。
     var variantReasonings: [String]?
+    /// 上下文剪枝策略；缺省为 `.normal`。
+    var contextMode: MessageContextMode
+    /// 当 `contextMode == .summaryOnly` 时发给模型的中性摘要。
+    var prunedSummary: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, role, variants, selectedVariant, createdAt, model, variantReasonings, contextMode, prunedSummary
+    }
 
     var content: String {
         get {
@@ -63,7 +81,9 @@ struct ChatMessage: Identifiable, Codable, Hashable {
         content: String = "",
         createdAt: Date = Date(),
         model: String? = nil,
-        variantReasonings: [String]? = nil
+        variantReasonings: [String]? = nil,
+        contextMode: MessageContextMode = .normal,
+        prunedSummary: String = ""
     ) {
         self.id = id
         self.role = role
@@ -72,6 +92,21 @@ struct ChatMessage: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.model = model
         self.variantReasonings = variantReasonings
+        self.contextMode = contextMode
+        self.prunedSummary = prunedSummary
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        role = try c.decode(Role.self, forKey: .role)
+        variants = try c.decode([String].self, forKey: .variants)
+        selectedVariant = try c.decode(Int.self, forKey: .selectedVariant)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        variantReasonings = try c.decodeIfPresent([String].self, forKey: .variantReasonings)
+        contextMode = (try? c.decode(MessageContextMode.self, forKey: .contextMode)) ?? .normal
+        prunedSummary = (try? c.decode(String.self, forKey: .prunedSummary)) ?? ""
     }
 }
 

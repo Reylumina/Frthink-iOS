@@ -116,7 +116,7 @@ struct SettingsFullArchiveSection: View {
         Section {
             AppValueRow(
                 title: "项目",
-                value: "\(store.projects.count) 个 · 回收站 \(store.trashedProjects.count) 个"
+                value: "\(store.projects.count) 个（回收站 \(store.trashedProjects.count)）"
             )
 
             Button {

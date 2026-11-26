@@ -80,7 +80,7 @@ struct RequestSnapshotsSheet: View {
                     .foregroundStyle(AppTone.warning.color)
             }
             if !snapshot.sourceIds.isEmpty {
-                Text(snapshot.sourceIds.joined(separator: " · "))
+                Text(snapshot.sourceIds.joined(separator: "、"))
                     .font(Theme.numericSmall)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -116,8 +116,7 @@ struct RequestSnapshotsSheet: View {
     }
 
     private func tokenLine(_ snapshot: RequestSnapshot) -> String {
-        "估算 \(snapshot.estimatedInputTokens) tok · 预算 \(snapshot.inputBudgetTokens)"
-            + " · 窗口 \(snapshot.modelContextWindowTokens)"
+        "估算 \(snapshot.estimatedInputTokens) tok，预算 \(snapshot.inputBudgetTokens)，窗口 \(snapshot.modelContextWindowTokens)"
     }
 
     /// 解析 `sourceIds` 生成来源描述标签，无记录时返回 nil。
@@ -132,10 +131,10 @@ struct RequestSnapshotsSheet: View {
         case "corpus": name = "语料"
         case "worldbook": name = "世界书"
         case "character": name = "人物卡"
-        case "narrative": name = "叙事工作区"
+        case "narrative": name = "世界与剧情"
         default: return nil
         }
-        return "来源 · \(name)"
+        return "来源：\(name)"
     }
 
     /// 静态缓存 DateFormatter 实例，避免重复创建产生开销。

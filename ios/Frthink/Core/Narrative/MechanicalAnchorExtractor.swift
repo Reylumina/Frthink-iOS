@@ -5,11 +5,7 @@ import Foundation
 enum MechanicalAnchorExtractor {
 
     private static let timeRegex = try? NSRegularExpression(
-        pattern: "(第[零一二三四五六七八九十百千万0-9]+[章回节卷幕]|次日|当夜|翌日|是夜|黄昏|拂晓|子时|丑时|寅时|卯时|辰时|巳时|午时|未时|申时|酉时|戌时|亥时|三更|五更|[一二三四五六七八九十两0-9]+[日天月年岁][前后内]?)"
-    )
-
-    private static let artifactCountRegex = try? NSRegularExpression(
-        pattern: "[一二三四五六七八九十两半百千0-9]+[枚把柄件张封卷册颗盏瓶坛箱袋块条支根道面][^\\s，。！？；：、“”「」\\n]{1,6}"
+        pattern: "第[零一二三四五六七八九十百千万0-9]+[章回节卷幕]"
     )
 
     static func extract(
@@ -96,29 +92,6 @@ enum MechanicalAnchorExtractor {
                     MechanicalAnchor(
                         id: anchorID(kind: .timeMarker, utf16Start: span.utf16Start, surface: surface),
                         kind: .timeMarker,
-                        surfaceText: surface,
-                        canonicalEntityID: nil,
-                        span: span
-                    )
-                )
-            }
-        }
-
-        if let artifactCountRegex {
-            for match in artifactCountRegex.matches(in: text, range: fullRange) {
-                let surface = nsText.substring(with: match.range)
-                let context = surroundingClause(in: nsText, around: match.range)
-                let span = TextSpanAnchor.make(
-                    pageIndex: pageIndex,
-                    utf16Start: baseUTF16Offset + match.range.location,
-                    utf16Length: match.range.length,
-                    quote: surface,
-                    paragraphText: context
-                )
-                anchors.append(
-                    MechanicalAnchor(
-                        id: anchorID(kind: .artifactOrCount, utf16Start: span.utf16Start, surface: surface),
-                        kind: .artifactOrCount,
                         surfaceText: surface,
                         canonicalEntityID: nil,
                         span: span

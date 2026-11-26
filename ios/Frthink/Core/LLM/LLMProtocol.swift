@@ -106,6 +106,8 @@ struct LLMRequest {
     var omitThinking: Bool
     /// 400 重试时无条件附带 `"thinking": {"type": "disabled"}`。
     var forceThinkingDisabledLiteral: Bool
+    /// 可选 `min_p` 截断参数（仅对支持 OpenRouter / 兼容推理引擎生效，防止高温长文尾部噪声）。
+    var minP: Double?
 
     init(
         model: String,
@@ -121,7 +123,8 @@ struct LLMRequest {
         toolChoiceName: String? = nil,
         parallelToolCalls: Bool? = nil,
         omitThinking: Bool = false,
-        forceThinkingDisabledLiteral: Bool = false
+        forceThinkingDisabledLiteral: Bool = false,
+        minP: Double? = nil
     ) {
         self.model = model
         self.messages = messages
@@ -137,6 +140,7 @@ struct LLMRequest {
         self.parallelToolCalls = parallelToolCalls
         self.omitThinking = omitThinking
         self.forceThinkingDisabledLiteral = forceThinkingDisabledLiteral
+        self.minP = minP
     }
 
     /// 按原版顺序组装；思考档位非关闭时按AI服务商能力追加字段。
@@ -247,10 +251,12 @@ struct LLMRequest {
         if forceThinkingDisabledLiteral {
             body["thinking"] = ["type": "disabled"]
             body["temperature"] = temperature
+            applyOptionalMinP(to: &body, isDeepSeek: isDeepSeek, kind: kind)
             return
         }
         if omitThinking {
             body["temperature"] = temperature
+            applyOptionalMinP(to: &body, isDeepSeek: isDeepSeek, kind: kind)
             return
         }
         let level = effectiveLevel(providerLevel: providerLevel)
@@ -264,6 +270,7 @@ struct LLMRequest {
             case .enableThinkingFalse: body["enable_thinking"] = false
             }
             body["temperature"] = temperature
+            applyOptionalMinP(to: &body, isDeepSeek: isDeepSeek, kind: kind)
             return
         }
         if isDeepSeek {
@@ -274,6 +281,18 @@ struct LLMRequest {
         } else {
             body["reasoning_effort"] = level.rawValue
         }
+    }
+
+    private func applyOptionalMinP(
+        to body: inout [String: Any],
+        isDeepSeek: Bool,
+        kind: ProviderKind
+    ) {
+        guard let minP, minP > 0, minP < 1,
+              !isDeepSeek,
+              kind == .openRouter || kind == .openAICompatible
+        else { return }
+        body["min_p"] = minP
     }
 }
 
@@ -341,6 +360,49 @@ extension Error {
 
 /// 单次 LLM 请求的 Token 用量统计与本地估算回退。
 enum LLMTokenUsage {
+    struct CacheStats: Sendable, Equatable {
+        var requestsWithUsage: Int = 0
+        var totalPromptTokens: Int = 0
+        var totalCachedPromptTokens: Int = 0
+        var lastProvider: String = ""
+        var lastPromptTokens: Int = 0
+        var lastCachedTokens: Int = 0
+
+        var hitRate: Double {
+            totalPromptTokens > 0 ? Double(totalCachedPromptTokens) / Double(totalPromptTokens) : 0
+        }
+    }
+
+    private final class CacheStatsBox: @unchecked Sendable {
+        let lock = NSLock()
+        var stats = CacheStats()
+    }
+
+    private static let cacheBox = CacheStatsBox()
+
+    static func recordCacheObservation(
+        provider: String,
+        promptTokens: Int,
+        cachedTokens: Int
+    ) {
+        guard promptTokens > 0 || cachedTokens > 0 else { return }
+        let safePrompt = max(0, promptTokens)
+        let safeCached = safePrompt > 0 ? min(safePrompt, max(0, cachedTokens)) : max(0, cachedTokens)
+        cacheBox.lock.lock()
+        cacheBox.stats.requestsWithUsage += 1
+        cacheBox.stats.totalPromptTokens += safePrompt
+        cacheBox.stats.totalCachedPromptTokens += safeCached
+        cacheBox.stats.lastProvider = provider
+        cacheBox.stats.lastPromptTokens = safePrompt
+        cacheBox.stats.lastCachedTokens = safeCached
+        cacheBox.lock.unlock()
+    }
+
+    static func currentCacheStats() -> CacheStats {
+        cacheBox.lock.lock()
+        defer { cacheBox.lock.unlock() }
+        return cacheBox.stats
+    }
     /// 优先采用服务端返回的 `usage` 总量；若仅返回一侧或未返回（如部分流式网关或中途停止），
     /// 则在已产生有效输出时按 `TokenEstimator` 补齐缺失侧或估算完整输入+输出消耗。
     static func resolveTotal(

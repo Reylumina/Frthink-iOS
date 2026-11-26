@@ -96,29 +96,36 @@ struct WriterMessageBubble: View {
     private var userRow: some View {
         HStack(alignment: .top, spacing: 0) {
             Spacer(minLength: Theme.Spacing.xxl)
-            JustifiedText(
-                attributed: WriterTypography.attributedDocument(
-                    message.content,
-                    fontSize: bodyFontSize,
-                    lineHeight: lineHeight,
-                    alignsLastLine: true,
-                    foregroundColor: UIColor(Theme.bubbleForeground)
-                ),
-                lineSpacing: bodyLineSpacing,
-                paragraphSpacing: WriterTypography.paragraphSpacing(
-                    size: bodyFontSize,
-                    lineHeight: lineHeight
-                ),
-                preservesParagraphStyles: true,
-                shrinksToFitWidth: true
-            )
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.s)
-            .background(
-                Theme.bubbleFill,
-                in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
+            VStack(alignment: .trailing, spacing: Theme.Spacing.xs) {
+                JustifiedText(
+                    attributed: WriterTypography.attributedDocument(
+                        message.content,
+                        fontSize: bodyFontSize,
+                        lineHeight: lineHeight,
+                        alignsLastLine: true,
+                        foregroundColor: UIColor(Theme.bubbleForeground)
+                    ),
+                    lineSpacing: bodyLineSpacing,
+                    paragraphSpacing: WriterTypography.paragraphSpacing(
+                        size: bodyFontSize,
+                        lineHeight: lineHeight
+                    ),
+                    preservesParagraphStyles: true,
+                    shrinksToFitWidth: true
+                )
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.vertical, Theme.Spacing.s)
+                .background(
+                    Theme.bubbleFill,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.large, style: .continuous))
+                .opacity(message.contextMode == .excluded ? 0.55 : 1)
+
+                if message.contextMode != .normal {
+                    contextStatusTag
+                }
+            }
             .frame(maxWidth: userBubbleMaxWidth, alignment: .trailing)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -127,6 +134,13 @@ struct WriterMessageBubble: View {
     private var assistantRow: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             header
+            if message.contextMode == .summaryOnly,
+               !message.prunedSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("发给模型的摘要：\(message.prunedSummary)")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             if let reasoning = message.reasoning, !reasoning.isEmpty {
                 WriterCompletedReasoningBlock(
                     reasoning: reasoning,
@@ -137,6 +151,7 @@ struct WriterMessageBubble: View {
                 )
             }
             content
+                .opacity(message.contextMode == .normal ? 1 : (message.contextMode == .summaryOnly ? 0.72 : 0.55))
             if message.hasBranches, !isSelecting {
                 versionSwitcher
                     .padding(.top, Theme.Spacing.xs)
@@ -165,12 +180,27 @@ struct WriterMessageBubble: View {
                     .padding(.vertical, Theme.Spacing.xs)
                     .background(Capsule().fill(Theme.accentSoft))
             }
+            if message.contextMode != .normal {
+                contextStatusTag
+            }
             Spacer(minLength: 0)
             if message.hasBranches {
                 Text("\(message.selectedVariant + 1)/\(message.variants.count)")
                     .font(Theme.numericSmall)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var contextStatusTag: some View {
+        switch message.contextMode {
+        case .normal:
+            EmptyView()
+        case .summaryOnly:
+            StatusPill(text: "仅发摘要", tone: .accent)
+        case .excluded:
+            StatusPill(text: "不发给模型", tone: .neutral)
         }
     }
 

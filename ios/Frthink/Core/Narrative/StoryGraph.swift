@@ -219,7 +219,7 @@ struct StoryGraph: Codable, Hashable {
     static func makeInitial(
         rootID: String = "root",
         branchLabel: String = "主线",
-        summary: String = "初始节点",
+        summary: String = "故事起点",
         initialDelta: PlotNodeDelta = PlotNodeDelta(),
         manuscriptAnchor: TextSpanAnchor? = nil,
         now: Date = Date()

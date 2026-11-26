@@ -187,6 +187,8 @@ struct ProjectPayload: Codable {
     var interruptedMessageIDs: [String]?
     /// 本书写作助手补充指令（P02）。项目级；空串时整块不出现。
     var assistantSupplement: String
+    /// 本场正文起始位置（UTF-16 偏移）：设置后仅将该位置之后的当前场次正文纳入活跃工作窗，前场交给摘要与账本。
+    var sceneBoundaryOffset: Int?
 
     init(
         schemaVersion: Int = 1,
@@ -196,6 +198,7 @@ struct ProjectPayload: Codable {
         world: WorldBook = WorldBook(),
         continuationAnchor: Int? = nil,
         assistantSupplement: String = "",
+        sceneBoundaryOffset: Int? = nil,
         bodyPromptSendWhole: Bool = false,
         bodyPromptTailCodePoints: Int = ProjectPayload.defaultBodyPromptTailCodePoints,
         readerOffset: Int = 0,
@@ -216,6 +219,7 @@ struct ProjectPayload: Codable {
         self.world = world
         self.continuationAnchor = continuationAnchor
         self.assistantSupplement = assistantSupplement
+        self.sceneBoundaryOffset = sceneBoundaryOffset
         self.bodyPromptSendWhole = bodyPromptSendWhole
         self.bodyPromptTailCodePoints = bodyPromptTailCodePoints
         self.readerOffset = readerOffset
@@ -240,6 +244,7 @@ struct ProjectPayload: Codable {
         world = (try? c.decode(WorldBook.self, forKey: .world)) ?? WorldBook()
         continuationAnchor = try? c.decodeIfPresent(Int.self, forKey: .continuationAnchor)
         assistantSupplement = (try? c.decode(String.self, forKey: .assistantSupplement)) ?? ""
+        sceneBoundaryOffset = try? c.decodeIfPresent(Int.self, forKey: .sceneBoundaryOffset)
         bodyPromptSendWhole = (try? c.decode(Bool.self, forKey: .bodyPromptSendWhole)) ?? false
         bodyPromptTailCodePoints =
             (try? c.decode(Int.self, forKey: .bodyPromptTailCodePoints))

@@ -1,6 +1,6 @@
-// 设置二级页「提示词与资料」及三级页「世界建立要求」。
+// 设置二级页「提示词与资料」。
 //
-// 二级页面承载设置入口与开关，长文本编辑收拢至三级子页面，避免在列表中直接展开长文本。
+// 承载全局写作基准、写作行为开关与长文本模板导航入口。
 
 import SwiftUI
 import UIKit
@@ -55,6 +55,7 @@ struct SettingsPromptPage: View {
             Toggle("启用语料收集库", isOn: settingsBinding(store, \.corpusEnabled))
             Toggle("默认流式输出", isOn: settingsBinding(store, \.streamByDefault))
             Toggle("采纳正文后自动更新世界与伏笔", isOn: settingsBinding(store, \.sleepTimeStateSync))
+            Toggle("换场时自动收起前场上下文", isOn: settingsBinding(store, \.autoSceneContextPruning))
             Picker("历史思维链回灌", selection: settingsBinding(store, \.reasoningContextPolicy)) {
                 ForEach(ReasoningContextPolicy.allCases) { policy in
                     Text(policy.displayName).tag(policy)
@@ -105,122 +106,5 @@ struct SettingsPromptPage: View {
                 store.saveSettings()
             }
         )
-    }
-}
-
-/// 三级页：世界建立要求（P18）正文。
-///
-/// 采用 600ms 防抖合并持久化，页面离开时强制保存，避免高频写入 settings.json。
-struct WorldBuildEditorPage: View {
-    let store: AppStore
-
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var text: String
-    @State private var saveTask: Task<Void, Never>?
-    @State private var showingDefault = false
-    @State private var confirmingReset = false
-
-    init(store: AppStore) {
-        self.store = store
-        _text = State(initialValue: store.settings.worldBuildInstruction)
-    }
-
-    var body: some View {
-        AppTextEditor(
-            text: $text,
-            placeholder: "世界建立时的额外要求",
-            minHeight: 240,
-            expands: true
-        )
-        .padding(Theme.Spacing.l)
-        .pageBackground()
-        .navigationTitle("世界建立要求")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Menu {
-                    Button("查看出厂要求") { showingDefault = true }
-                    Button("恢复出厂值", role: .destructive) { confirmingReset = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("更多操作")
-                SheetConfirmButton(title: "完成") { close() }
-            }
-        }
-        .onChange(of: text) { _, _ in
-            scheduleSave()
-        }
-        .onDisappear { flush() }
-        .sheet(isPresented: $showingDefault) {
-            WorldBuildDefaultSheet(text: PromptLibrary.worldBuildInstructionDefault)
-        }
-        .alert(
-            "恢复出厂值？",
-            isPresented: $confirmingReset
-        ) {
-            Button("恢复出厂值", role: .destructive) { resetToDefault() }
-            Button("取消", role: .cancel) {}
-        }
-    }
-
-    private func scheduleSave() {
-        saveTask?.cancel()
-        saveTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            commit()
-        }
-    }
-
-    private func close() {
-        flush()
-        dismiss()
-    }
-
-    private func flush() {
-        saveTask?.cancel()
-        saveTask = nil
-        commit()
-    }
-
-    @MainActor
-    private func commit() {
-        guard store.settings.worldBuildInstruction != text else { return }
-        store.settings.worldBuildInstruction = text
-        store.saveSettings()
-    }
-
-    @MainActor
-    private func resetToDefault() {
-        text = ""
-        store.settings.worldBuildInstruction = ""
-        store.saveSettings()
-        store.toast = "已恢复出厂值"
-    }
-}
-
-/// 读取预设初始规则，避免在编辑区域展示长篇占位符。
-struct WorldBuildDefaultSheet: View {
-    let text: String
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                MarkdownDocumentView(markdown: text)
-                    .padding(Theme.Spacing.l)
-            }
-            .pageBackground()
-            .navigationTitle("出厂要求")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    SheetCloseButton(title: "完成") { dismiss() }
-                }
-            }
-        }
     }
 }

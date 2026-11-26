@@ -80,6 +80,7 @@ struct NarrativeStore {
         var entityIDs: [String]
         var checkpointNodeIDs: [String]
         var pendingSyncNodeIDs: [String]
+        var syncedManuscriptUTF16Offset: Int
         var activePOVCharacterID: String?
 
         init(
@@ -91,6 +92,7 @@ struct NarrativeStore {
             entityIDs: [String],
             checkpointNodeIDs: [String] = [],
             pendingSyncNodeIDs: [String] = [],
+            syncedManuscriptUTF16Offset: Int = 0,
             activePOVCharacterID: String? = nil
         ) {
             self.schemaVersion = schemaVersion
@@ -101,6 +103,7 @@ struct NarrativeStore {
             self.entityIDs = entityIDs
             self.checkpointNodeIDs = checkpointNodeIDs
             self.pendingSyncNodeIDs = pendingSyncNodeIDs
+            self.syncedManuscriptUTF16Offset = syncedManuscriptUTF16Offset
             self.activePOVCharacterID = activePOVCharacterID
         }
 
@@ -116,6 +119,7 @@ struct NarrativeStore {
             entityIDs = (try? c.decode([String].self, forKey: .entityIDs)) ?? []
             checkpointNodeIDs = (try? c.decode([String].self, forKey: .checkpointNodeIDs)) ?? []
             pendingSyncNodeIDs = (try? c.decode([String].self, forKey: .pendingSyncNodeIDs)) ?? []
+            syncedManuscriptUTF16Offset = (try? c.decode(Int.self, forKey: .syncedManuscriptUTF16Offset)) ?? 0
             activePOVCharacterID = try? c.decodeIfPresent(String.self, forKey: .activePOVCharacterID)
         }
     }
@@ -310,6 +314,7 @@ struct NarrativeStore {
                     latestStyleLint: manifest.latestStyleLint,
                     migratedFromLegacyAt: manifest.migratedFromLegacyAt,
                     pendingSyncNodeIDs: manifest.pendingSyncNodeIDs,
+                    syncedManuscriptUTF16Offset: manifest.syncedManuscriptUTF16Offset,
                     activePOVCharacterID: manifest.activePOVCharacterID
                 )
 
@@ -600,6 +605,7 @@ struct NarrativeStore {
                     || previous?.latestStyleLint != workspace.latestStyleLint
                     || previous?.migratedFromLegacyAt != workspace.migratedFromLegacyAt
                     || previous?.pendingSyncNodeIDs != workspace.pendingSyncNodeIDs
+                    || previous?.syncedManuscriptUTF16Offset != workspace.syncedManuscriptUTF16Offset
                     || previous?.activePOVCharacterID != workspace.activePOVCharacterID)
             let entityIndexChanged = entitiesChanged
                 && (previous.map { Set($0.entityPages.keys) != Set(workspace.entityPages.keys) } ?? true)
@@ -621,6 +627,7 @@ struct NarrativeStore {
                     entityIDs: sortedEntityIDs(),
                     checkpointNodeIDs: sortedCheckpointIDs(),
                     pendingSyncNodeIDs: workspace.pendingSyncNodeIDs,
+                    syncedManuscriptUTF16Offset: workspace.syncedManuscriptUTF16Offset,
                     activePOVCharacterID: workspace.activePOVCharacterID
                 )
                 try fileStore.writeEncrypted(

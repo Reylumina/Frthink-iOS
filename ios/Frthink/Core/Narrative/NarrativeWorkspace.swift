@@ -35,6 +35,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         case migratedFromLegacyAt
         case hasLiveLedgers
         case pendingSyncNodeIDs
+        case syncedManuscriptUTF16Offset
         case activePOVCharacterID
     }
 
@@ -89,6 +90,9 @@ struct NarrativeWorkspace: Codable, Hashable {
     var pendingSyncNodeIDs: [String] {
         didSet { sectionRevisions.manifest &+= 1 }
     }
+    var syncedManuscriptUTF16Offset: Int {
+        didSet { sectionRevisions.manifest &+= 1 }
+    }
     var activePOVCharacterID: String? {
         didSet { sectionRevisions.manifest &+= 1 }
     }
@@ -113,6 +117,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         migratedFromLegacyAt: Date? = nil,
         hasLiveLedgers: Bool = false,
         pendingSyncNodeIDs: [String] = [],
+        syncedManuscriptUTF16Offset: Int = 0,
         activePOVCharacterID: String? = nil
     ) {
         self.schemaVersion = schemaVersion
@@ -132,6 +137,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         self.migratedFromLegacyAt = migratedFromLegacyAt
         self.hasLiveLedgers = hasLiveLedgers
         self.pendingSyncNodeIDs = pendingSyncNodeIDs
+        self.syncedManuscriptUTF16Offset = syncedManuscriptUTF16Offset
         self.activePOVCharacterID = activePOVCharacterID
     }
 
@@ -158,6 +164,8 @@ struct NarrativeWorkspace: Codable, Hashable {
         migratedFromLegacyAt = try? c.decodeIfPresent(Date.self, forKey: .migratedFromLegacyAt)
         hasLiveLedgers = (try? c.decode(Bool.self, forKey: .hasLiveLedgers)) ?? false
         pendingSyncNodeIDs = (try? c.decode([String].self, forKey: .pendingSyncNodeIDs)) ?? []
+        syncedManuscriptUTF16Offset =
+            (try? c.decode(Int.self, forKey: .syncedManuscriptUTF16Offset)) ?? 0
         activePOVCharacterID = try? c.decodeIfPresent(String.self, forKey: .activePOVCharacterID)
     }
 
@@ -179,6 +187,7 @@ struct NarrativeWorkspace: Codable, Hashable {
             && lhs.migratedFromLegacyAt == rhs.migratedFromLegacyAt
             && lhs.hasLiveLedgers == rhs.hasLiveLedgers
             && lhs.pendingSyncNodeIDs == rhs.pendingSyncNodeIDs
+            && lhs.syncedManuscriptUTF16Offset == rhs.syncedManuscriptUTF16Offset
             && lhs.activePOVCharacterID == rhs.activePOVCharacterID
     }
 
@@ -200,6 +209,7 @@ struct NarrativeWorkspace: Codable, Hashable {
         hasher.combine(migratedFromLegacyAt)
         hasher.combine(hasLiveLedgers)
         hasher.combine(pendingSyncNodeIDs)
+        hasher.combine(syncedManuscriptUTF16Offset)
         hasher.combine(activePOVCharacterID)
     }
 

@@ -391,7 +391,8 @@ enum PromptComposer {
         reasoningPolicy: ReasoningContextPolicy = .all
     ) -> [LLMMessage] {
         var assistantIndices: [Int] = []
-        for (idx, msg) in messages.enumerated() where msg.role == .assistant {
+        for (idx, msg) in messages.enumerated()
+        where msg.role == .assistant && msg.contextMode == .normal {
             if !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 assistantIndices.append(idx)
             }
@@ -407,14 +408,30 @@ enum PromptComposer {
         }
 
         return messages.enumerated().compactMap { index, message -> LLMMessage? in
-            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !content.isEmpty else { return nil }
+            let outgoingContent: String
+            let outgoingReasoning: String?
+            switch message.contextMode {
+            case .excluded:
+                return nil
+            case .summaryOnly:
+                let summary = message.prunedSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !summary.isEmpty else { return nil }
+                outgoingContent = "[前情摘要：\(summary)]"
+                outgoingReasoning = nil
+            case .normal:
+                let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !content.isEmpty else { return nil }
+                outgoingContent = content
+                outgoingReasoning = keptReasoningIndices.contains(index) ? message.reasoning : nil
+            }
+
             switch message.role {
-            case .user: return LLMMessage.user(content)
+            case .user:
+                return LLMMessage.user(outgoingContent)
             case .assistant:
-                let reasoning = keptReasoningIndices.contains(index) ? message.reasoning : nil
-                return LLMMessage.assistant(content, reasoningContent: reasoning)
-            case .system: return LLMMessage.system(content)
+                return LLMMessage.assistant(outgoingContent, reasoningContent: outgoingReasoning)
+            case .system:
+                return LLMMessage.system(outgoingContent)
             }
         }
     }

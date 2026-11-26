@@ -199,7 +199,7 @@ struct StyleLintCardView: View {
                     ProgressView(value: progress)
                         .tint(exceeded ? AppTone.warning.color : AppTone.success.color)
 
-                    Text(String(format: "每千字 %.1f 次 · 建议不超 %.1f", value, limit))
+                    Text(String(format: "每千字 %.1f 次（建议不超过 %.1f）", value, limit))
                         .font(Theme.numericSmall)
                         .foregroundStyle(.secondary)
                 }

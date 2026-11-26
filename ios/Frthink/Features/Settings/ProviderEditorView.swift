@@ -214,7 +214,7 @@ struct ProviderEditorView: View {
             }
             .pickerStyle(.menu)
 
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                 HStack {
                     Text("温度")
                     Spacer(minLength: 0)
@@ -230,6 +230,7 @@ struct ProviderEditorView: View {
                     showTicks: false
                 )
             }
+            .padding(.vertical, Theme.Spacing.xs)
         } header: {
             AppSectionHeader(title: "生成")
         }
