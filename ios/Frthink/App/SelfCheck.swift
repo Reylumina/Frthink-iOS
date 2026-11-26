@@ -2378,13 +2378,13 @@ enum SelfCheck {
                 assembly: orderAssembly,
                 history: [.user("历史1"), .assistant("回复1")],
                 userInstruction: "继续",
-                fewShotMessages: fewShot.messages
+                fewShotMessages: [.user("【示例】雨夜长街对峙"), .assistant("风过长街。他按住刀柄，没有回头。")]
             )
             let fewShotIdx = ordered.firstIndex(where: { $0.content.contains("雨夜长街对峙") }) ?? Int.max
             let bodyIdx = ordered.firstIndex(where: { $0.content.contains("这是当前的权威正文末尾") }) ?? -1
             try expect(
                 fewShotIdx < bodyIdx,
-                "Few-Shot 示范轮次应位于权威正文之前，避免紧贴末尾干扰续写衔接"
+                "示例轮次若传入应位于权威正文之前，避免紧贴末尾干扰续写衔接"
             )
             return "\(prepared.messages.count) 条消息 / \(prepared.estimatedInputTokens) tokens"
         }
