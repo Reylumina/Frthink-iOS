@@ -391,24 +391,6 @@ final class ProjectSession {
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
-    func forkNarrativeBranch(
-        from nodeID: String,
-        label: String,
-        settingsCorpusLibraries: [CorpusLibrary] = []
-    ) throws {
-        let cleanLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanLabel.isEmpty else { return }
-        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
-        let node = PlotNode(
-            parentID: nodeID,
-            branchLabel: cleanLabel,
-            summary: "开辟分支：\(cleanLabel)"
-        )
-        try workspace.storyGraph.appendNode(node, moveHead: false)
-        _ = try workspace.checkoutBranch(to: node.id)
-        noteNarrativeWorkspaceUpdated(workspace)
-    }
-
     func addPlotBeat(
         summary: String,
         branchLabel: String? = nil,
@@ -430,16 +412,6 @@ final class ProjectSession {
         )
         try workspace.storyGraph.appendNode(node, moveHead: false)
         _ = try workspace.checkoutBranch(to: node.id)
-        noteNarrativeWorkspaceUpdated(workspace)
-    }
-
-    func addNarrativeCausalEdge(
-        from parentID: String,
-        to childID: String,
-        settingsCorpusLibraries: [CorpusLibrary] = []
-    ) throws {
-        var workspace = ensureNarrativeWorkspace(settingsCorpusLibraries: settingsCorpusLibraries)
-        try workspace.storyGraph.addCausalEdge(from: parentID, to: childID)
         noteNarrativeWorkspaceUpdated(workspace)
     }
 
