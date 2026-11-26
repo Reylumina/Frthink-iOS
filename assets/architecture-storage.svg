@@ -18,33 +18,33 @@
 
   <rect x="20" y="18" width="1080" height="280" class="panel"/>
   <text x="38" y="45" class="header">世界工作台与分文件加密存储</text>
-  <text x="246" y="45" class="sub">全书共享设定档案与全局法则；支线事实、认知、伏笔与摘要随当前分支独立重放与回滚</text>
+  <text x="246" y="45" class="sub">全书共享设定档案与全局规则；平行试写通过书库「项目级分支」独立隔离正文与对话</text>
 
   <!-- Card 1 -->
   <rect x="38" y="60" width="506" height="102" class="card-emerald"/>
-  <text x="54" y="84" class="title">1. 剧情图谱与增量加密日志</text>
-  <text x="54" y="106" class="desc">单轨主路径展示因果节拍，在分叉节点可通过菜单切换平行支线</text>
+  <text x="54" y="84" class="title">1. 剧情时间线与增量加密日志</text>
+  <text x="54" y="106" class="desc">单轨主路径展示幕次规划与关键事件；平行分支由项目级副本承载</text>
   <text x="54" y="125" class="desc">节点变更追加写入 story_graph.wal 密文日志（满 40 帧自动压实）</text>
   <text x="54" y="144" class="desc">重放检查点独立保存在 checkpoints/*.json（最多保留 12 份）</text>
 
   <!-- Card 2 -->
   <rect x="576" y="60" width="506" height="102" class="card-blue"/>
   <text x="592" y="84" class="title">2. 叙事三账本（事实 / 认知 / 伏笔）</text>
-  <text x="592" y="106" class="desc">区分客观事实与角色已知信息，按“作者手改 &gt; 正文事实 &gt; 模型推断”校验优先级</text>
+  <text x="592" y="106" class="desc">未命中原文引用的推测事实拒绝入账；POV 下盲区冲突事实硬裁剪</text>
   <text x="592" y="125" class="desc">伏笔按“待埋设 → 就绪 → 已触发 → 已回收 / 已废弃”五种状态流转</text>
   <text x="592" y="144" class="desc">已发生节拍逐级归纳为近期场次卡、阶段剧情线与卷纲摘要</text>
 
   <!-- Card 3 -->
   <rect x="38" y="176" width="506" height="102" class="card-indigo"/>
-  <text x="54" y="200" class="title">3. 设定档案页与作者法则</text>
-  <text x="54" y="222" class="desc">按角色、组织、地点、物品分类管理独立档案页</text>
-  <text x="54" y="241" class="desc">支持从正文或对话气泡提取设定、别名归并、关系一跳联想及冲突确认</text>
-  <text x="54" y="260" class="desc">作者法则逐字保存全局或分支范围的写作要求与禁忌，不经摘要改写</text>
+  <text x="54" y="200" class="title">3. 设定档案页与写作规则</text>
+  <text x="54" y="222" class="desc">按人物、地点、物件、世界观四类管理独立档案页与别名触发</text>
+  <text x="54" y="241" class="desc">支持从正文提取设定、关系一跳联想及待确认冲突告警</text>
+  <text x="54" y="260" class="desc">写作规则逐字保存全局或指定档案要求与禁忌，不经摘要改写</text>
 
   <!-- Card 4 -->
   <rect x="576" y="176" width="506" height="102" class="card-slate"/>
-  <text x="592" y="200" class="title">4. 本地检索、文风提炼与记忆自审</text>
-  <text x="592" y="222" class="desc">按页增量更新本地 BM25 索引，自动提取人名、地点、物品与时间位置</text>
-  <text x="592" y="241" class="desc">从样章提炼文风模板，按当前场景类型（动作、对白、心理、景物）匹配范例</text>
-  <text x="592" y="260" class="desc">记忆自审检查陈旧认知与超期伏笔；散文体检在本地标出旁白高频套话</text>
+  <text x="592" y="200" class="title">4. 本地检索、MUSE 文风与世界核查</text>
+  <text x="592" y="222" class="desc">按页增量 BM25 与实体/章回锚点（正文改稿自动平移 UTF-16 偏移）</text>
+  <text x="592" y="241" class="desc">文风标注 [场景｜节奏｜对白] 语域，MUSE 错配门控宁缺毋滥</text>
+  <text x="592" y="260" class="desc">世界核查保护 knowsSecret=false 盲区；回看页实时显示缓存命中率</text>
 </svg>

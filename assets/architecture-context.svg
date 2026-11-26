@@ -23,22 +23,22 @@
   <text x="174" y="45" class="sub">固定前部内容以复用服务端缓存，将动态状态放在末尾</text>
 
   <rect x="38" y="60" width="628" height="68" class="tier0"/>
-  <text x="54" y="83" class="title">Tier 0 · 静态前缀（System · 跨轮次保持不变）</text>
-  <text x="54" y="105" class="desc">系统指令、基础世界设定、文风静态模板、全书质心样本、顶层目录索引与只读工具定义</text>
+  <text x="54" y="83" class="title">Tier 0 · 冻结静态前缀（System · 跨轮次字节恒定）</text>
+  <text x="54" y="105" class="desc">系统指令、常驻世界观、共享世界书、文风静态模板、质心样本与只读工具定义</text>
 
   <rect x="38" y="140" width="628" height="68" class="tier1"/>
-  <text x="54" y="163" class="title">Tier 1 · 可逆折叠对话流（每 3 轮推进一次折叠边界）</text>
-  <text x="54" y="185" class="desc">保留最近 3 轮完整对话与工具记录；早期对话折叠为单行进展摘要，重复工具输出自动去重</text>
+  <text x="54" y="163" class="title">Tier 1 · 非破坏性滑窗对话流（ReFold · 128K+ 阈值 64K）</text>
+  <text x="54" y="185" class="desc">保留近期完整对话与工具记录；超窗早期对话折叠为单条区间边界，重复工具输出自动去重</text>
 
   <rect x="38" y="220" width="628" height="72" class="tier2"/>
   <text x="54" y="243" class="title">Tier 2 · 尾部动态工作区（紧贴最新指令）</text>
-  <text x="54" y="264" class="desc">逐字作者法则 + 在场实体与一跳关联离场实体 + 视角角色已知信息 + 就绪伏笔</text>
-  <text x="54" y="281" class="desc">当前场景类型匹配的文风范例 + 书末正文窗口（2K / 6K / 12K 三档）</text>
+  <text x="54" y="264" class="desc">全书卷纲与目录索引（BOOK_INDEX）+ 逐字规则 + 在场实体与一跳实体 + POV 盲区硬隔离</text>
+  <text x="54" y="281" class="desc">MUSE 语域门控文风范例（宁缺毋滥）+ 场次正文窗口（2K/6K/12K，含换场防回流）</text>
 
   <!-- Right Panel: 只读工具与本地回退 -->
   <rect x="704" y="18" width="396" height="292" class="panel"/>
   <text x="722" y="45" class="header">只读工具与本地检索回退</text>
-  <text x="898" y="45" class="sub">无工具接口自动切换本地检索</text>
+  <text x="898" y="45" class="sub">无工具接口自动按时间序预检</text>
 
   <rect x="722" y="60" width="360" height="68" class="tool-card"/>
   <text x="738" y="82" class="code">grep_manuscript(pattern, regex)</text>
@@ -47,11 +47,11 @@
 
   <rect x="722" y="140" width="360" height="68" class="tool-card"/>
   <text x="738" y="162" class="code">read_entity_page(entityId, section)</text>
-  <text x="738" y="182" class="desc">按需读取未在场的角色、组织、地点或物品</text>
+  <text x="738" y="182" class="desc">按需读取未在场的人物、地点、物件或世界观</text>
   <text x="738" y="198" class="desc">独立档案页全文及原文引文位置</text>
 
   <rect x="722" y="220" width="360" height="72" class="tool-card"/>
   <text x="738" y="242" class="code">restore_turn(stepRange)</text>
-  <text x="738" y="262" class="desc">将早期折叠的对话追加到上下文末尾展开；</text>
-  <text x="738" y="278" class="desc">不支持工具的接口自动回退至本地 BM25 与专名锚点检索</text>
+  <text x="738" y="262" class="desc">从无损历史展开滑出窗口的对话（回看页统计缓存命中）</text>
+  <text x="738" y="278" class="desc">无工具通道回退本地 BM25 与锚点（按 utf16Start 升序）</text>
 </svg>

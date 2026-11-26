@@ -34,22 +34,22 @@
   <rect x="38" y="62" width="234" height="106" class="card-blue"/>
   <text x="52" y="86" class="title">1. 指令与视角入口</text>
   <text x="52" y="108" class="desc">手写指令或选择分支走向</text>
-  <text x="52" y="126" class="desc">选择当前章节视角角色 (POV)</text>
-  <text x="52" y="144" class="desc">设置续写锚点或改写选区</text>
+  <text x="52" y="126" class="desc">POV 视角硬隔离盲区客观事实</text>
+  <text x="52" y="144" class="desc">标定换场边界、锚点或选区改写</text>
 
   <!-- Step 2 -->
   <rect x="302" y="62" width="246" height="106" class="card-indigo"/>
   <text x="316" y="86" class="title">2. 三段式上下文拼装</text>
-  <text x="316" y="108" class="desc">静态前缀：系统指令、目录与文风模板</text>
-  <text x="316" y="126" class="desc">对话历史：保留近期对话，早期折叠</text>
-  <text x="316" y="144" class="desc">尾部工作区：作者法则、在场状态与尾窗</text>
+  <text x="316" y="108" class="desc">冻结前缀：指令、常驻设定与模板</text>
+  <text x="316" y="126" class="desc">对话历史：近期完整，超窗滑窗折叠</text>
+  <text x="316" y="144" class="desc">尾部工作区：目录、规则、状态与尾窗</text>
 
   <!-- Step 3 -->
   <rect x="578" y="62" width="246" height="106" class="card-blue"/>
   <text x="592" y="86" class="title">3. 流式续写与只读工具</text>
-  <text x="592" y="108" class="desc">流式输出正文与可折叠思考卡片</text>
+  <text x="592" y="108" class="desc">流式输出与缓存命中率观测</text>
   <text x="592" y="126" class="desc">按需调用全文检索、读档案、展开对话</text>
-  <text x="592" y="144" class="desc">无工具接口自动使用本地 BM25 检索</text>
+  <text x="592" y="144" class="desc">无工具自动本地 BM25 按时间序预检</text>
 
   <!-- Step 4 -->
   <rect x="854" y="62" width="228" height="106" class="card-emerald"/>
@@ -69,30 +69,30 @@
 
   <!-- Step 8 -->
   <rect x="38" y="258" width="234" height="106" class="card-slate"/>
-  <text x="52" y="282" class="title">8. 分支推演与记忆自审</text>
+  <text x="52" y="282" class="title">8. 推演与世界核查</text>
   <text x="52" y="304" class="desc">按需推演 2–3 条后续剧情走向</text>
-  <text x="52" y="322" class="desc">核对正文审查陈旧认知与超期伏笔</text>
+  <text x="52" y="322" class="desc">查已知情过时认知（护盲区）与伏笔</text>
   <text x="52" y="340" class="desc">逐级归纳场次卡、阶段剧情线与卷纲</text>
 
   <!-- Step 7 -->
   <rect x="302" y="258" width="246" height="106" class="card-emerald"/>
   <text x="316" y="282" class="title">7. 状态机更新</text>
   <text x="316" y="304" class="desc">按权威等级更新事实、认知与伏笔</text>
-  <text x="316" y="322" class="desc">更新对应角色、地点、物品档案页</text>
-  <text x="316" y="340" class="desc">隔离支线状态，共享全书通用设定</text>
+  <text x="316" y="322" class="desc">更新人物、地点、物件与世界观档案</text>
+  <text x="316" y="340" class="desc">同步更新关键事件与自动换场边界</text>
 
   <!-- Step 6 -->
   <rect x="578" y="258" width="246" height="106" class="card-indigo"/>
   <text x="592" y="282" class="title">6. 单步增量抽取</text>
-  <text x="592" y="304" class="desc">后台抽取本段新增事实与状态变化</text>
-  <text x="592" y="322" class="desc">校验原文引文位置，过滤无依据推断</text>
-  <text x="592" y="340" class="desc">自动识别新出场角色与地点并建档</text>
+  <text x="592" y="304" class="desc">后台抽取本段新增事实与转场信号</text>
+  <text x="592" y="322" class="desc">原文逐字引用门控，未命中拒绝入账</text>
+  <text x="592" y="340" class="desc">自动识别新出场实体并建档去重</text>
 
   <!-- Step 5 -->
   <rect x="854" y="258" width="228" height="106" class="card-slate"/>
   <text x="868" y="282" class="title">5. 增量日志与本地索引</text>
   <text x="868" y="304" class="desc">追加剧情图谱增量加密日志 (WAL)</text>
-  <text x="868" y="322" class="desc">提取人名、地点、物品与时间锚点</text>
+  <text x="868" y="322" class="desc">提取已知实体/章回锚点（改稿同步平移）</text>
   <text x="868" y="340" class="desc">按页增量更新本地 BM25 索引</text>
 
   <path d="M 968 168 L 968 254" class="arrow-loop"/>
