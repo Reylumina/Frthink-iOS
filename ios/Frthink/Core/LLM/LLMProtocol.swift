@@ -290,7 +290,7 @@ struct LLMRequest {
     ) {
         guard let minP, minP > 0, minP < 1,
               !isDeepSeek,
-              kind == .openRouter || kind == .openAICompatible
+              kind == .openRouter
         else { return }
         body["min_p"] = minP
     }

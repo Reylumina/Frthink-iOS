@@ -15,6 +15,10 @@ struct RequestSnapshotsSheet: View {
         session.payload.requestSnapshots.sorted { $0.createdAt > $1.createdAt }
     }
 
+    private var cacheStats: LLMTokenUsage.CacheStats {
+        LLMTokenUsage.currentCacheStats()
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -92,23 +96,59 @@ struct RequestSnapshotsSheet: View {
     }
 
     private var list: some View {
-        List(ordered) { snapshot in
-            Button {
-                selected = snapshot
-            } label: {
-                snapshotRow(snapshot)
+        List {
+            if cacheStats.requestsWithUsage > 0 {
+                Section {
+                    cacheStatsRow
+                } header: {
+                    AppSectionHeader(title: "前缀缓存命中统计")
+                }
             }
-            .buttonStyle(.plain)
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                Button(role: .destructive) {
-                    pendingDelete = snapshot
-                } label: {
-                    Label("删除", systemImage: "trash")
+
+            Section {
+                ForEach(ordered) { snapshot in
+                    Button {
+                        selected = snapshot
+                    } label: {
+                        snapshotRow(snapshot)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            pendingDelete = snapshot
+                        } label: {
+                            Label("删除", systemImage: "trash")
+                        }
+                    }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+    }
+
+    private var cacheStatsRow: some View {
+        let hitPct = Int((cacheStats.hitRate * 100).rounded())
+        return VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.s) {
+                StatusPill(
+                    text: "累计命中率 \(hitPct)%",
+                    tone: hitPct >= 50 ? .success : (hitPct > 0 ? .accent : .neutral)
+                )
+                Text("共 \(cacheStats.requestsWithUsage) 次含 usage 请求")
+                    .font(Theme.numericSmall)
+                    .foregroundStyle(.secondary)
+            }
+            Text("累计命中 \(cacheStats.totalCachedPromptTokens) / \(cacheStats.totalPromptTokens) prompt tok")
+                .font(Theme.numericSmall)
+                .foregroundStyle(.secondary)
+            if !cacheStats.lastProvider.isEmpty {
+                Text("最近（\(cacheStats.lastProvider)）：命中 \(cacheStats.lastCachedTokens) / \(cacheStats.lastPromptTokens) tok")
+                    .font(Theme.metadata)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, Theme.Spacing.xs)
     }
 
     private func formatted(_ date: Date) -> String {

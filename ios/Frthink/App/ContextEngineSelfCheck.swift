@@ -138,12 +138,12 @@ extension SelfCheck {
                 "场景工作记忆块应包含在场快照、L1 未出场名录、认知信息差与 open 伏笔"
             )
 
-            // 场景动态匹配 Few-Shot：根据当前指令技法意图挑出最贴合的 1-2 条样本
+            // 场景动态匹配文风参考（MUSE 语域对齐 + 宁缺毋滥门控）
             let combatSample = PromptAssembly.Corpus(
                 libraryID: "lib",
                 libraryName: "节选",
                 entryID: "s_combat",
-                entryName: "短句动作交锋与节奏压迫",
+                entryName: "[场景:动作｜节奏:快｜对白:低] 短句动作交锋与节奏压迫",
                 category: "仿写样本",
                 text: "刀光一闪。他侧身避开，反手扣住对方手腕。"
             )
@@ -151,27 +151,29 @@ extension SelfCheck {
                 libraryID: "lib",
                 libraryName: "节选",
                 entryID: "s_dlg",
-                entryName: "人物对白试探与言外之意留白",
+                entryName: "[场景:对白｜节奏:中｜对白:高] 人物对白试探与言外之意留白",
                 category: "仿写样本",
                 text: "“茶凉了。”他没有抬头。“凉了正好醒神。”"
             )
-            let routed = StyleDistiller.fewShotDialoguePairs(
+            let routed = StyleDistiller.styleReferenceBlock(
                 from: [combatSample, dialogueSample],
-                maxPairs: 1,
-                queryText: "写一段两人喝茶试探的克制对白"
+                maxSamples: 1,
+                instructionText: "写一段两人喝茶试探的克制对白",
+                queryText: "茶盏轻响。"
             )
             try expect(
-                routed.injectedEntryIDs == ["s_dlg"],
-                "动态 Few-Shot 应优先匹配契合当前场景技法的样本"
+                routed.injectedEntryIDs == ["s_dlg"] && routed.block != nil,
+                "文风参考应按结构化语域标签优先匹配契合当前场景的样本"
             )
-            let mismatchFiltered = StyleDistiller.fewShotDialoguePairs(
+            let mismatchFiltered = StyleDistiller.styleReferenceBlock(
                 from: [dialogueSample],
-                maxPairs: 1,
+                maxSamples: 1,
+                instructionText: "写一段大雨荒原环境描写",
                 queryText: "暴雨倾盆而下，他独自穿过荒原石阶，风声灌满长廊，远山灯火熄灭。"
             )
             try expect(
-                mismatchFiltered.injectedEntryIDs.isEmpty && mismatchFiltered.messages.isEmpty,
-                "纯叙述场景遇到无关键词重合的纯对白样本时应按语域门控过滤"
+                mismatchFiltered.injectedEntryIDs.isEmpty && mismatchFiltered.block == nil,
+                "描写/叙述场景遇到对白语域样本时应严格按语域门控返回 nil（宁缺毋滥）"
             )
 
             // 因果截断（Causal Cutoff）：锚点之后的未来文本不得被 BM25 召回

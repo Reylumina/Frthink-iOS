@@ -73,8 +73,14 @@ enum StyleDistiller {
         )
     }
 
-    /// 基于「5 维文体风格向量 + MMR 最大边际相关性」从全书抽取最多 5 段多样化原著节选（每段约 400 token）。
-    /// 先选最贴近全书风格质心的代表段，再依次选出既贴合本书基调又与已选样本在句法/节奏/对白上尽量正交的段落。
+    struct RegisterProfile: Equatable {
+        var sceneType: String?
+        var tempo: String?
+        var dialogueDensity: String?
+        var technique: String
+    }
+
+    /// 从全书按写作进度等距抽取最多 `maxCount` 段成段原著候选节选，交由后续语义语域标注识别风格属性。
     static func selectExemplarPassages(from text: String, maxCount: Int = 5) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
         func isQualified(_ chunk: String) -> Bool {
@@ -86,105 +92,19 @@ enum StyleDistiller {
         let chunks = WorldDigest.chunks(of: text, tokenBudget: 400, overlapTokens: 0)
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter(isQualified)
-        guard !chunks.isEmpty else { return [] }
+        guard !chunks.isEmpty, maxCount > 0 else { return [] }
         guard chunks.count > maxCount else { return Array(chunks.prefix(maxCount)) }
+        guard maxCount > 1 else { return [chunks[0]] }
 
-        func styleVector(_ chunk: String) -> [Double] {
-            let totalChars = max(1, chunk.count)
-            var inQuote = false
-            var dialogueChars = 0
-            var clausePuncts = 0
-            for ch in chunk {
-                if ch == "“" || ch == "「" {
-                    inQuote = true
-                } else if ch == "”" || ch == "」" {
-                    inQuote = false
-                } else if inQuote {
-                    dialogueChars += 1
-                }
-                if "，；、".contains(ch) {
-                    clausePuncts += 1
-                }
+        var selected: [String] = []
+        var usedIndices: Set<Int> = []
+        for slot in 0..<maxCount {
+            let idx = (slot * (chunks.count - 1)) / (maxCount - 1)
+            if usedIndices.insert(idx).inserted {
+                selected.append(chunks[idx])
             }
-
-            let paragraphs = chunk.split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            let sentences = chunk.components(separatedBy: sentenceEnds)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-
-            let sentLengths = sentences.map { Double($0.count) }
-            let meanLen = sentLengths.isEmpty
-                ? Double(totalChars)
-                : sentLengths.reduce(0, +) / Double(sentLengths.count)
-            let variance = sentLengths.isEmpty
-                ? 0.0
-                : sentLengths.reduce(0.0) { $0 + ($1 - meanLen) * ($1 - meanLen) } / Double(sentLengths.count)
-            let stdDev = variance.squareRoot()
-
-            let vMeanLen = min(1.0, meanLen / 45.0)
-            let vBurstiness = min(1.0, stdDev / 20.0)
-            let vCadence = min(1.0, (Double(clausePuncts) / Double(totalChars)) / 0.15)
-            let vParaDensity = min(1.0, (Double(paragraphs.count) / (Double(totalChars) / 100.0)) / 2.5)
-            let vDialogue = min(1.0, Double(dialogueChars) / Double(totalChars))
-            return [vMeanLen, vBurstiness, vCadence, vParaDensity, vDialogue]
         }
-
-        func distance(_ a: [Double], _ b: [Double]) -> Double {
-            var sum = 0.0
-            for i in 0..<min(a.count, b.count) {
-                let d = a[i] - b[i]
-                sum += d * d
-            }
-            return (sum / Double(max(1, a.count))).squareRoot()
-        }
-
-        let vectors = chunks.map(styleVector)
-        let dims = 5
-        var centroid = Array(repeating: 0.0, count: dims)
-        for v in vectors {
-            for i in 0..<dims { centroid[i] += v[i] }
-        }
-        for i in 0..<dims { centroid[i] /= Double(vectors.count) }
-
-        var selectedIndices: [Int] = []
-        var used: Set<Int> = []
-
-        // 第 1 段：最贴近全书风格质心的饱满代表段，锚定主基调（避开极端高对白样本以免常驻拉偏对话比例）。
-        if let first = chunks.indices.max(by: { a, b in
-            let dialoguePenaltyA = vectors[a][4] > 0.55 ? 0.65 : 1.0
-            let dialoguePenaltyB = vectors[b][4] > 0.55 ? 0.65 : 1.0
-            let sa = (1.0 - distance(vectors[a], centroid)) * min(1.0, Double(chunks[a].count) / 260.0) * dialoguePenaltyA
-            let sb = (1.0 - distance(vectors[b], centroid)) * min(1.0, Double(chunks[b].count) / 260.0) * dialoguePenaltyB
-            return sa < sb
-        }) {
-            selectedIndices.append(first)
-            used.insert(first)
-        }
-
-        // 第 2..maxCount 段：MMR（兼顾贴合主基调 + 与已选样本在 5 维向量上最大差异 + 位置分散）。
-        while selectedIndices.count < maxCount {
-            var bestIdx: Int?
-            var bestScore = -Double.infinity
-            for idx in chunks.indices where !used.contains(idx) {
-                let relevance = 1.0 - distance(vectors[idx], centroid)
-                let minStyleGap = selectedIndices.map { distance(vectors[idx], vectors[$0]) }.min() ?? 0.0
-                let minPosGap = selectedIndices.map { abs(idx - $0) }.min() ?? chunks.count
-                let posBonus = minPosGap >= 2 ? 0.05 : -0.15
-                let lenFactor = min(1.0, Double(chunks[idx].count) / 240.0)
-                let score = (0.35 * relevance + 0.65 * minStyleGap + posBonus) * lenFactor
-                if score > bestScore {
-                    bestScore = score
-                    bestIdx = idx
-                }
-            }
-            guard let chosen = bestIdx else { break }
-            selectedIndices.append(chosen)
-            used.insert(chosen)
-        }
-
-        return selectedIndices.map { chunks[$0] }
+        return selected
     }
 
     /// 构造深度蒸馏请求（总览全书前中后样章，按模型输入预算均衡采样）。
@@ -301,20 +221,77 @@ enum StyleDistiller {
         return parts.joined(separator: "\n\n")
     }
 
-    /// 为抽取的原著节选反推纯写作技法指令（严禁包含原著人名、地名与剧情，避免写作时带偏正文衔接）。
+    /// 为抽取的原著节选反推结构化语域标签与纯写作技法指令（MUSE §3.3：区分语域与内容，严禁包含原著人名/地名/剧情）。
     static func exemplarPromptsMessages(
         for passages: [String],
         fingerprint: LinguisticFingerprint? = nil
     ) -> [LLMMessage] {
         let statHint = fingerprint.map { "参考语言统计：\($0.summaryLine)\n" } ?? ""
         let system = """
-        \(statHint)请为下面每段原著节选各提炼一条纯写作技法指令（25至45字），只概括该段的句式节奏、描写分寸、视角落点或对白留白技巧。
+        \(statHint)请为下面每段原著节选各输出一行「语域标签 + 纯写作技法指令」，格式严格为：
+        [场景:<动作|对白|描写|心理|转场>｜节奏:<快|中|慢>｜对白:<低|中|高>] <25至45字纯写作技法>
+        例如：[场景:对白｜节奏:中｜对白:高] 用日常物件动作隔开问答停顿，言外之意留白推进试探。
         严禁出现任何原著人名、地名、具体物品或剧情事件；严格按输入顺序每段输出一行，不要编号、不要引号、不要 Markdown。
         """
         let numbered = passages.enumerated().map { idx, text in
             "[\(idx + 1)]\n\(text)"
         }.joined(separator: "\n\n")
         return [.system(system), .user(numbered)]
+    }
+
+    /// 解析语域标签与技法指令，兼容无方括号标签的旧版样本标题。
+    static func parseRegister(from rawLabel: String) -> RegisterProfile {
+        let trimmed = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("["),
+              let closeIdx = trimmed.firstIndex(of: "]") else {
+            return RegisterProfile(technique: trimmed)
+        }
+
+        let header = String(trimmed[trimmed.index(after: trimmed.startIndex)..<closeIdx])
+        let rest = String(trimmed[trimmed.index(after: closeIdx)...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var sceneType: String?
+        var tempo: String?
+        var dialogueDensity: String?
+
+        let normalizedHeader = header
+            .replacingOccurrences(of: "|", with: "｜")
+            .replacingOccurrences(of: ":", with: "：")
+        for part in normalizedHeader.components(separatedBy: "｜") {
+            let kv = part.components(separatedBy: "：")
+            guard kv.count >= 2 else { continue }
+            let key = kv[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let val = kv[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            if key.contains("场景") {
+                if val.contains("动作") || val.contains("打斗") || val.contains("战斗") {
+                    sceneType = "动作"
+                } else if val.contains("对白") || val.contains("对话") {
+                    sceneType = "对白"
+                } else if val.contains("心理") || val.contains("独白") {
+                    sceneType = "心理"
+                } else if val.contains("转场") || val.contains("过渡") {
+                    sceneType = "转场"
+                } else if val.contains("描写") || val.contains("叙述") || val.contains("氛围") {
+                    sceneType = "描写"
+                }
+            } else if key.contains("节奏") {
+                if val.contains("快") { tempo = "快" }
+                else if val.contains("慢") { tempo = "慢" }
+                else if val.contains("中") { tempo = "中" }
+            } else if key.contains("对白") {
+                if val.contains("高") { dialogueDensity = "高" }
+                else if val.contains("低") { dialogueDensity = "低" }
+                else if val.contains("中") { dialogueDensity = "中" }
+            }
+        }
+
+        return RegisterProfile(
+            sceneType: sceneType,
+            tempo: tempo,
+            dialogueDensity: dialogueDensity,
+            technique: rest.isEmpty ? trimmed : rest
+        )
     }
 
     /// 解析反推指令列表；若行数不匹配或为空则按位置安全回退。
@@ -329,7 +306,7 @@ enum StyleDistiller {
                 with: "",
                 options: .regularExpression
             )
-            return String(cleaned.prefix(100))
+            return String(cleaned.prefix(140))
         }
     }
 
@@ -374,30 +351,6 @@ enum StyleDistiller {
             body: body
         )
         return (block, Set(picked.map(\.entry.entryID)))
-    }
-
-    /// 从语料库中挑选最多 `maxPairs` 条「仿写样本」，构造前置对话示范（保留供自检验证）。
-    static func fewShotDialoguePairs(
-        from corpus: [PromptAssembly.Corpus],
-        maxPairs: Int = 5,
-        tokenBudget: Int? = nil,
-        queryText: String? = nil
-    ) -> (messages: [LLMMessage], injectedEntryIDs: Set<String>) {
-        let picked = selectExemplars(
-            from: corpus,
-            maxCount: maxPairs,
-            tokenBudget: tokenBudget,
-            instructionText: nil,
-            queryText: queryText,
-            anchorCentroid: false
-        )
-        var messages: [LLMMessage] = []
-        for item in picked {
-            let prompt = "【文风示范（仅效仿笔法与语感，勿沿用其中人物与剧情）】\n技法要求：\(item.technique)"
-            messages.append(.user(prompt))
-            messages.append(.assistant(item.entry.text))
-        }
-        return (messages, Set(picked.map(\.entry.entryID)))
     }
 
     private static func selectExemplars(
@@ -461,7 +414,8 @@ enum StyleDistiller {
         var usedTokens = 0
 
         for entry in orderedSamples.prefix(maxCount) {
-            let rawTitle = entry.entryName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let profile = parseRegister(from: entry.entryName)
+            let rawTitle = profile.technique
             let isPlaceholder = rawTitle.isEmpty || rawTitle.hasPrefix("原著节选") || rawTitle.hasPrefix("原著范文")
             let technique = isPlaceholder
                 ? "保持本书的句式节奏与描写分寸。"
@@ -479,53 +433,75 @@ enum StyleDistiller {
         return selected
     }
 
+    private static func inferredRequestedSceneType(from keywordSource: String) -> String? {
+        if ["动作", "打斗", "交锋", "搏杀", "追逐", "战斗", "格斗", "刺杀"].contains(where: { keywordSource.contains($0) }) {
+            return "动作"
+        }
+        if ["对话", "对白", "交谈", "争吵", "质问", "谈话", "试探"].contains(where: { keywordSource.contains($0) }) {
+            return "对白"
+        }
+        if ["描写", "景物", "环境", "氛围", "白描", "肖像", "穿行", "赶路", "荒原"].contains(where: { keywordSource.contains($0) }) {
+            return "描写"
+        }
+        if ["心理", "独白", "回忆", "思索"].contains(where: { keywordSource.contains($0) }) {
+            return "心理"
+        }
+        if ["转场", "过渡", "衔接"].contains(where: { keywordSource.contains($0) }) {
+            return "转场"
+        }
+        return nil
+    }
+
     private static func exemplarMatchScore(
         _ entry: PromptAssembly.Corpus,
         queryTokens: Set<String>,
         queryFingerprint: LinguisticFingerprint,
         keywordSource: String
     ) -> Double? {
-        let entryTokens = Set(ManuscriptIndex.tokenize(entry.entryName))
+        let profile = parseRegister(from: entry.entryName)
+        let entryTokens = Set(ManuscriptIndex.tokenize(profile.technique + " " + entry.entryName))
         let overlapCount = queryTokens.intersection(entryTokens).count
         let textFP = analyzeFingerprint(entry.text)
 
         let suppressDialogue = ["减少对话", "少对话", "少写对话", "减少对白", "少对白", "不要对话"]
             .contains { keywordSource.contains($0) }
-        if suppressDialogue && textFP.dialogueRatio > 0.30 {
+        if suppressDialogue && (textFP.dialogueRatio > 0.30 || profile.dialogueDensity == "高" || profile.sceneType == "对白") {
             return nil
         }
 
         let explicitDialogueRequest = ["对话", "对白", "交谈", "争吵", "质问", "谈话"]
             .contains { keywordSource.contains($0) }
-        if !explicitDialogueRequest && textFP.dialogueRatio > 0.65 && overlapCount == 0 {
+        if !explicitDialogueRequest && (textFP.dialogueRatio > 0.65 || profile.dialogueDensity == "高") && overlapCount == 0 {
+            return nil
+        }
+
+        // MUSE §3.3：语域/场景类型明确冲突且无关键词直连时直接返回 nil（宁缺毋滥）。
+        let requestedScene = inferredRequestedSceneType(from: keywordSource)
+        if let requestedScene, let sampleScene = profile.sceneType, requestedScene != sampleScene {
             return nil
         }
 
         let dialogueSim = 1.0 - min(1.0, abs(queryFingerprint.dialogueRatio - textFP.dialogueRatio) * 2.0)
-        if overlapCount == 0 && dialogueSim < 0.35 {
+        if overlapCount == 0 && dialogueSim < 0.35 && (requestedScene == nil || requestedScene != profile.sceneType) {
             return nil
         }
         let shortRatioSim = 1.0 - min(
             1.0,
             abs(queryFingerprint.shortSentenceRatio - textFP.shortSentenceRatio) * 2.0
         )
-        let sentenceSim = 1.0 - min(
-            1.0,
-            abs(queryFingerprint.averageSentenceLength - textFP.averageSentenceLength) / 25.0
-        )
-        let paragraphSim = 1.0 - min(
-            1.0,
-            abs(queryFingerprint.averageParagraphLength - textFP.averageParagraphLength) / 120.0
-        )
 
         var registerBonus = 0.0
-        let label = entry.entryName
-        if explicitDialogueRequest && (label.contains("对白") || label.contains("对话")) {
-            registerBonus += 0.4
-        }
-        if queryFingerprint.shortSentenceRatio >= 0.45
-            && (label.contains("短句") || label.contains("节奏") || label.contains("动作")) {
-            registerBonus += 0.4
+        if let requestedScene, let sampleScene = profile.sceneType, requestedScene == sampleScene {
+            registerBonus += 0.8
+        } else {
+            let label = entry.entryName
+            if explicitDialogueRequest && (label.contains("对白") || label.contains("对话")) {
+                registerBonus += 0.4
+            }
+            if queryFingerprint.shortSentenceRatio >= 0.45
+                && (label.contains("短句") || label.contains("节奏") || label.contains("动作")) {
+                registerBonus += 0.4
+            }
         }
         let dialogueExcessPenalty: Double
         if !explicitDialogueRequest && textFP.dialogueRatio > 0.45 {
@@ -538,8 +514,6 @@ enum StyleDistiller {
         return Double(overlapCount) * 1.5
             + dialogueSim * 0.6
             + shortRatioSim * 0.3
-            + sentenceSim * 0.25
-            + paragraphSim * 0.15
             + registerBonus
             + dialogueExcessPenalty
     }

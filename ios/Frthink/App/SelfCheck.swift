@@ -2300,31 +2300,43 @@ enum SelfCheck {
                 "超预算时动态事件分层应保留近期/关联事件全貌并压缩远期无关事件"
             )
 
-            // 深度蒸馏器：语言统计、成段节选抽取与 Few-Shot 对话示范构造。
+            // 深度蒸馏器：语言统计、成段节选抽取、语域标签解析与显式隔离参考块构造。
             let sampleProse = String(repeating: "风过长街。他按住刀柄，没有回头。“进来。”门后有人低声道。\n", count: 15)
             let fp = StyleDistiller.analyzeFingerprint(sampleProse)
             let exemplars = StyleDistiller.selectExemplarPassages(from: sampleProse)
             let shortSingleSentence = StyleDistiller.selectExemplarPassages(from: "他推开门，看见走廊尽头站着一个人。")
-            let fewShot = StyleDistiller.fewShotDialoguePairs(from: [
-                PromptAssembly.Corpus(
-                    libraryID: "lib1",
-                    libraryName: "本书节选",
-                    entryID: "e1",
-                    entryName: "雨夜长街对峙",
-                    category: "仿写样本",
-                    text: "风过长街。他按住刀柄，没有回头。"
-                ),
-            ])
-            try expect(
-                fp.averageSentenceLength > 0 && fp.dialogueRatio > 0 && !exemplars.isEmpty && shortSingleSentence.isEmpty,
-                "深度蒸馏器应正确统计语言特征、抽取成段节选，并忽略单句碎片"
+            let parsedReg = StyleDistiller.parseRegister(from: "[场景:动作｜节奏:快｜对白:低] 短句交锋推进节奏")
+            let styleRef = StyleDistiller.styleReferenceBlock(
+                from: [
+                    PromptAssembly.Corpus(
+                        libraryID: "lib1",
+                        libraryName: "本书节选",
+                        entryID: "e1",
+                        entryName: "[场景:动作｜节奏:快｜对白:低] 雨夜长街对峙短句控制",
+                        category: "仿写样本",
+                        text: "风过长街。他按住刀柄，没有回头。"
+                    ),
+                ],
+                maxSamples: 1,
+                instructionText: "写一段雨夜动作交锋",
+                queryText: "雨夜长街。"
             )
             try expect(
-                fewShot.messages.count == 2
-                    && fewShot.messages[0].role == "user"
-                    && fewShot.messages[1].role == "assistant"
-                    && fewShot.injectedEntryIDs == ["e1"],
-                "Few-Shot 示范注入应生成成对 user/assistant 对话轮次并去重"
+                fp.averageSentenceLength > 0
+                    && fp.dialogueRatio > 0
+                    && !exemplars.isEmpty
+                    && shortSingleSentence.isEmpty
+                    && parsedReg.sceneType == "动作"
+                    && parsedReg.tempo == "快"
+                    && parsedReg.dialogueDensity == "低"
+                    && parsedReg.technique == "短句交锋推进节奏",
+                "深度蒸馏器应正确统计语言特征、等距抽取成段节选，并解析结构化语域标签"
+            )
+            try expect(
+                styleRef.block?.body.contains("<style_reference_only") == true
+                    && styleRef.block?.body.contains("雨夜长街对峙短句控制") == true
+                    && styleRef.injectedEntryIDs == ["e1"],
+                "文风参考块应使用显式隔离标签并注入解析后的纯技法指令"
             )
             var isolatedSettings = AppSettings()
             isolatedSettings.corpusEnabled = true
