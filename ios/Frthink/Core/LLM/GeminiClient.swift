@@ -6,6 +6,37 @@ import Foundation
 /// `{base}/v1beta/models/{model}:generateContent`、`{base}/v1beta/models`。
 /// 鉴权：`x-goog-api-key: <key>`。
 final class GeminiClient: LLMClient {
+    private final class ExplicitCacheRegistry: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [String: (name: String, expiresAt: Date)] = [:]
+
+        func get(key: String) -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let item = entries[key] else { return nil }
+            guard item.expiresAt > Date().addingTimeInterval(60) else {
+                entries.removeValue(forKey: key)
+                return nil
+            }
+            return item.name
+        }
+
+        func set(key: String, name: String, ttlSeconds: TimeInterval = 840) {
+            lock.lock()
+            entries[key] = (name: name, expiresAt: Date().addingTimeInterval(ttlSeconds))
+            lock.unlock()
+        }
+
+        func remove(key: String) {
+            lock.lock()
+            entries.removeValue(forKey: key)
+            lock.unlock()
+        }
+    }
+
+    private static let cacheRegistry = ExplicitCacheRegistry()
+    private static let explicitCacheMinTokens = 4_096
+
     private let baseURL: String
     private let apiKey: String
     private let provider: ProviderSetting
@@ -64,17 +95,37 @@ final class GeminiClient: LLMClient {
         return request
     }
 
-    // MARK: - 请求体组装
+    // MARK: - 请求体组装与显式缓存
 
-    static func requestBody(
-        for request: LLMRequest,
-        providerLevel: ThinkingLevel
-    ) -> Data {
-        let systemText = request.messages
+    private static func systemPromptText(for request: LLMRequest) -> String {
+        request.messages
             .filter { $0.role == "system" }
             .map(\.content)
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
+    }
+
+    private static func toolDeclarations(for request: LLMRequest) -> [[String: Any]] {
+        (request.tools ?? []).compactMap { tool in
+            guard let data = tool.parametersJSON.data(using: .utf8),
+                  let params = try? JSONSerialization.jsonObject(with: data) else {
+                return nil
+            }
+            return [
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": params,
+            ]
+        }
+    }
+
+    static func requestBody(
+        for request: LLMRequest,
+        providerLevel: ThinkingLevel,
+        cachedContentName: String? = nil
+    ) -> Data {
+        let systemText = systemPromptText(for: request)
+        let declarations = toolDeclarations(for: request)
 
         var contents: [[String: Any]] = []
         var toolNamesByCallID: [String: String] = [:]
@@ -163,36 +214,84 @@ final class GeminiClient: LLMClient {
             "contents": contents,
             "generationConfig": generationConfig,
         ]
-        if !systemText.isEmpty {
-            body["systemInstruction"] = [
-                "parts": [["text": systemText]],
-            ]
-        }
-
-        let declarations: [[String: Any]] = (request.tools ?? []).compactMap { tool in
-            guard let data = tool.parametersJSON.data(using: .utf8),
-                  let params = try? JSONSerialization.jsonObject(with: data) else {
-                return nil
-            }
-            return [
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": params,
-            ]
-        }
-        if !declarations.isEmpty {
-            body["tools"] = [["functionDeclarations": declarations]]
-            if let toolName = request.toolChoiceName, !toolName.isEmpty {
-                body["toolConfig"] = [
-                    "functionCallingConfig": [
-                        "mode": "ANY",
-                        "allowedFunctionNames": [toolName],
-                    ],
+        if let cachedContentName, !cachedContentName.isEmpty {
+            // Gemini REST 规范：使用显式 cachedContent 时，不可重复发送已固化的 systemInstruction 与 tools。
+            body["cachedContent"] = cachedContentName
+        } else {
+            if !systemText.isEmpty {
+                body["systemInstruction"] = [
+                    "parts": [["text": systemText]],
                 ]
+            }
+            if !declarations.isEmpty {
+                body["tools"] = [["functionDeclarations": declarations]]
+                if let toolName = request.toolChoiceName, !toolName.isEmpty {
+                    body["toolConfig"] = [
+                        "functionCallingConfig": [
+                            "mode": "ANY",
+                            "allowedFunctionNames": [toolName],
+                        ],
+                    ]
+                }
             }
         }
 
         return (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+    }
+
+    private struct CachedContentResponse: Decodable {
+        let name: String?
+    }
+
+    private func resolveExplicitCacheName(for request: LLMRequest) async -> (key: String, name: String)? {
+        guard request.toolChoiceName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true else {
+            return nil
+        }
+        let systemText = Self.systemPromptText(for: request)
+        guard !systemText.isEmpty else { return nil }
+        let declarations = Self.toolDeclarations(for: request)
+        let toolsJSON: String
+        if !declarations.isEmpty,
+           let data = try? JSONSerialization.data(withJSONObject: declarations, options: [.sortedKeys]),
+           let str = String(data: data, encoding: .utf8) {
+            toolsJSON = str
+        } else {
+            toolsJSON = ""
+        }
+        let estimatedStaticTokens = TokenEstimator.estimate(systemText)
+            + (toolsJSON.isEmpty ? 0 : TokenEstimator.estimate(toolsJSON))
+        guard estimatedStaticTokens >= Self.explicitCacheMinTokens else {
+            return nil
+        }
+
+        let normalizedBase = Self.normalizedBaseURL(baseURL)
+        let cacheKey = SummaryKey.sha256Hex("\(normalizedBase)|\(request.model)|\(systemText)|\(toolsJSON)")
+        if let existing = Self.cacheRegistry.get(key: cacheKey) {
+            return (cacheKey, existing)
+        }
+
+        var createBody: [String: Any] = [
+            "model": "models/\(request.model)",
+            "ttl": "900s",
+            "systemInstruction": [
+                "parts": [["text": systemText]],
+            ],
+        ]
+        if !declarations.isEmpty {
+            createBody["tools"] = [["functionDeclarations": declarations]]
+        }
+        guard let payload = try? JSONSerialization.data(withJSONObject: createBody),
+              let urlRequest = try? makeRequest(v1betaSubpath: "/cachedContents", body: payload),
+              let data = try? await performData(urlRequest),
+              let created = try? JSONDecoder().decode(CachedContentResponse.self, from: data),
+              let name = created.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty
+        else {
+            return nil
+        }
+
+        Self.cacheRegistry.set(key: cacheKey, name: name)
+        return (cacheKey, name)
     }
 
     private static func effectiveThinkingLevel(
@@ -231,14 +330,40 @@ final class GeminiClient: LLMClient {
             var req = request
             req.stream = true
             let encodedModel = req.model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? req.model
-            let urlRequest = try makeRequest(
-                v1betaSubpath: "/models/\(encodedModel):streamGenerateContent?alt=sse",
-                body: Self.requestBody(for: req, providerLevel: provider.effectiveThinkingLevel),
-                accept: "text/event-stream",
-                attemptId: req.attemptId
-            )
-            let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
-            try await consumeStream(bytes, request: req, continuation: continuation)
+            let explicitCache = await resolveExplicitCacheName(for: req)
+            do {
+                let urlRequest = try makeRequest(
+                    v1betaSubpath: "/models/\(encodedModel):streamGenerateContent?alt=sse",
+                    body: Self.requestBody(
+                        for: req,
+                        providerLevel: provider.effectiveThinkingLevel,
+                        cachedContentName: explicitCache?.name
+                    ),
+                    accept: "text/event-stream",
+                    attemptId: req.attemptId
+                )
+                let bytes = try await LLMHTTPTransport.openBytes(urlRequest, session: session)
+                try await consumeStream(bytes, request: req, continuation: continuation)
+            } catch let error as LLMError {
+                if let explicitCache,
+                   case .http(let status, _) = error,
+                   status == 400 || status == 404 {
+                    Self.cacheRegistry.remove(key: explicitCache.key)
+                    let fallbackRequest = try makeRequest(
+                        v1betaSubpath: "/models/\(encodedModel):streamGenerateContent?alt=sse",
+                        body: Self.requestBody(
+                            for: req,
+                            providerLevel: provider.effectiveThinkingLevel
+                        ),
+                        accept: "text/event-stream",
+                        attemptId: req.attemptId
+                    )
+                    let bytes = try await LLMHTTPTransport.openBytes(fallbackRequest, session: session)
+                    try await consumeStream(bytes, request: req, continuation: continuation)
+                } else {
+                    throw error
+                }
+            }
         }
     }
 
@@ -443,11 +568,32 @@ final class GeminiClient: LLMClient {
         var req = request
         req.stream = false
         let encodedModel = req.model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? req.model
-        let urlRequest = try makeRequest(
-            v1betaSubpath: "/models/\(encodedModel):generateContent",
-            body: Self.requestBody(for: req, providerLevel: provider.effectiveThinkingLevel)
-        )
-        let data = try await performData(urlRequest)
+        let explicitCache = await resolveExplicitCacheName(for: req)
+        let data: Data
+        do {
+            let urlRequest = try makeRequest(
+                v1betaSubpath: "/models/\(encodedModel):generateContent",
+                body: Self.requestBody(
+                    for: req,
+                    providerLevel: provider.effectiveThinkingLevel,
+                    cachedContentName: explicitCache?.name
+                )
+            )
+            data = try await performData(urlRequest)
+        } catch let error as LLMError {
+            if let explicitCache,
+               case .http(let status, _) = error,
+               status == 400 || status == 404 {
+                Self.cacheRegistry.remove(key: explicitCache.key)
+                let fallbackRequest = try makeRequest(
+                    v1betaSubpath: "/models/\(encodedModel):generateContent",
+                    body: Self.requestBody(for: req, providerLevel: provider.effectiveThinkingLevel)
+                )
+                data = try await performData(fallbackRequest)
+            } else {
+                throw error
+            }
+        }
         let decoded: GenerateResponse
         do {
             decoded = try JSONDecoder().decode(GenerateResponse.self, from: data)

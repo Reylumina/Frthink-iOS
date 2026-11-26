@@ -123,6 +123,7 @@ struct WorldRulesHubView: View {
                 session: session,
                 showingAddSheet: $showingAddRuleSheet
             )
+            crossBookBaselineSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -135,6 +136,30 @@ struct WorldRulesHubView: View {
         }
         .task(id: "\(session.project.id)-\(session.manuscriptCharacterCount)-\(session.bodyPageCount)") {
             fingerprint = await StyleFingerprintLoader.load(for: session, fileStore: store.fileStore)
+        }
+    }
+
+    private var crossBookBaselineSection: some View {
+        let enabledSkillCount = store.settings.skills.filter(\.enabled).count
+        let hasPreset = !store.settings.globalPreset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasFlavor = !store.settings.aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let detail = "已启 \(enabledSkillCount) 项技能"
+            + (hasPreset ? " · 已设预设" : "")
+            + (hasFlavor ? " · 已设去 AI 味" : "")
+        return Section {
+            NavigationLink {
+                PromptManagerPane(store: store, session: session)
+            } label: {
+                SettingsLabelRow(
+                    title: "全局写作基准与技能",
+                    detail: detail
+                )
+            }
+        } header: {
+            AppSectionHeader(title: "跨书写作基准")
+        } footer: {
+            Text("统一管理跨书预设、可开关技能、去 AI 味规范与全局提示词预览。")
+                .font(Theme.metadata)
         }
     }
 

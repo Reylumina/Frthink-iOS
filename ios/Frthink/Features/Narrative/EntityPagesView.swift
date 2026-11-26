@@ -113,10 +113,35 @@ struct EntityPagesView: View {
                 }
             }
             entitiesSections
+            sharedUniverseSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .keyboardDismissOnScroll()
+    }
+
+    private var sharedUniverseSection: some View {
+        let enabledCount = store.settings.enabledUniverseEntries(
+            for: session.payload.enabledUniverseEntryIDs
+        ).count
+        let totalCount = store.settings.universeEntries.count
+        let detail = totalCount == 0 ? "暂无词条" : "本书启用 \(enabledCount) / \(totalCount)"
+        return Section {
+            NavigationLink {
+                UniversePane(store: store, session: session)
+                    .navigationTitle("共享宇宙")
+            } label: {
+                SettingsLabelRow(
+                    title: "共享宇宙世界书",
+                    detail: detail
+                )
+            }
+        } header: {
+            AppSectionHeader(title: "跨书共享世界观")
+        } footer: {
+            Text("本书独立档案与跨书共享世界观词条统一在此管理；词条会在生成时按需注入静态前缀。")
+                .font(Theme.metadata)
+        }
     }
 
     private var kindSelectionBinding: Binding<EntityKind?> {
