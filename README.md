@@ -45,10 +45,10 @@ Frthink 在保留原版创作流、提示词体系与 `.frthink` 存档兼容的
 
 世界页分为「档案 · 剧情 · 规则」三栏：
 
-- **档案**：按人物、地点、物件、世界观四类管理独立档案页。人物保留声线与私有认知边界；世界观区分「按关键词触发」与「始终生效」，不与戏外写作规则混淆。详情页展示分类圆形徽章、中文属性标签（如「所在」「持有」「对某人」）、关联关键事件与冲突确认。
+- **档案**：按人物、地点、物件、世界观四类管理独立档案页，列表底部直连跨书「共享宇宙世界书」。人物保留声线与私有认知边界；世界观区分「按关键词触发」与「始终生效」，不与戏外写作规则混淆。详情页展示分类圆形徽章、中文属性标签（如「所在」「持有」「对某人」）、关联关键事件与冲突确认。
 - **剧情时间线与关键事件**：以单轨主路径线性展示幕次规划与关键事件（按故事线分组记录起因、经过、结果）；平行试写与分支稿通过书库「项目级分支」隔离正文与对话。
 - **伏笔追踪与分层摘要**：伏笔按 `潜伏 → 待回收 → 已回收 / 已放弃` 流转，未决状态展示触发时机与原文埋设依据；已发生节拍逐级归纳为近期场次卡、阶段剧情线与卷纲摘要。
-- **写作规则**：管理全局或指定档案作用域的写作要求与禁忌，生成时逐字注入 `Tier 2`，不经摘要改写。
+- **写作规则**：管理全局或指定档案作用域的写作要求与禁忌，生成时逐字注入 `Tier 2`，不经摘要改写；规则页底部直连跨书「全局写作基准与技能」。
 - **文风提炼、行文观感与世界核查**：
   - **文风提炼**：等距抽取代表性样章并由模型产出 `[场景｜节奏｜对白]` 结构化语域标签与纯写作技法（零人名剧情泄露）；续写时以显式隔离协议 `<style_reference_only>` 注入，并严格执行语域与对白密度错配门控（宁缺毋滥）。
   - **行文观感**：本地检测旁白中空泛修饰、重复指代、套路转折、旁白破折号与连续裸代词五项节奏指标（自动跳过引号内人物对白），支持切换「文学 / 正剧」与「网文 / 快节奏」两档尺度；点击片段可直接调起带上下文的选区改写，应用后自动重检。
@@ -64,7 +64,7 @@ Frthink 在保留原版创作流、提示词体系与 `.frthink` 存档兼容的
 |---|---|---|
 | DeepSeek | `https://api.deepseek.com` | 支持 `deepseek-chat` / `deepseek-reasoner`、原生思维链分流与 `prompt_cache_hit_tokens` 观测 |
 | Anthropic | `https://api.anthropic.com` | 原生 `/v1/messages` 协议，支持 Extended Thinking、Prompt Caching 与 `cache_read_input_tokens` 观测 |
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | 原生 REST 协议，支持 `thinkingConfig`、工具调用与 `cachedContentTokenCount` 观测 |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | 原生 REST 协议，支持 `thinkingConfig`、工具调用、显式 `cachedContents`（自动回退隐式缓存）与 `cachedContentTokenCount` 观测 |
 | OpenRouter | `https://openrouter.ai/api/v1` | 支持统一 `reasoning` 参数、可选 `min_p` 采样参数透传与 `cached_tokens` 观测 |
 | OpenAI 兼容 | 自定义或内置预设 | 内置 Kimi、GLM、Qwen、豆包、混元、MiniMax、OpenCode Go、Ollama Cloud、Grok、Mistral 等预设，支持 `cached_tokens` 观测 |
 

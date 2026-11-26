@@ -32,7 +32,8 @@ ios/
 struct Project                     // id, title, synopsis, updatedAt, revision,
                                    // coverImagePayload(String?), branchRootId,
                                    // branchOrder, trashedAt(Date?)
-struct ProjectPayload              // chapters, messages, world, continuationAnchor, composerDraft 等
+struct ProjectPayload              // chapters, messages, world, continuationAnchor, sceneBoundaryOffset,
+                                   // requestSnapshots, composerDraft 等
                                    // 正文分页独立存储在 FileStore（body.pages/），通过 session.manuscript / editorText 访问
 struct Chapter                     // id, title, location
 
@@ -104,19 +105,21 @@ struct AppSettings                 // providers[], activeProviderID, corpusEnabl
 ### 网络
 
 ```swift
-struct LLMMessage  { role, content; .system()/.user()/.assistant() 便捷构造 }
-struct LLMRequest  { model, messages, stream, temperature, maxTokens, topP }
+struct LLMMessage  { role, content, reasoningContent, toolCalls, toolCallID; .system()/.user()/.assistant()/.toolResult() }
+struct LLMRequest  { model, messages, stream, temperature, maxTokens, thinking, failOnLength, tools, toolChoiceName, parallelToolCalls, minP }
 
 enum LLMStreamEvent { case delta(String), reasoning(String), toolCalls([LLMToolCall]), finished(reason: String?) }
-enum LLMError: LocalizedError  // .notConfigured/.missingAPIKey/.badURL/.http/.decoding/.cancelled/.emptyResponse/.truncated
+enum LLMError: LocalizedError  // .notConfigured/.missingAPIKey/.badURL/.http/.decoding/.cancelled/.emptyResponse/.truncated/.streamError
 
 protocol LLMClient {
     func stream(_ request: LLMRequest) -> AsyncThrowingStream<LLMStreamEvent, Error>
     func complete(_ request: LLMRequest) async throws -> String
+    func completeToolCall(_ request: LLMRequest) async throws -> [LLMToolCall]
     func listModels() async throws -> [String]
     func testConnection() async throws
 }
 
+enum LLMTokenUsage // .resolveTotal(...) / .recordCacheObservation(...) / .currentCacheStats()
 enum TokenEstimator   // .estimate(String) / .estimate([LLMMessage]) / .contextWindow(for:) / .trimTail
 ```
 
@@ -185,10 +188,13 @@ ToastView / ErrorBanner               // 已在 RootView 中接入，业务层�
 | 模块 | 文件路径 | 入口视图 |
 |---|---|---|
 | library | `Features/Library/` | `LibraryView(store: AppStore, onOpen: (Project) -> Void)` |
-| writer | `Features/Writer/` | `WriterPane(session: ProjectSession)`（辅视图在 `WriterSupportViews.swift` 等） |
+| writer | `Features/Writer/` | `WriterPane(session: ProjectSession)`（辅视图在 `WriterSupportViews.swift`、`ContextPruningSheet.swift` 等） |
 | world | `Features/World/` | `WorldPane(session: ProjectSession)` |
-| reader / translation | `Features/Translation/` | `ReaderPane(session: ProjectSession)`、`TranslationPane(session: ProjectSession)` |
+| narrative | `Features/Narrative/` | `EntityPagesView(session:)`、`StoryGraphView(session:)`、`DreamingAuditView(session:)` |
+| reader | `Features/Reader/` | `ReaderPane(session: ProjectSession)` |
+| translation | `Features/Translation/` | `TranslationPane(session: ProjectSession)` |
 | universe | `Features/Universe/` | `UniversePane(store: AppStore, session: ProjectSession?)` |
+| prompt manager | `Features/PromptManager/` | `PromptManagerPane(store: AppStore, session: ProjectSession?)` |
 | settings | `Features/Settings/` | `SettingsView(store: AppStore)` |
 
 `LibraryView` 中需提供工具栏入口以呈现 `SettingsView`（可通过 sheet 或 navigationDestination 实现）。`onOpen` 回调由 `RootView` 统一处理导航路由。
