@@ -1,5 +1,13 @@
 import Foundation
 
+/// 世界流程里需要把原始响应交给 UI 展示时用的错误。
+struct WorldRunError: LocalizedError {
+    let message: String
+    var rawResponse: String? = nil
+
+    var errorDescription: String? { message }
+}
+
 /// 世界任务共用的一次性请求上下文：当前服务商、客户端与统一请求参数。
 ///
 /// 统一构建 `LLMRequest` 与获取 activeProvider，各工作流专注于上下文消息与截断控制。
