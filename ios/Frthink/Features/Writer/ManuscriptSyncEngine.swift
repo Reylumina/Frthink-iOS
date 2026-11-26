@@ -230,7 +230,7 @@ enum ManuscriptSyncEngine {
                 quote: String(trimmedChunk.prefix(80)),
                 paragraphText: trimmedChunk
             )
-            let sceneSummary = updatedDelta.pyramidPatch?.appendedSceneCards.first?
+            let sceneSummary = updatedDelta.pyramidPatch?.addedRecentSceneCards.first?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let snippet = NarrativeCommitCoordinator.compactLineSnippet(chunk.text, limit: 28)
             let summaryText = !sceneSummary.isEmpty ? sceneSummary : (snippet.isEmpty ? "同步正文片段" : snippet)
