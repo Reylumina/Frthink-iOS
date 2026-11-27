@@ -216,7 +216,7 @@ enum ManuscriptSyncEngine {
             let nodeID = "sync_\(UUID().uuidString)"
             let pageIndex = max(0, chunk.utf16Start / pageSize)
 
-            // 阶段 1：四类档案与精确动态事实专精
+            // 阶段 1：抽取四类档案与精确动态事实
             onProgress?(
                 ManuscriptSyncProgress(
                     completedChunks: index,
@@ -268,7 +268,7 @@ enum ManuscriptSyncEngine {
                 workingWorkspace.applyLedgerDelta(stage1Delta, sourceNodeID: nodeID)
             }
 
-            // 阶段 2：基于已定型实体专精提取剧情事件、伏笔与角色认知盲区
+            // 阶段 2：基于已定型实体抽取剧情事件、伏笔与角色认知盲区
             onProgress?(
                 ManuscriptSyncProgress(
                     completedChunks: index,

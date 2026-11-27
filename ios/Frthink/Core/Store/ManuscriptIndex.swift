@@ -408,7 +408,7 @@ enum ManuscriptIndex {
         return windows
     }
 
-    /// 无索引直查分页原稿：严格在匹配与提取上下文之前按 `causalLimit` 截断，杜绝后续章节剧透泄露。
+    /// 无索引直查分页原稿：在匹配与提取上下文前按 `causalLimit` 截断，避免泄露后续章节正文。
     static func grepManuscript(
         pages: [String],
         pattern: String,

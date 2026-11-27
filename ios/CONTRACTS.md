@@ -132,7 +132,7 @@ let request = LLMRequest(
     model: provider.model,
     messages: PromptComposer.writingMessages(
         world: session.payload.world,
-        manuscript: session.payload.manuscript,
+        manuscript: session.manuscript,
         history: history,
         userInstruction: instruction
     ),

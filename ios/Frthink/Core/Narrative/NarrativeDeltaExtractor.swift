@@ -202,7 +202,7 @@ enum NarrativeDeltaExtractor {
         )
     }
 
-    /// 阶段 2 专精（剧情事件、角色认知与伏笔）：基于已定型的实体列表只抽取剧情推进、信息差与伏笔迁跃。
+    /// 阶段 2（剧情事件、角色认知与伏笔）：基于已定型的实体列表抽取剧情推进、信息差与伏笔状态变更。
     static func buildPlotExtractionPayload(
         excerpt: String,
         leadingContext: String = "",
