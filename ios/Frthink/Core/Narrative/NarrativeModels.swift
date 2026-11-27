@@ -380,6 +380,16 @@ enum ThreadLifecycle: String, Codable, Hashable {
     var isTerminal: Bool {
         self == .satisfied || self == .invalidated
     }
+
+    var displayName: String {
+        switch self {
+        case .pending: return "埋设待发"
+        case .ready: return "待回收"
+        case .enacted: return "推进中"
+        case .satisfied: return "已回收"
+        case .invalidated: return "已作废"
+        }
+    }
 }
 
 /// 伏笔触发模式：`.once` 在进入 `.enacted` 后锁定，避免被重复兑现。
