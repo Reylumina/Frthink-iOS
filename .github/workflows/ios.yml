@@ -70,14 +70,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -R "$APP" "$RUNNER_TEMP/Payload/"
           cd "$RUNNER_TEMP"
-          /usr/bin/zip -qry fr_loom-unsigned.ipa Payload
-          ls -lh fr_loom-unsigned.ipa
+          /usr/bin/zip -qry FrthinkLoom-unsigned.ipa Payload
+          ls -lh FrthinkLoom-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: fr_loom-unsigned-ipa
-          path: ${{ runner.temp }}/fr_loom-unsigned.ipa
+          name: FrthinkLoom-unsigned-ipa
+          path: ${{ runner.temp }}/FrthinkLoom-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
