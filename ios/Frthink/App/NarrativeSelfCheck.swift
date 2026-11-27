@@ -5000,7 +5000,7 @@ extension SelfCheck {
             let dirtyPayload = ProjectPayload(
                 manuscript: "第一章 雨夜。\n\n林昭推门而入。",
                 chapters: [chapter],
-                messages: [ChatMessage(role: .user, variants: ["续写"])],
+                messages: [ChatMessage(role: .user, content: "续写")],
                 world: WorldBook(
                     styleTemplate: "旧仿写模板",
                     longTermRules: "旧规则",
