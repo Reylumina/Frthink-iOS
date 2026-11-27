@@ -53,8 +53,8 @@
 
   <!-- Step 4 -->
   <rect x="854" y="62" width="228" height="106" class="card-emerald"/>
-  <text x="868" y="86" class="title">4. 散文体检与采纳提交</text>
-  <text x="868" y="108" class="desc">本地检测旁白套话密度（跳过对白）</text>
+  <text x="868" y="86" class="title">4. 行文观感与采纳提交</text>
+  <text x="868" y="108" class="desc">本地检测旁白节奏与套话（跳过对白）</text>
   <text x="868" y="126" class="desc">多变体左右切换对比</text>
   <text x="868" y="144" class="desc">点击插入或追加正文才触发状态更新</text>
 
@@ -70,23 +70,23 @@
   <!-- Step 8 -->
   <rect x="38" y="258" width="234" height="106" class="card-slate"/>
   <text x="52" y="282" class="title">8. 推演与世界核查</text>
-  <text x="52" y="304" class="desc">按需推演 2–3 条后续剧情走向</text>
+  <text x="52" y="304" class="desc">依全局预设与人设推演 2–3 条走向</text>
   <text x="52" y="322" class="desc">查已知情过时认知（护盲区）与伏笔</text>
   <text x="52" y="340" class="desc">逐级归纳场次卡、阶段剧情线与卷纲</text>
 
   <!-- Step 7 -->
   <rect x="302" y="258" width="246" height="106" class="card-emerald"/>
-  <text x="316" y="282" class="title">7. 状态机更新</text>
+  <text x="316" y="282" class="title">7. 状态机更新与终态整理</text>
   <text x="316" y="304" class="desc">按权威等级更新事实、认知与伏笔</text>
-  <text x="316" y="322" class="desc">更新人物、地点、物件与世界观档案</text>
-  <text x="316" y="340" class="desc">同步更新关键事件与自动换场边界</text>
+  <text x="316" y="322" class="desc">changed 筛选与快照替换防重复叠加</text>
+  <text x="316" y="340" class="desc">全书同步后条件触发终态档案整理</text>
 
   <!-- Step 6 -->
   <rect x="578" y="258" width="246" height="106" class="card-indigo"/>
   <text x="592" y="282" class="title">6. 单步增量抽取</text>
   <text x="592" y="304" class="desc">后台抽取本段新增事实与转场信号</text>
-  <text x="592" y="322" class="desc">原文逐字引用门控，未命中拒绝入账</text>
-  <text x="592" y="340" class="desc">自动识别新出场实体并建档去重</text>
+  <text x="592" y="322" class="desc">原文逐字引用校验，未命中拒绝入账</text>
+  <text x="592" y="340" class="desc">规范槽位时间线覆写与旧近况撤回</text>
 
   <!-- Step 5 -->
   <rect x="854" y="258" width="228" height="106" class="card-slate"/>

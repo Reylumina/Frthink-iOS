@@ -32,8 +32,8 @@
 
   <rect x="38" y="220" width="628" height="72" class="tier2"/>
   <text x="54" y="243" class="title">Tier 2 · 尾部动态工作区（紧贴最新指令）</text>
-  <text x="54" y="264" class="desc">全书卷纲与目录索引（BOOK_INDEX）+ 逐字规则 + 在场实体与一跳实体 + POV 盲区硬隔离</text>
-  <text x="54" y="281" class="desc">MUSE 语域门控文风范例（宁缺毋滥）+ 场次正文窗口（2K/6K/12K，含换场防回流）</text>
+  <text x="54" y="264" class="desc">全书卷纲与目录（有工具时 ≤80 行）+ 逐字规则 + 在场/一跳实体 + POV 盲区隔离</text>
+  <text x="54" y="281" class="desc">语域匹配文风范例（不匹配跳过）+ 场次正文窗口（2K/6K/12K，含换场防回流）</text>
 
   <!-- Right Panel: 只读工具与本地回退 -->
   <rect x="704" y="18" width="396" height="292" class="panel"/>
