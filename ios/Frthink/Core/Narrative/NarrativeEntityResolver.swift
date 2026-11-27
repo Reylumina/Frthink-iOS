@@ -242,16 +242,16 @@ enum NarrativeEntityResolver {
 
             let nameKey = NarrativeEntityResolver.normalizeName(page.name)
             if !nameKey.isEmpty {
-                appendUnique(page, into: &byNormalizedName[page.kind, default: [:]][nameKey, default: []])
-                appendUnique(page, into: &globalByNormalizedName[nameKey, default: []])
+                Self.appendUnique(page, into: &byNormalizedName[page.kind, default: [:]][nameKey, default: []])
+                Self.appendUnique(page, into: &globalByNormalizedName[nameKey, default: []])
             }
             for alias in page.aliases {
                 let aliasKey = NarrativeEntityResolver.normalizeName(alias)
                 guard !aliasKey.isEmpty,
                       aliasKey != nameKey,
                       !NarrativeEntityResolver.isGenericRoleTerm(alias) else { continue }
-                appendUnique(page, into: &byNormalizedAlias[page.kind, default: [:]][aliasKey, default: []])
-                appendUnique(page, into: &globalByNormalizedAlias[aliasKey, default: []])
+                Self.appendUnique(page, into: &byNormalizedAlias[page.kind, default: [:]][aliasKey, default: []])
+                Self.appendUnique(page, into: &globalByNormalizedAlias[aliasKey, default: []])
             }
         }
 
@@ -364,7 +364,7 @@ enum NarrativeEntityResolver {
             return .notFound
         }
 
-        private mutating func appendUnique(_ page: EntityPage, into bucket: inout [EntityPage]) {
+        private static func appendUnique(_ page: EntityPage, into bucket: inout [EntityPage]) {
             if let existingIndex = bucket.firstIndex(where: { $0.id == page.id }) {
                 bucket[existingIndex] = page
             } else {
