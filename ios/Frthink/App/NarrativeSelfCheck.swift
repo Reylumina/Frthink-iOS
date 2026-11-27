@@ -809,11 +809,11 @@ extension SelfCheck {
                 plantedAtNodeID: "root",
                 updatedAtNodeID: "root"
             )
-            let messages = NarrativeDeltaExtractor.buildExtractionMessages(
+            let messages = NarrativeDeltaExtractor.buildExtractionPayload(
                 excerpt: excerpt,
                 knownEntities: [lin],
                 activeThreads: [thread]
-            )
+            ).messages
             try expect(messages.count == 2 && messages[0].role == "system", "增量抽取消息应包含系统与用户两段")
 
             let rawResponse = """
@@ -1848,6 +1848,9 @@ extension SelfCheck {
                     summary: "码头接头",
                     manuscriptAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 8, quote: "老码头停着无灯乌篷"),
                     delta: PlotNodeDelta(
+                        entityPageUpserts: [
+                            EntityPage(id: "e_lin", kind: .character, name: "林昭", summary: "码头来客")
+                        ],
                         factEvents: [
                             WorldFactEvent(
                                 entityID: "e_lin",
@@ -2168,6 +2171,9 @@ extension SelfCheck {
                     manuscriptAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 4, quote: "雨落石阶"),
                     sourceMessageID: "msg_ai_1",
                     delta: PlotNodeDelta(
+                        entityPageUpserts: [
+                            EntityPage(id: "char_lin", kind: .character, name: "林昭")
+                        ],
                         factEvents: [
                             WorldFactEvent(
                                 entityID: "char_lin",
@@ -2283,7 +2289,8 @@ extension SelfCheck {
                     && byKind[.location]?.count == 1
                     && byKind[.artifact]?.count == 1
                     && byKind[.lore]?.count == 1
-                    && mergedLin?.summary == "发现暗格铜匙"
+                    && mergedLin?.summary.contains("初入码头") == true
+                    && mergedLin?.summary.contains("发现暗格铜匙") == true
                     && mergedLin?.aliases.contains("阿昭") == true
                     && mergedLin?.aliases.contains("林捕快") == true
                     && mergedLin?.conflictWarnings == ["待核对旧伤"]
@@ -2840,8 +2847,6 @@ extension SelfCheck {
                 skills: [],
                 universes: [],
                 preservedStyle: PreservedStyleDistillation(),
-                bookIndexLines: [],
-                volumeOneLiners: [],
                 alwaysOnLorePages: [alwaysLore, hero]
             )
             try expect(
@@ -3126,12 +3131,12 @@ extension SelfCheck {
                 "热路径应注入相关关键事件、通过 relation:赵二 触发一跳召回，并对伏笔做线索词门控与原文依据透出"
             )
 
-            let extractionMessages = NarrativeDeltaExtractor.buildExtractionMessages(
+            let extractionMessages = NarrativeDeltaExtractor.buildExtractionPayload(
                 excerpt: "巷口铜钟再响，林昭轻声对出了暗号。",
                 knownEntities: [],
                 activeThreads: Array(stateForCone.threads.values),
                 activeEvents: []
-            )
+            ).messages
             let extractionText = extractionMessages.map(\.content).joined(separator: "\n")
             try expect(
                 extractionText.contains("暗夜钟声")
@@ -3899,6 +3904,778 @@ extension SelfCheck {
             )
 
             return "自动换场剪枝 + 主观隔离 + Few-Shot 对白均衡 ok"
+        }
+
+        // 验证实体短编号映射、反向别名回填、泛称/歧义保护、跨类不覆盖、孤儿防线、因果追加与候选去重解析。
+        check("narrative.entityResolutionAndEventIntegrity") {
+            let t0 = Date(timeIntervalSince1970: 1_796_200_000)
+            let lin = EntityPage(
+                id: "char_lin_real",
+                kind: .character,
+                name: "林昭",
+                aliases: ["阿昭"],
+                identity: "雾港旧书店掌柜",
+                updatedAt: t0
+            )
+            let chenOld = EntityPage(
+                id: "char_chen_real",
+                kind: .character,
+                name: "老陈",
+                identity: "码头船夫",
+                updatedAt: t0.addingTimeInterval(-10)
+            )
+            let loreSect = EntityPage(
+                id: "lore_qingyun",
+                kind: .lore,
+                name: "青云宗",
+                identity: "修真宗门",
+                summary: "以剑入道",
+                updatedAt: t0
+            )
+            let ongoingEvent = EpisodicEvent(
+                id: "evt_dock_meeting",
+                title: "雾港夜谈",
+                arcTitle: "南疆线",
+                scene: "老码头",
+                participantEntityIDs: [lin.id],
+                cause: "接到密信赶赴码头。",
+                development: "两人在雨棚下碰头。",
+                status: .ongoing,
+                nodeID: "root",
+                updatedAt: t0
+            )
+
+            // 1. Short-ID + NEW: 同响应不分裂 + 反向别名回填 + 泛称过滤 + 标点容错锚点
+            let excerpt1 = "雨棚下，林昭把铜牌递给沈清秋，陈远山（老陈）在旁望风；旁边一个黑衣人冷眼看着。"
+            let payload = NarrativeDeltaExtractor.buildExtractionPayload(
+                excerpt: excerpt1,
+                leadingContext: "夜色沉沉，码头钟声刚歇。",
+                knownEntities: [lin, chenOld, loreSect],
+                activeThreads: [],
+                activeEvents: [ongoingEvent]
+            )
+            let linShort = payload.mapping.entityRealToShort[lin.id] ?? ""
+            let evtShort = payload.mapping.eventRealToShort[ongoingEvent.id] ?? ""
+            try expect(!linShort.isEmpty && !evtShort.isEmpty, "抽取载荷应为已知实体与事件生成短编号")
+
+            let rawDelta1 = """
+            {
+              "new_entities": [
+                {"name": "沈清秋", "kind": "character", "identity": "南疆暗探", "aliases": ["沈姑娘", "黑衣人"], "quote": "沈清秋"},
+                {"name": "陈远山", "kind": "character", "identity": "老舵手", "aliases": ["老陈"], "quote": "陈远山"},
+                {"name": "黑衣人", "kind": "character", "identity": "不明刺客", "quote": "黑衣人"}
+              ],
+              "facts": [
+                {"entity_id": "\(linShort)", "attribute": "possession", "value": "已转交铜牌", "quote": "「林昭把铜牌递给沈清秋」"},
+                {"entity_id": "NEW:沈清秋", "attribute": "possession", "value": "取得铜牌", "quote": "林昭把铜牌递给沈清秋"},
+                {"entity_id": "ghost_unknown_id", "attribute": "location", "value": "虚空"}
+              ],
+              "beliefs": [
+                {"character_id": "NEW:沈清秋", "topic": "铜牌交接", "believed_truth": "确认林昭可信", "knows_secret": true, "quote": "林昭把铜牌递给沈清秋"}
+              ],
+              "events": [
+                {"id": "\(evtShort)", "title": "雾港夜谈", "participants": ["\(linShort)", "NEW:沈清秋"], "development": "林昭当面交出铜牌。", "outcome": "双方达成临时同盟。", "status": "resolved", "quote": "林昭把铜牌递给沈清秋"}
+              ],
+              "threads": []
+            }
+            """
+            let parsed1 = try NarrativeDeltaExtractor.parseDelta(
+                from: rawDelta1,
+                excerpt: excerpt1,
+                nodeID: "n_sync_1",
+                knownEntities: [lin, chenOld, loreSect],
+                activeEvents: [ongoingEvent],
+                idMapping: payload.mapping,
+                now: t0.addingTimeInterval(30)
+            )
+            let shenCreated = parsed1.delta.entityPageUpserts.first { $0.name == "沈清秋" }
+            let chenMerged = parsed1.delta.entityPageUpserts.first { $0.id == chenOld.id }
+            try expect(
+                shenCreated != nil
+                    && !(shenCreated?.aliases.contains("黑衣人") ?? true)
+                    && chenMerged != nil
+                    && (chenMerged?.aliases.contains("陈远山") ?? false)
+                    && parsed1.delta.entityPageUpserts.count == 2
+                    && !parsed1.delta.entityPageUpserts.contains(where: { $0.name == "黑衣人" })
+                    && parsed1.delta.factEvents.count == 2
+                    && parsed1.delta.factEvents.contains(where: { $0.entityID == lin.id && $0.value == "已转交铜牌" })
+                    && parsed1.delta.factEvents.contains(where: { $0.entityID == shenCreated?.id && $0.value == "取得铜牌" })
+                    && parsed1.delta.epistemicBeliefs.first?.characterID == shenCreated?.id
+                    && parsed1.delta.episodicEvents.first?.id == ongoingEvent.id
+                    && parsed1.delta.episodicEvents.first?.participantEntityIDs == [lin.id, shenCreated?.id ?? ""],
+                "短编号与 NEW: 应正确映射且不产生幽灵卡，反向别名应回填原卡，泛称不得建卡或入别名，带引号引用应放行"
+            )
+
+            // 2. 归约器孤儿防线 + 事件因果追加不覆盖
+            var state = MaterializedNarrativeState(
+                atNodeID: "root",
+                pathNodeIDs: ["root"],
+                entityPages: [lin.id: lin, chenOld.id: chenOld, loreSect.id: loreSect],
+                episodicEvents: [ongoingEvent.id: ongoingEvent]
+            )
+            NarrativeStateReducer.apply(delta: parsed1.delta, nodeID: "n_sync_1", to: &state)
+            NarrativeStateReducer.apply(
+                delta: PlotNodeDelta(
+                    factEvents: [
+                        WorldFactEvent(
+                            entityID: "missing_entity_should_drop",
+                            attribute: "location",
+                            value: "幽灵客栈",
+                            nodeID: "n_sync_1"
+                        )
+                    ],
+                    epistemicBeliefs: [
+                        EpistemicBelief(
+                            characterID: "missing_char_should_drop",
+                            topic: "秘密",
+                            believedTruth: "不应入库",
+                            knowsSecret: true,
+                            updatedAtNodeID: "n_sync_1"
+                        )
+                    ]
+                ),
+                nodeID: "n_sync_2",
+                to: &state
+            )
+            let updatedEvent = state.episodicEvents[ongoingEvent.id]
+            try expect(
+                state.entityPages["missing_entity_should_drop"] == nil
+                    && state.entityPages["missing_char_should_drop"] == nil
+                    && (updatedEvent?.cause.contains("接到密信赶赴码头") ?? false)
+                    && (updatedEvent?.development.contains("两人在雨棚下碰头") ?? false)
+                    && (updatedEvent?.development.contains("林昭当面交出铜牌") ?? false)
+                    && updatedEvent?.outcome == "双方达成临时同盟。",
+                "归约器必须拦截孤儿事实/认知防止新建幽灵卡，且事件进展应句级追加不覆盖旧因果"
+            )
+
+            // 3. 跨分类同名不覆盖 + 同分类共享别名歧义不盲选
+            let entityPayload = NarrativeEntityExtractor.buildExtractionPayload(
+                manuscriptTail: "一行人走进青云宗山门。",
+                existingPages: [loreSect]
+            )
+            let entityExtractRaw = """
+            {"entities":[
+              {"id":"","kind":"location","name":"青云宗","identity":"东域高山道观群","summary":"石阶九百级"}
+            ]}
+            """
+            let parsedEntities = try NarrativeEntityExtractor.parseEntities(
+                from: entityExtractRaw,
+                existingPages: [loreSect],
+                idMapping: entityPayload.mapping
+            )
+            try expect(
+                parsedEntities.added == 1
+                    && parsedEntities.updated == 0
+                    && parsedEntities.upserts.first?.kind == .location
+                    && parsedEntities.upserts.first?.id != loreSect.id,
+                "跨分类同名实体不得互相覆盖，应各自独立建档"
+            )
+
+            let ambA = EntityPage(id: "c_a", kind: .character, name: "张三", aliases: ["铁剑"])
+            let ambB = EntityPage(id: "c_b", kind: .character, name: "李四", aliases: ["铁剑"])
+            let lookup = NarrativeEntityResolver.EntityLookupIndex(pages: [ambA, ambB])
+            if case .ambiguous(let hits) = lookup.resolve(name: "铁剑", expectedKind: .character) {
+                try expect(hits.count == 2, "多候选共享别名应返回 ambiguous 而不是盲选第一个")
+            } else {
+                try expect(false, "多候选共享别名必须触发歧义保护")
+            }
+
+            // 4. 同步切片前情重叠区 + 候选去重响应解析校验
+            let seg1 = String(repeating: "第一段雨夜码头对峙。", count: 10)
+            let seg2 = String(repeating: "第二段茶室密谈细节。", count: 10)
+            let joinedBook = seg1 + "\n\n" + seg2
+            let overlapChunks = ManuscriptSyncEngine.splitIntoSyncChunks(
+                fullText: joinedBook,
+                startUTF16: 0,
+                targetChunkUTF16: 120,
+                contextOverlapUTF16: 30
+            )
+            try expect(
+                overlapChunks.count >= 2
+                    && overlapChunks.map(\.text).joined() == joinedBook
+                    && overlapChunks[0].leadingContext.isEmpty
+                    && !overlapChunks[1].leadingContext.isEmpty
+                    && seg1.contains(overlapChunks[1].leadingContext),
+                "同步切片应保持 text 无缝拼接且续段携带来自上段末尾的只读前情"
+            )
+
+            let dedupeRaw = """
+            {"resolutions":[
+              {"id":0,"duplicate_candidate_id":0,"merge_with_new_id":-1,"canonical_name":"","aliases":["小张"]},
+              {"id":1,"duplicate_candidate_id":-1,"merge_with_new_id":-1,"canonical_name":"","aliases":[]}
+            ]}
+            """
+            let dedupeSuggestions = NarrativeEntityResolver.parseDedupeResponse(
+                from: dedupeRaw,
+                candidateIDs: ["new_0", "new_1"],
+                existingIDs: ["exist_0"]
+            )
+            let invalidDedupe = NarrativeEntityResolver.parseDedupeResponse(
+                from: #"{"resolutions":[{"id":0,"duplicate_candidate_id":99,"merge_with_new_id":-1}]}"#,
+                candidateIDs: ["new_0"],
+                existingIDs: ["exist_0"]
+            )
+            try expect(
+                dedupeSuggestions?.count == 1
+                    && dedupeSuggestions?.first?.sourceID == "new_0"
+                    && dedupeSuggestions?.first?.targetID == "exist_0"
+                    && invalidDedupe == nil,
+                "候选去重解析应校验索引边界并正确映射合法合并建议"
+            )
+
+            return "短号防分裂 + 反向别名 + 泛称/歧义/跨类隔离 + 因果追加 + 切片前情 ok"
+        }
+
+        // 验证两阶段全书同步抽取（阶段 1 档案+精确事实，阶段 2 剧情+认知+伏笔）及写作上下文人物摘要与顺时序事件视野。
+        check("narrative.twoStageSyncAndCharacterSummaryInjection") {
+            let t0 = Date(timeIntervalSince1970: 1_796_300_000)
+            let lin = EntityPage(
+                id: "char_lin",
+                kind: .character,
+                name: "林昭",
+                identity: "雾港旧书店掌柜",
+                summary: "外冷内热，行事慎密",
+                voiceProfile: "言简意赅，少用虚词",
+                hardBoundaries: ["绝不在外人面前暴露左手旧伤"],
+                updatedAt: t0
+            )
+            let excerpt = "茶室内，林昭把青铜钥匙拍在桌上，沉声道：“沈清秋，账本就在码头地窖。”沈清秋脸色微变，这才知道地窖早在半月前就已易主。"
+
+            // 1. 阶段 1：档案 + 精确动态事实专精提取
+            let stage1Payload = NarrativeEntityExtractor.buildExtractionPayload(
+                manuscriptTail: excerpt,
+                leadingContext: "夜雨未歇，两人刚从巷口闪进茶室。",
+                existingPages: [lin],
+                includeFacts: true
+            )
+            let linShort1 = stage1Payload.mapping.entityRealToShort[lin.id] ?? ""
+            let stage1PromptText = stage1Payload.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                !linShort1.isEmpty
+                    && stage1PromptText.contains("【前情参考")
+                    && stage1PromptText.contains("\"facts\""),
+                "阶段 1 应携带前情隔离区与档案+精确事实双层契约"
+            )
+
+            let stage1Raw = """
+            {
+              "entities": [
+                {"id": "\(linShort1)", "kind": "character", "name": "林昭", "summary": "当面摊牌试探沈清秋", "voice_profile": "语调沉冷"},
+                {"id": "", "kind": "character", "name": "沈清秋", "aliases": ["沈姑娘"], "identity": "南疆暗探", "summary": "城府深沉，此时略显动容", "voice_profile": "字句试探", "hard_boundaries": ["不轻信口头承诺"]}
+              ],
+              "facts": [
+                {"entity_id": "\(linShort1)", "attribute": "location", "value": "茶室", "quote": "茶室内，林昭把青铜钥匙拍在桌上"},
+                {"entity_id": "NEW:沈清秋", "attribute": "relation:林昭", "value": "心生忌惮", "quote": "沈清秋脸色微变"},
+                {"entity_id": "unknown_orphan_id", "attribute": "location", "value": "幽灵巷", "quote": "茶室内"}
+              ]
+            }
+            """
+            let stage1Parsed = try NarrativeEntityExtractor.parseEntitiesAndFacts(
+                from: stage1Raw,
+                excerpt: excerpt,
+                nodeID: "sync_stage1",
+                existingPages: [lin],
+                idMapping: stage1Payload.mapping,
+                now: t0.addingTimeInterval(10)
+            )
+            let shenPage = stage1Parsed.upserts.first { $0.name == "沈清秋" }
+            let linUpdated = stage1Parsed.upserts.first { $0.id == lin.id }
+            try expect(
+                stage1Parsed.added == 1
+                    && stage1Parsed.updated == 1
+                    && shenPage != nil
+                    && shenPage?.voiceProfile == "字句试探"
+                    && shenPage?.hardBoundaries == ["不轻信口头承诺"]
+                    && (linUpdated?.summary.contains("外冷内热") ?? false)
+                    && (linUpdated?.summary.contains("当面摊牌试探沈清秋") ?? false)
+                    && stage1Parsed.factEvents.count == 2
+                    && stage1Parsed.ungroundedFactCount == 1
+                    && stage1Parsed.factEvents.contains(where: { $0.entityID == lin.id && $0.value == "茶室" })
+                    && stage1Parsed.factEvents.contains(where: { $0.entityID == shenPage?.id && $0.attribute == "relation:林昭" }),
+                "阶段 1 应完整抽齐人物档案与精确事实，并拦截孤儿实体事实"
+            )
+
+            // 2. 阶段 2：基于已定型实体专精提取事件、伏笔与认知盲区
+            let allEntities = [linUpdated ?? lin, shenPage].compactMap { $0 }
+            let priorEvent = EpisodicEvent(
+                id: "evt_teahouse",
+                title: "茶室摊牌",
+                arcTitle: "南疆追查线",
+                scene: "茶室",
+                participantEntityIDs: [lin.id],
+                cause: "林昭携青铜钥匙赴约。",
+                development: "双方刚落座试探。",
+                status: .ongoing,
+                nodeID: "root",
+                updatedAt: t0
+            )
+            let thread = ProspectiveThread(
+                id: "th_cellar",
+                goal: "查明码头地窖真主",
+                activationCue: "码头地窖",
+                state: .pending,
+                plantedAtNodeID: "root",
+                updatedAtNodeID: "root"
+            )
+            let stage2Payload = NarrativeDeltaExtractor.buildPlotExtractionPayload(
+                excerpt: excerpt,
+                knownEntities: allEntities,
+                activeThreads: [thread],
+                activeEvents: [priorEvent]
+            )
+            let stage2Prompt = stage2Payload.messages.map(\.content).joined(separator: "\n")
+            let linShort2 = stage2Payload.mapping.entityRealToShort[lin.id] ?? ""
+            let shenShort2 = stage2Payload.mapping.entityRealToShort[shenPage?.id ?? ""] ?? ""
+            let evShort2 = stage2Payload.mapping.eventRealToShort[priorEvent.id] ?? ""
+            let thShort2 = stage2Payload.mapping.threadRealToShort[thread.id] ?? ""
+            try expect(
+                stage2Prompt.contains("双方刚落座试探")
+                    && !linShort2.isEmpty
+                    && !shenShort2.isEmpty
+                    && !evShort2.isEmpty
+                    && !thShort2.isEmpty,
+                "阶段 2 应向模型提供进行中事件既有进展与全量短编号"
+            )
+
+            let stage2Raw = """
+            {
+              "events": [
+                {"id": "\(evShort2)", "title": "茶室摊牌", "participants": ["\(linShort2)", "\(shenShort2)"], "development": "林昭亮出青铜钥匙并点破地窖地址。", "outcome": "沈清秋惊觉地窖早已易主。", "status": "resolved", "quote": "账本就在码头地窖"}
+              ],
+              "beliefs": [
+                {"character_id": "\(shenShort2)", "topic": "码头地窖归属", "believed_truth": "地窖早在半月前就已易主", "knows_secret": true, "quote": "地窖早在半月前就已易主"}
+              ],
+              "threads": [
+                {"thread_id": "\(thShort2)", "action": "ready", "related_entity_ids": ["\(shenShort2)"], "quote": "账本就在码头地窖"}
+              ],
+              "scene_card": "茶室亮出铜匙并揭晓地窖易主"
+            }
+            """
+            let stage2Parsed = try NarrativeDeltaExtractor.parsePlotDelta(
+                from: stage2Raw,
+                excerpt: excerpt,
+                nodeID: "sync_stage2",
+                knownEntities: allEntities,
+                activeEvents: [priorEvent],
+                idMapping: stage2Payload.mapping,
+                now: t0.addingTimeInterval(20)
+            )
+            try expect(
+                stage2Parsed.delta.entityPageUpserts.isEmpty
+                    && stage2Parsed.delta.factEvents.isEmpty
+                    && stage2Parsed.delta.episodicEvents.first?.id == priorEvent.id
+                    && stage2Parsed.delta.episodicEvents.first?.participantEntityIDs == [lin.id, shenPage?.id ?? ""]
+                    && stage2Parsed.delta.epistemicBeliefs.first?.characterID == shenPage?.id
+                    && stage2Parsed.delta.threadEvents.first?.threadID == thread.id
+                    && stage2Parsed.delta.pyramidPatch?.addedRecentSceneCards == ["茶室亮出铜匙并揭晓地窖易主"],
+                "阶段 2 应只产出事件/认知/伏笔/场拍卡并精确绑定实体，不得再创建实体或零散事实"
+            )
+
+            // 3. 写作上下文应注入人物性格与处境，且关键事件按顺时序展示最多 6 条
+            var eventsMap: [String: EpisodicEvent] = [:]
+            for idx in 1...6 {
+                let evtID = "evt_seq_\(idx)"
+                eventsMap[evtID] = EpisodicEvent(
+                    id: evtID,
+                    title: "事件\(idx)",
+                    participantEntityIDs: [lin.id],
+                    status: .ongoing,
+                    nodeID: "root",
+                    updatedAt: t0.addingTimeInterval(TimeInterval(idx * 10))
+                )
+            }
+            let checkState = MaterializedNarrativeState(
+                atNodeID: "root",
+                pathNodeIDs: ["root"],
+                entityPages: Dictionary(uniqueKeysWithValues: allEntities.map { ($0.id, $0) }),
+                episodicEvents: eventsMap
+            )
+            let cone = NarrativeContextOrchestrator.buildQueryConeBlock(
+                state: checkState,
+                scanText: "林昭走进茶室。"
+            )
+            let idx1 = cone.block.range(of: "事件1")?.lowerBound
+            let idx6 = cone.block.range(of: "事件6")?.lowerBound
+            try expect(
+                cone.block.contains("性格与处境：")
+                    && cone.block.contains("外冷内热，行事慎密")
+                    && cone.block.contains("事件6")
+                    && idx1 != nil
+                    && idx6 != nil
+                    && idx1! < idx6!,
+                "写作上下文必须注入人物性格与处境摘要，并按时间升序保留最多 6 条相关关键事件"
+            )
+
+            return "两阶段全书同步 + 人物摘要注入 + 顺时序事件视野 ok"
+        }
+
+        // 验证消费端提示词注意力排布、去重、无工具噪声裁剪与超长档案预算限制。
+        check("narrative.orchestratorAttentionLayoutAndDedupe") {
+            let t0 = Date(timeIntervalSince1970: 1_795_960_000)
+            let longSummary = "核心性格冷静克制，极擅察言观色。" + String(repeating: "曾在江南旧案中孤身潜伏数月不露破绽。", count: 14) + "此刻正屏息躲在茶楼暗格后。"
+            let lin = EntityPage(
+                id: "auto_character_deadbeef",
+                kind: .character,
+                name: "林昭",
+                identity: "旧书店掌柜",
+                summary: longSummary,
+                voiceProfile: "短句寡言",
+                updatedAt: t0
+            )
+            let shen = EntityPage(
+                id: "auto_character_cafe0001",
+                kind: .character,
+                name: "沈清秋",
+                identity: "南疆密使",
+                summary: "城府极深，擅借刀杀人",
+                updatedAt: t0
+            )
+            let p0 = "第一章：老码头青石阶下压着半截铜钥匙。\n"
+            let p1 = String(repeating: "雨夜街巷冷清无人。\n", count: 8)
+                + "茶室内灯影摇曳，林昭盯着沈清秋手中的密信，指尖缓缓按住桌沿。"
+            let fullManuscript = p0 + "\n\n" + p1
+
+            var ws = NarrativeWorkspace(
+                preservedStyle: PreservedStyleDistillation(
+                    exemplars: [
+                        CorpusEntry(
+                            id: "ex_teahouse",
+                            source: "样本",
+                            title: "[场景:动作｜节奏:快｜对白:低] 茶室对峙拆穿假印鉴动作示范",
+                            text: "灯花啪地一爆，茶盏盖子刮过瓷沿，发出极轻的一声脆响。"
+                        )
+                    ]
+                )
+            )
+            ws.storyGraph = StoryGraph.makeInitial(
+                rootID: "root",
+                summary: "开篇码头伏笔",
+                now: t0
+            )
+            try ws.storyGraph.appendNode(
+                PlotNode(
+                    id: "sync_1",
+                    parentID: "root",
+                    branchLabel: "主线",
+                    summary: "林昭茶楼试探沈清秋",
+                    manuscriptAnchor: TextSpanAnchor.make(utf16Start: 0, utf16Length: 10, quote: "第一章"),
+                    createdAt: t0.addingTimeInterval(10)
+                )
+            )
+            try ws.storyGraph.appendNode(
+                PlotNode(
+                    id: "plan_next",
+                    parentID: "sync_1",
+                    branchLabel: "主线",
+                    summary: "当场拆穿密信上的假印鉴",
+                    createdAt: t0.addingTimeInterval(20)
+                )
+            )
+            ws.applyLedgerDelta(
+                PlotNodeDelta(
+                    directiveAdds: [
+                        AuthorDirective(
+                            id: "dir_no_modern",
+                            verbatimRule: "严禁出现现代科技词汇与枪械描写。",
+                            scope: .global,
+                            sourceNodeID: "root",
+                            createdAt: t0
+                        )
+                    ],
+                    entityPageUpserts: [lin, shen],
+                    factEvents: [
+                        WorldFactEvent(
+                            entityID: lin.id,
+                            attribute: "location",
+                            value: "茶室",
+                            nodeID: "sync_1",
+                            authority: .canonProseQuote,
+                            createdAt: t0
+                        ),
+                        WorldFactEvent(
+                            entityID: lin.id,
+                            attribute: "relation:沈清秋",
+                            value: "高度警惕",
+                            nodeID: "sync_1",
+                            authority: .canonProseQuote,
+                            createdAt: t0
+                        ),
+                    ],
+                    pyramidPatch: NarrativePyramidPatch(addedRecentSceneCards: ["林昭茶楼试探沈清秋"])
+                ),
+                sourceNodeID: "sync_1"
+            )
+
+            var bm25 = ManuscriptIndex.IncrementalBM25Index()
+            _ = bm25.updatePage(index: 0, text: p0, utf16Start: 0)
+            _ = bm25.updatePage(index: 1, text: p1, utf16Start: (p0 as NSString).length + 2)
+
+            var settings = AppSettings()
+            settings.providers = [ProviderSetting(kind: .deepseek, model: "deepseek-chat")]
+            settings.activeProviderID = settings.providers[0].id
+            settings.corpusEnabled = true
+
+            let instruction = "请紧接写林昭拆穿密信假印鉴的动作"
+            let noToolsPrompt = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: fullManuscript,
+                history: [],
+                userInstruction: instruction,
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailCodePointLimitOverride: 80,
+                inputBudget: 16_000,
+                enableTools: false,
+                bm25Index: bm25
+            )
+            let noToolsMerged = noToolsPrompt.messages.map(\.content).joined(separator: "\n")
+            let idxPrefetch = noToolsMerged.range(of: "老码头青石阶下压着半截铜钥匙")?.lowerBound
+            let idxStyle = noToolsMerged.range(of: "灯花啪地一爆")?.lowerBound
+            let idxBody = noToolsMerged.range(of: "【当前场次正文】")?.lowerBound
+            let idxRule = noToolsMerged.range(of: "严禁出现现代科技词汇与枪械描写")?.lowerBound
+            let idxBeat = noToolsMerged.range(of: "【本幕待写目标】")?.lowerBound
+            let idxInstr = noToolsMerged.range(of: instruction)?.lowerBound
+            let sceneCardCount = noToolsMerged.components(separatedBy: "林昭茶楼试探沈清秋").count - 1
+
+            try expect(
+                !noToolsMerged.contains("【全书实体与伏笔索引目录")
+                    && !noToolsMerged.contains(lin.id)
+                    && !noToolsMerged.contains("location=")
+                    && noToolsMerged.contains("位置：茶室")
+                    && noToolsMerged.contains("与沈清秋关系：高度警惕")
+                    && sceneCardCount == 1
+                    && !noToolsMerged.contains("性格与处境：\(longSummary)")
+                    && noToolsMerged.contains("核心性格冷静克制")
+                    && noToolsMerged.contains("屏息躲在茶楼暗格后")
+                    && idxPrefetch != nil && idxStyle != nil && idxBody != nil && idxRule != nil && idxBeat != nil && idxInstr != nil
+                    && idxPrefetch! < idxStyle!
+                    && idxStyle! < idxBody!
+                    && idxBody! < idxRule!
+                    && idxRule! < idxBeat!
+                    && idxBeat! < idxInstr!,
+                "无工具模式应移除工具目录与机器 ID、汉化事实键、去重场景卡，并将参考资料前置、硬规则与目标置后紧贴指令"
+            )
+
+            let withToolsPrompt = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: fullManuscript,
+                history: [],
+                userInstruction: instruction,
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailCodePointLimitOverride: 80,
+                inputBudget: 16_000,
+                enableTools: true,
+                bm25Index: bm25
+            )
+            let withToolsMerged = withToolsPrompt.messages.map(\.content).joined(separator: "\n")
+            try expect(
+                withToolsMerged.contains("【全书实体与伏笔索引目录")
+                    && withToolsMerged.contains(lin.id),
+                "开启工具模式应保留精简索引目录与实体 ID 供按需查询"
+            )
+
+            return "消费端注意力排布 + 语义去噪 + 重复抑制 + 摘要预算 ok"
+        }
+
+        // 验证抽取端 20 实体上限、原文 grounding 门控、事件相关性排序与只读工具降级检出。
+        check("narrative.extractionBoundsAndToolHardening") {
+            let t0 = Date(timeIntervalSince1970: 1_795_970_000)
+            var pages: [EntityPage] = []
+            for idx in 1...30 {
+                pages.append(
+                    EntityPage(
+                        id: "e_\(idx)",
+                        kind: .character,
+                        name: "角色\(idx)",
+                        identity: "路人甲\(idx)",
+                        updatedAt: t0.addingTimeInterval(TimeInterval(idx * 10))
+                    )
+                )
+            }
+            let lin = EntityPage(id: "e_lin", kind: .character, name: "林昭", identity: "书店主", updatedAt: t0)
+            pages.insert(lin, at: 0)
+
+            let leading = "【前情】幽灵前情角色顾寒舟昨日离开了京城。"
+            let excerpt = "今日茶室内，林昭打开青铜匣，取出半张旧契。"
+            let stage1Payload = NarrativeEntityExtractor.buildExtractionPayload(
+                manuscriptTail: excerpt,
+                leadingContext: leading,
+                existingPages: pages,
+                includeFacts: true
+            )
+            try expect(
+                stage1Payload.mapping.entityShortToReal.count == 20
+                    && stage1Payload.mapping.entityRealToShort[lin.id] != nil,
+                "Stage 1 现有实体候选清单应严格收敛至 20 条以内并优先保留本段出场实体"
+            )
+
+            let stage1Raw = """
+            {
+              "entities": [
+                {"id": "", "kind": "character", "name": "顾寒舟", "identity": "京城旧客"},
+                {"id": "", "kind": "artifact", "name": "青铜匣", "identity": "盛放旧契的匣子"}
+              ],
+              "facts": []
+            }
+            """
+            let stage1Parsed = try NarrativeEntityExtractor.parseEntitiesAndFacts(
+                from: stage1Raw,
+                excerpt: excerpt,
+                nodeID: "sync_ground",
+                existingPages: pages,
+                idMapping: stage1Payload.mapping,
+                now: t0
+            )
+            try expect(
+                stage1Parsed.upserts.count == 1 && stage1Parsed.upserts.first?.name == "青铜匣",
+                "Stage 1 必须拦截未出现在本段待提取正文（仅出现在前情参考或脑补）的新实体建档"
+            )
+
+            var events: [EpisodicEvent] = [
+                EpisodicEvent(
+                    id: "evt_old_lin",
+                    title: "旧契失窃案",
+                    scene: "茶室",
+                    participantEntityIDs: [lin.id],
+                    status: .ongoing,
+                    nodeID: "root",
+                    updatedAt: t0
+                )
+            ]
+            for idx in 1...14 {
+                events.append(
+                    EpisodicEvent(
+                        id: "evt_recent_\(idx)",
+                        title: "无关支线\(idx)",
+                        participantEntityIDs: ["e_\(idx)"],
+                        status: .ongoing,
+                        nodeID: "root",
+                        updatedAt: t0.addingTimeInterval(TimeInterval(idx * 100))
+                    )
+                )
+            }
+            let stage2Payload = NarrativeDeltaExtractor.buildPlotExtractionPayload(
+                excerpt: excerpt,
+                knownEntities: pages,
+                activeThreads: [],
+                activeEvents: events
+            )
+            try expect(
+                stage2Payload.mapping.entityShortToReal.count == 20
+                    && stage2Payload.mapping.eventShortToReal.count == 12
+                    && stage2Payload.mapping.eventRealToShort["evt_old_lin"] != nil,
+                "Stage 2 应控制实体上限为 20 且把命中本段实体与场景的早期进行中事件优先排入前 12"
+            )
+
+            // 验证只读工具：高频分布采样、多词空格降级 BM25、模糊/异类实体与事件兜底。
+            var repeatedLines = ["第1页开端：林昭初入茶馆。"]
+            for idx in 2...12 {
+                repeatedLines.append("第\(idx)段：林昭翻看泛黄卷宗第\(idx)页。")
+            }
+            repeatedLines.append("尾声：林昭终于找到半截青铜令牌。")
+            let pageOne = repeatedLines.joined(separator: "\n")
+            let futurePage = "未来章节：林昭飞升仙界。"
+            let fullBody = pageOne + "\n" + futurePage
+            let sameLoc = EntityPage(id: "loc_tea", kind: .location, name: "听雨阁（南区）", identity: "隐秘茶肆", updatedAt: t0)
+            let sameLore = EntityPage(id: "lore_tea", kind: .lore, name: "听雨阁", aliases: ["茶肆旧盟"], identity: "江湖情报组织", updatedAt: t0.addingTimeInterval(10))
+            let toolState = MaterializedNarrativeState(
+                atNodeID: "root",
+                pathNodeIDs: ["root"],
+                entityPages: [lin.id: lin, sameLoc.id: sameLoc, sameLore.id: sameLore],
+                threads: [
+                    "th_tok": ProspectiveThread(
+                        id: "th_tok",
+                        goal: "查清青铜令牌出处",
+                        activationCue: "青铜令牌",
+                        state: .pending,
+                        plantedAtNodeID: "root",
+                        updatedAtNodeID: "root"
+                    )
+                ],
+                episodicEvents: ["evt_old_lin": events[0]]
+            )
+            let toolCtx = NarrativeToolContext(
+                pages: [pageOne, futurePage],
+                causalLimit: (pageOne as NSString).length,
+                materializedState: toolState
+            )
+
+            let freqGrep = NarrativeReadTools.execute(
+                call: LLMToolCall(id: "tc1", functionName: NarrativeReadTools.grepManuscriptName, arguments: #"{"pattern":"林昭"}"#),
+                context: toolCtx
+            )
+            let invalidRegexGrep = NarrativeReadTools.execute(
+                call: LLMToolCall(id: "tc1b", functionName: NarrativeReadTools.grepManuscriptName, arguments: #"{"pattern":"[unclosed","regex":true}"#),
+                context: toolCtx
+            )
+            let multiTermGrep = NarrativeReadTools.execute(
+                call: LLMToolCall(id: "tc2", functionName: NarrativeReadTools.grepManuscriptName, arguments: #"{"query":"林昭 青铜令牌"}"#),
+                context: toolCtx
+            )
+            let fuzzyEntityRead = NarrativeReadTools.execute(
+                call: LLMToolCall(id: "tc3", functionName: NarrativeReadTools.readEntityPageName, arguments: #"{"name":"听雨阁"}"#),
+                context: toolCtx
+            )
+            let eventFallbackRead = NarrativeReadTools.execute(
+                call: LLMToolCall(id: "tc4", functionName: NarrativeReadTools.readEntityPageName, arguments: #"{"entity_id":"旧契失窃案"}"#),
+                context: toolCtx
+            )
+            try expect(
+                freqGrep.output.contains("共命中 13 处")
+                    && freqGrep.output.contains("第1页开端")
+                    && freqGrep.output.contains("青铜令牌")
+                    && !freqGrep.output.contains("仙界")
+                    && invalidRegexGrep.output.contains("语法无效")
+                    && multiTermGrep.output.contains("BM25相关段落")
+                    && multiTermGrep.output.contains("青铜令牌")
+                    && fuzzyEntityRead.output.contains("江湖情报组织")
+                    && fuzzyEntityRead.output.contains("隐秘茶肆")
+                    && eventFallbackRead.output.contains("旧契失窃案"),
+                "只读工具应汇报命中总数并支持早晚分布采样、显式正则错误、多词降级 BM25、模糊/同名异类档案合并及事件伏笔兜底"
+            )
+
+            let segmentedWords = ManuscriptIndex.tokenize("林昭在城隍庙找到青铜令牌")
+            let segmentedSentences = NarrativeEntityResolver.splitSentences("核心性格冷静。他低声道：“你敢么？”说罢起身离开。")
+            let denseIndexState = MaterializedNarrativeState(
+                atNodeID: "root",
+                pathNodeIDs: ["root"],
+                entityPages: Dictionary(uniqueKeysWithValues: (1...90).map { idx in
+                    let longBio = String(repeating: "旧案追踪线索详情第\(idx)段。", count: 8)
+                    return ("idx_\(idx)", EntityPage(id: "idx_\(idx)", kind: .character, name: "甲\(idx)", summary: longBio, updatedAt: t0.addingTimeInterval(TimeInterval(idx))))
+                }),
+                threads: [
+                    "th_keep": ProspectiveThread(
+                        id: "th_keep",
+                        goal: "城隍庙地下暗门尚未开启",
+                        state: .ready,
+                        plantedAtNodeID: "root",
+                        updatedAtNodeID: "root",
+                        updatedAt: t0
+                    )
+                ]
+            )
+            let boundedIndex = denseIndexState.bookIndexLines(maxLines: 80)
+            let chineseQueryRecall = ManuscriptIndex.recallHistoricalExcerpts(
+                fullManuscript: "第一章：老城隍庙的青铜香炉底座刻着一道暗门机关。\n\n第五章：街上行人匆匆走过。",
+                activeWindowText: "街上行人匆匆走过。",
+                queryTerms: [],
+                instructionText: "请紧接写他去城隍庙找暗门机关",
+                maxResults: 2,
+                maxTokens: 300
+            )
+            try expect(
+                segmentedWords.contains("城隍庙")
+                    && !segmentedWords.contains("庙找")
+                    && segmentedSentences.count >= 2
+                    && boundedIndex.count == 80
+                    && boundedIndex.contains(where: { $0.contains("城隍庙地下暗门尚未开启") })
+                    && boundedIndex.allSatisfy { $0.count <= 95 }
+                    && chineseQueryRecall.contains(where: { $0.text.contains("青铜香炉") }),
+                "中文分词/查询词应走系统 NLTokenizer、断句应正确切分整句，目录索引应截断单行简介并为未决伏笔预留名额"
+            )
+
+            return "抽取端 20 实体上限 + grounding + 事件相关性排序 + 工具加固 ok"
         }
     }
 

@@ -463,8 +463,13 @@ struct WorldPane: View {
                 store: self.store,
                 rescanFromStart: rescanFromStart,
                 onProgress: { progress in
+                    let current = min(
+                        progress.totalChunks,
+                        progress.stageLabel.isEmpty ? progress.completedChunks : progress.completedChunks + 1
+                    )
+                    let stageSuffix = progress.stageLabel.isEmpty ? "" : " · \(progress.stageLabel)"
                     self.busy = .syncingManuscript(
-                        progressText: "正在同步正文（\(progress.completedChunks)/\(progress.totalChunks) 段）…"
+                        progressText: "正在同步正文（\(current)/\(progress.totalChunks) 段\(stageSuffix)）…"
                     )
                 }
             )

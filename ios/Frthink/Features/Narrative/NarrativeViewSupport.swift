@@ -104,14 +104,14 @@ enum NarrativeViewSupport {
         let existingPages = Array(workspace.currentState().entityPages.values)
         let excerpt = PromptComposer.codePointTail(trimmed, limit: 6_000)
 
-        let messages = NarrativeEntityExtractor.buildExtractionMessages(
+        let extractionPayload = NarrativeEntityExtractor.buildExtractionPayload(
             manuscriptTail: excerpt,
             existingPages: existingPages,
             targetKind: targetKind
         )
         let request = LLMRequest(
             model: provider.resolvedModel,
-            messages: messages,
+            messages: extractionPayload.messages,
             stream: false,
             temperature: 0.2,
             maxTokens: max(provider.maxTokens, 2_048),
@@ -124,7 +124,8 @@ enum NarrativeViewSupport {
         let parsed = try NarrativeEntityExtractor.parseEntities(
             from: raw,
             existingPages: existingPages,
-            targetKind: targetKind
+            targetKind: targetKind,
+            idMapping: extractionPayload.mapping
         )
         if !parsed.upserts.isEmpty {
             _ = try session.commitNarrativeDelta(

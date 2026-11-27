@@ -403,24 +403,28 @@ enum NarrativeCommitCoordinator {
         let activeThreads = currentState.threads.values
             .filter { !$0.state.isTerminal }
             .sorted { $0.id < $1.id }
-        let activeEvents = Array(
-            currentState.sortedEpisodicEvents()
-                .filter { $0.status == .ongoing }
-                .prefix(8)
+        let activeEvents = currentState.sortedEpisodicEvents()
+            .filter { $0.status == .ongoing }
+        let leadingContext = resolveLeadingContext(
+            beforeUTF16: baseUTF16Offset,
+            pageIndex: pageIndex,
+            session: session,
+            maxUTF16: 200
         )
 
-        let messages = NarrativeDeltaExtractor.buildExtractionMessages(
+        let extractionPayload = NarrativeDeltaExtractor.buildExtractionPayload(
             excerpt: excerpt,
+            leadingContext: leadingContext,
             knownEntities: knownEntities,
             activeThreads: activeThreads,
             activeEvents: activeEvents
         )
         let request = LLMRequest(
             model: provider.resolvedModel,
-            messages: messages,
+            messages: extractionPayload.messages,
             stream: false,
             temperature: deltaExtractionTemperature,
-            maxTokens: max(provider.maxTokens, 2_048),
+            maxTokens: max(provider.maxTokens, 4_096),
             thinking: false,
             failOnLength: true
         )
@@ -435,11 +439,8 @@ enum NarrativeCommitCoordinator {
         }
         let latestState = latestWorkspace.currentState()
         let latestKnownEntities = latestState.entityPages.values.sorted { $0.id < $1.id }
-        let latestActiveEvents = Array(
-            latestState.sortedEpisodicEvents()
-                .filter { $0.status == .ongoing }
-                .prefix(8)
-        )
+        let latestActiveEvents = latestState.sortedEpisodicEvents()
+            .filter { $0.status == .ongoing }
         let extraction = try NarrativeDeltaExtractor.parseDelta(
             from: raw,
             excerpt: excerpt,
@@ -447,7 +448,8 @@ enum NarrativeCommitCoordinator {
             pageIndex: pageIndex,
             baseUTF16Offset: baseUTF16Offset,
             knownEntities: latestKnownEntities,
-            activeEvents: latestActiveEvents
+            activeEvents: latestActiveEvents,
+            idMapping: extractionPayload.mapping
         )
 
         var updatedDelta = extraction.delta
@@ -559,6 +561,45 @@ enum NarrativeCommitCoordinator {
             items,
             maxChars: fallbackMaxChars
         )
+    }
+
+    private static func resolveLeadingContext(
+        beforeUTF16: Int,
+        pageIndex: Int,
+        session: ProjectSession,
+        maxUTF16: Int = 200
+    ) -> String {
+        guard beforeUTF16 > 0, maxUTF16 > 0 else { return "" }
+        if session.canReadByPage {
+            let pageBase = session.pageStartOffset(for: pageIndex)
+            let localOffset = max(0, beforeUTF16 - pageBase)
+            var collected = ""
+            if localOffset < maxUTF16,
+               pageIndex > 0,
+               let prevPage = session.bodyPage(pageIndex - 1),
+               !prevPage.isEmpty {
+                collected += prevPage
+            }
+            if let currentPage = session.bodyPage(pageIndex), !currentPage.isEmpty {
+                let nsCurr = currentPage as NSString
+                let takeLen = min(nsCurr.length, max(0, localOffset))
+                collected += nsCurr.substring(to: takeLen)
+            }
+            if !collected.isEmpty {
+                return PromptComposer.codePointTail(collected, limit: maxUTF16)
+            }
+        }
+        let nsFull = session.manuscript as NSString
+        guard nsFull.length > 0 else { return "" }
+        let safeEnd = min(beforeUTF16, nsFull.length)
+        var start = max(0, safeEnd - maxUTF16)
+        if start > 0 && start < nsFull.length {
+            let ch = nsFull.character(at: start)
+            if ch >= 0xDC00 && ch <= 0xDFFF {
+                start -= 1
+            }
+        }
+        return nsFull.substring(with: NSRange(location: start, length: max(0, safeEnd - start)))
     }
 
     private static func resolveExcerptSlice(

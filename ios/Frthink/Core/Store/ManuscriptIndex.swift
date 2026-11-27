@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// 端侧轻量 BM25 历史正文句窗检索（纯内存计算，零外部依赖、零网络调用）。
 ///
@@ -25,6 +26,12 @@ enum ManuscriptIndex {
         let utf16Length: Int
         let matchedText: String
         let contextSnippet: String
+    }
+
+    struct GrepSearchResult: Equatable {
+        let matches: [GrepMatch]
+        let totalMatchCount: Int
+        let regexError: String?
     }
 
     /// 按页缓存分词、句窗与文档频率的增量 BM25 索引：正文尾页改动时仅重算受影响页，其余页直接命中缓存。
@@ -408,25 +415,54 @@ enum ManuscriptIndex {
         contextLines: Int = 1,
         regex: Bool = false,
         causalLimit: Int? = nil,
-        maxMatches: Int = 12,
-        pageSize: Int = FileStore.bodyPageSize
+        maxMatches: Int = 12
     ) -> [GrepMatch] {
+        grepManuscriptDetailed(
+            pages: pages,
+            pattern: pattern,
+            contextLines: contextLines,
+            regex: regex,
+            causalLimit: causalLimit,
+            maxMatches: maxMatches
+        ).matches
+    }
+
+    /// 详细正文检索：保留全量命中计数、显式正则错误及早晚均匀分布采样结果。
+    static func grepManuscriptDetailed(
+        pages: [String],
+        pattern: String,
+        contextLines: Int = 1,
+        regex: Bool = false,
+        causalLimit: Int? = nil,
+        maxMatches: Int = 12
+    ) -> GrepSearchResult {
         let query = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, maxMatches > 0 else { return [] }
+        guard !query.isEmpty, maxMatches > 0 else {
+            return GrepSearchResult(matches: [], totalMatchCount: 0, regexError: nil)
+        }
 
         let compiledRegex: NSRegularExpression?
         if regex {
-            guard let compiled = try? NSRegularExpression(pattern: query) else {
-                return []
+            do {
+                compiledRegex = try NSRegularExpression(pattern: query)
+            } catch {
+                return GrepSearchResult(
+                    matches: [],
+                    totalMatchCount: 0,
+                    regexError: error.localizedDescription
+                )
             }
-            compiledRegex = compiled
         } else {
             compiledRegex = nil
         }
 
-        var matches: [GrepMatch] = []
+        var headMatches: [GrepMatch] = []
+        var recentMatches: [GrepMatch] = []
+        var totalMatchCount = 0
         var pageStartUTF16 = 0
         let safeContext = max(0, contextLines)
+        let headReserve = min(3, max(1, maxMatches / 2))
+        let tailReserve = max(0, maxMatches - headReserve)
 
         for (pageIdx, rawPage) in pages.enumerated() {
             let rawLength = (rawPage as NSString).length
@@ -464,15 +500,26 @@ enum ManuscriptIndex {
                 }
 
                 guard matchRange.location != NSNotFound else { continue }
-                let matchedText = nsLine.substring(with: matchRange)
-                let ctxStart = max(0, lineArrayIdx - safeContext)
-                let ctxEnd = min(lines.count - 1, lineArrayIdx + safeContext)
-                let contextSnippet = (ctxStart...ctxEnd)
-                    .map { lines[$0].text }
-                    .joined(separator: "\n")
+                totalMatchCount += 1
 
-                matches.append(
-                    GrepMatch(
+                let buildMatch = { () -> GrepMatch in
+                    let matchedText = nsLine.substring(with: matchRange)
+                    let ctxStart = max(0, lineArrayIdx - safeContext)
+                    let ctxEnd = min(lines.count - 1, lineArrayIdx + safeContext)
+                    let renderedLines = (ctxStart...ctxEnd).map { idx -> String in
+                        let lineText = lines[idx].text
+                        if idx == lineArrayIdx {
+                            return clippedLineAroundMatch(lineText, matchRange: matchRange, maxLength: 220)
+                        }
+                        if lineText.count > 90 {
+                            return idx < lineArrayIdx
+                                ? "…" + String(lineText.suffix(80))
+                                : String(lineText.prefix(80)) + "…"
+                        }
+                        return lineText
+                    }
+                    let contextSnippet = renderedLines.joined(separator: "\n")
+                    return GrepMatch(
                         pageIndex: pageIdx,
                         lineNumber: lineArrayIdx + 1,
                         utf16Start: pageStartUTF16 + lineInfo.utf16Start + matchRange.location,
@@ -480,14 +527,62 @@ enum ManuscriptIndex {
                         matchedText: matchedText,
                         contextSnippet: contextSnippet
                     )
-                )
-                if matches.count >= maxMatches {
-                    return matches
+                }
+
+                if headMatches.count < maxMatches {
+                    headMatches.append(buildMatch())
+                } else if tailReserve > 0 {
+                    recentMatches.append(buildMatch())
+                    if recentMatches.count > tailReserve {
+                        recentMatches.removeFirst()
+                    }
                 }
             }
         }
 
-        return matches
+        let sampledMatches: [GrepMatch]
+        if totalMatchCount <= maxMatches || tailReserve == 0 {
+            sampledMatches = Array(headMatches.prefix(maxMatches))
+        } else {
+            // headMatches 至少有 maxMatches 条，取前 headReserve 条 + 最新 tailReserve 条，保证时序不重叠。
+            let fixedHead = Array(headMatches.prefix(headReserve))
+            let combinedTail = Array((headMatches.dropFirst(headReserve) + recentMatches).suffix(tailReserve))
+            sampledMatches = fixedHead + combinedTail
+        }
+
+        return GrepSearchResult(
+            matches: sampledMatches,
+            totalMatchCount: totalMatchCount,
+            regexError: nil
+        )
+    }
+
+    private static func clippedLineAroundMatch(
+        _ line: String,
+        matchRange: NSRange,
+        maxLength: Int
+    ) -> String {
+        let nsLine = line as NSString
+        guard nsLine.length > maxLength,
+              matchRange.location != NSNotFound,
+              matchRange.location < nsLine.length else {
+            return line
+        }
+        let sideContext = max(20, (maxLength - matchRange.length) / 2)
+        var start = max(0, matchRange.location - sideContext)
+        if start > 0 && start < nsLine.length {
+            let ch = nsLine.character(at: start)
+            if ch >= 0xDC00 && ch <= 0xDFFF { start -= 1 }
+        }
+        var end = min(nsLine.length, matchRange.location + matchRange.length + sideContext)
+        if end > start && end < nsLine.length {
+            let ch = nsLine.character(at: end - 1)
+            if ch >= 0xD800 && ch <= 0xDBFF { end -= 1 }
+        }
+        let slice = nsLine.substring(with: NSRange(location: start, length: max(0, end - start)))
+        let prefix = start > 0 ? "…" : ""
+        let suffix = end < nsLine.length ? "…" : ""
+        return prefix + slice + suffix
     }
 
     static func grepManuscript(
@@ -605,20 +700,77 @@ enum ManuscriptIndex {
     private static func normalizedQueryTerms(terms: [String], instructionText: String) -> [String] {
         var result: [String] = []
         var seen: Set<String> = []
-        let rawList = terms + instructionText
-            .components(separatedBy: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-        for raw in rawList {
+
+        func appendCandidate(_ raw: String) {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard trimmed.count >= 2 else { continue }
+            guard trimmed.count >= 2 else { return }
             let key = trimmed.lowercased()
             if seen.insert(key).inserted {
                 result.append(trimmed)
             }
         }
+
+        for term in terms {
+            appendCandidate(term)
+        }
+
+        let cleanInstruction = instructionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanInstruction.isEmpty {
+            let tokenizer = NLTokenizer(unit: .word)
+            tokenizer.string = cleanInstruction
+            tokenizer.enumerateTokens(in: cleanInstruction.startIndex..<cleanInstruction.endIndex) { range, _ in
+                let word = String(cleanInstruction[range])
+                appendCandidate(word)
+                return true
+            }
+            for raw in cleanInstruction.components(
+                separatedBy: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
+            ) {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.count <= 6 {
+                    appendCandidate(trimmed)
+                }
+            }
+        }
         return result
     }
 
+    /// 真实中文分词（NaturalLanguage `.word`）+ 长词双字滑窗兜底：
+    /// 保留完整中文词元以提升 IDF 区分度，避免相邻无关字组假词噪声，同时保留多字专名内部分片召回。
     static func tokenize(_ text: String) -> [String] {
+        guard !text.isEmpty else { return [] }
+        var tokens: [String] = []
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let raw = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { return true }
+            let lower = raw.lowercased()
+            let chars = Array(lower)
+            let cjkChars = chars.filter(isCJK)
+            if !cjkChars.isEmpty {
+                if cjkChars.count >= 2 {
+                    tokens.append(String(cjkChars))
+                    if cjkChars.count >= 3 {
+                        for i in 0..<(cjkChars.count - 1) {
+                            tokens.append(String([cjkChars[i], cjkChars[i + 1]]))
+                        }
+                    }
+                } else {
+                    tokens.append(String(cjkChars[0]))
+                }
+            } else {
+                let asciiWord = String(chars.filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+                if asciiWord.count >= 2 {
+                    tokens.append(asciiWord)
+                }
+            }
+            return true
+        }
+        return tokens.isEmpty ? fallbackBigramTokens(text) : tokens
+    }
+
+    private static func fallbackBigramTokens(_ text: String) -> [String] {
         var tokens: [String] = []
         var asciiWord = ""
         var cjkRun: [Character] = []

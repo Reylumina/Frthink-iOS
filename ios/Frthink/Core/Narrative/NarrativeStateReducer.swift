@@ -276,7 +276,8 @@ struct MaterializedNarrativeState: Codable, Hashable {
         sortedEpisodicEvents().filter { $0.participantEntityIDs.contains(entityID) }
     }
 
-    /// 生成轻量顶层目录索引，供模型按需下沉查阅实体独立页，限制最大行数避免前缀膨胀。
+    /// 生成轻量顶层目录索引，供模型按需下沉查阅实体独立页：
+    /// 单行简介限长防膨胀，近期活跃实体优先，并为未决伏笔预留独立名额避免被实体挤出目录。
     func bookIndexLines(maxLines: Int = 200) -> [String] {
         guard maxLines > 0 else { return [] }
         var lines: [String] = []
@@ -284,6 +285,9 @@ struct MaterializedNarrativeState: Codable, Hashable {
         let enabledEntities = entityPages.values
             .filter(\.enabled)
             .sorted { lhs, rhs in
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
+                }
                 if lhs.kind.rawValue != rhs.kind.rawValue {
                     return lhs.kind.rawValue < rhs.kind.rawValue
                 }
@@ -291,34 +295,56 @@ struct MaterializedNarrativeState: Codable, Hashable {
                 return lhs.id < rhs.id
             }
 
-        for page in enabledEntities {
-            guard lines.count < maxLines else { return lines }
-            let aliasSuffix = page.aliases.isEmpty
-                ? ""
-                : "（别名：\(page.aliases.joined(separator: "、"))）"
-            let brief = page.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            if brief.isEmpty {
-                lines.append("- [实体:\(page.kind.rawValue)/\(page.id)] \(page.name)\(aliasSuffix)")
-            } else {
-                lines.append("- [实体:\(page.kind.rawValue)/\(page.id)] \(page.name)\(aliasSuffix)：\(brief)")
-            }
-        }
-
         let activeThreads = threads.values
             .filter { !$0.state.isTerminal }
             .sorted { lhs, rhs in
-                if lhs.state.rawValue != rhs.state.rawValue {
-                    return lhs.state.rawValue < rhs.state.rawValue
+                if (lhs.state == .ready) != (rhs.state == .ready) {
+                    return lhs.state == .ready
+                }
+                if lhs.updatedAt != rhs.updatedAt {
+                    return lhs.updatedAt > rhs.updatedAt
                 }
                 return lhs.id < rhs.id
             }
 
-        for thread in activeThreads {
-            guard lines.count < maxLines else { return lines }
-            lines.append("- [伏笔:\(thread.state.rawValue)/\(thread.id)] \(thread.goal)")
+        let reservedForThreads = activeThreads.isEmpty
+            ? 0
+            : min(activeThreads.count, max(1, maxLines / 5))
+        let entityLimit = max(0, maxLines - reservedForThreads)
+
+        for page in enabledEntities.prefix(entityLimit) {
+            let aliasSuffix = page.aliases.isEmpty
+                ? ""
+                : "（别名：\(page.aliases.joined(separator: "、"))）"
+            let rawBrief = !page.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? page.summary
+                : page.identity
+            let clippedBrief = compactDirectoryBrief(rawBrief, maxLength: 36)
+            if clippedBrief.isEmpty {
+                lines.append("- [实体:\(page.kind.rawValue)/\(page.id)] \(page.name)\(aliasSuffix)")
+            } else {
+                lines.append("- [实体:\(page.kind.rawValue)/\(page.id)] \(page.name)\(aliasSuffix)：\(clippedBrief)")
+            }
+        }
+
+        let remainingCapacity = max(0, maxLines - lines.count)
+        for thread in activeThreads.prefix(remainingCapacity) {
+            let clippedGoal = compactDirectoryBrief(thread.goal, maxLength: 60)
+            lines.append("- [伏笔:\(thread.state.rawValue)/\(thread.id)] \(clippedGoal)")
         }
 
         return Array(lines.prefix(maxLines))
+    }
+
+    private func compactDirectoryBrief(_ raw: String, maxLength: Int) -> String {
+        let collapsed = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard collapsed.count > maxLength, maxLength > 0 else { return collapsed }
+        return String(collapsed.prefix(maxLength)) + "…"
     }
 }
 
@@ -468,9 +494,9 @@ enum NarrativeStateReducer {
         to state: inout MaterializedNarrativeState
     ) {
         for event in events where !event.entityID.isEmpty && !event.attribute.isEmpty {
+            guard state.entityPages[event.entityID] != nil else { continue }
             state.factHistory.append(event)
             affectedEntityIDs.insert(event.entityID)
-            ensureEntityPageExists(id: event.entityID, kind: .character, in: &state)
 
             if let current = state.activeFacts[event.slotKey], event.authority < current.authority {
                 if event.isRetracted || event.value != current.value {
@@ -522,7 +548,7 @@ enum NarrativeStateReducer {
         to state: inout MaterializedNarrativeState
     ) {
         for belief in beliefs where !belief.characterID.isEmpty && !belief.topic.isEmpty {
-            ensureEntityPageExists(id: belief.characterID, kind: .character, in: &state)
+            guard state.entityPages[belief.characterID] != nil else { continue }
             if let current = state.epistemicBeliefs[belief.slotKey],
                belief.authority < current.authority {
                 if belief.believedTruth != current.believedTruth
@@ -753,11 +779,29 @@ enum NarrativeStateReducer {
             let cleanScene = incoming.scene.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cleanScene.isEmpty { merged.scene = cleanScene }
             let cleanCause = incoming.cause.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleanCause.isEmpty { merged.cause = cleanCause }
+            if !cleanCause.isEmpty {
+                merged.cause = NarrativeEntityResolver.appendUniqueSentences(
+                    merged.cause,
+                    cleanCause,
+                    separator: ""
+                )
+            }
             let cleanDev = incoming.development.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleanDev.isEmpty { merged.development = cleanDev }
+            if !cleanDev.isEmpty {
+                merged.development = NarrativeEntityResolver.appendUniqueSentences(
+                    merged.development,
+                    cleanDev,
+                    separator: ""
+                )
+            }
             let cleanOutcome = incoming.outcome.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleanOutcome.isEmpty { merged.outcome = cleanOutcome }
+            if !cleanOutcome.isEmpty {
+                merged.outcome = NarrativeEntityResolver.appendUniqueSentences(
+                    merged.outcome,
+                    cleanOutcome,
+                    separator: ""
+                )
+            }
             if merged.status != .resolved || incoming.authority == .authorDirective || incoming.status == .resolved {
                 merged.status = incoming.status
             }
@@ -791,15 +835,6 @@ enum NarrativeStateReducer {
         if let version = patch.anchorIndexVersion, version > pyramid.anchorIndexVersion {
             pyramid.anchorIndexVersion = version
         }
-    }
-
-    private static func ensureEntityPageExists(
-        id: String,
-        kind: EntityKind,
-        in state: inout MaterializedNarrativeState
-    ) {
-        guard state.entityPages[id] == nil else { return }
-        state.entityPages[id] = EntityPage(id: id, kind: kind, name: id)
     }
 
     private static func recordWarning(

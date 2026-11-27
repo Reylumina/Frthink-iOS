@@ -84,7 +84,7 @@ enum NarrativeReadTools {
 
         switch call.functionName {
         case grepManuscriptName:
-            let pattern = (args["pattern"] as? String) ?? ""
+            let pattern = NarrativeJSONScanner.firstNonEmptyString(args, keys: ["pattern", "query", "keyword"])
             let contextLines = (args["context_lines"] as? Int) ?? 1
             let regex = (args["regex"] as? Bool) ?? false
             output = executeGrep(
@@ -94,7 +94,7 @@ enum NarrativeReadTools {
                 context: context
             )
         case readEntityPageName:
-            let entityKey = (args["entity_id"] as? String) ?? ""
+            let entityKey = NarrativeJSONScanner.firstNonEmptyString(args, keys: ["entity_id", "name", "entity_name", "query"])
             let section = args["section"] as? String
             output = executeReadEntity(
                 entityKey: entityKey,
@@ -102,7 +102,7 @@ enum NarrativeReadTools {
                 state: context.materializedState
             )
         case restoreTurnName:
-            let stepRange = (args["step_range"] as? String) ?? ""
+            let stepRange = NarrativeJSONScanner.firstNonEmptyString(args, keys: ["step_range", "range", "turn"])
             output = ReFoldManager.restoreTurns(
                 stepRange: stepRange,
                 from: context.losslessHistory
@@ -114,7 +114,7 @@ enum NarrativeReadTools {
         return NarrativeToolExecution(
             callID: call.id,
             toolName: call.functionName,
-            output: boundedOutput(output, maxChars: 1_800)
+            output: boundedOutput(output, maxChars: 2_600)
         )
     }
 
@@ -128,7 +128,7 @@ enum NarrativeReadTools {
         guard !trimmed.isEmpty else {
             return "检索关键词不能为空。"
         }
-        let matches = ManuscriptIndex.grepManuscript(
+        let result = ManuscriptIndex.grepManuscriptDetailed(
             pages: context.pages,
             pattern: trimmed,
             contextLines: min(3, max(0, contextLines)),
@@ -136,13 +136,109 @@ enum NarrativeReadTools {
             causalLimit: context.causalLimit,
             maxMatches: 8
         )
-        guard !matches.isEmpty else {
-            return "在当前锚点之前的正文中未找到「\(trimmed)」。"
+        if let regexError = result.regexError {
+            return "正则表达式「\(trimmed)」语法无效（\(regexError)）。请修正正则表达式，或将 regex 设为 false 后改用关键词检索。"
         }
-        let lines = matches.enumerated().map { idx, hit in
-            "[\(idx + 1)] 第 \(hit.pageIndex + 1) 页 第 \(hit.lineNumber) 行\n\(hit.contextSnippet)"
+        if !result.matches.isEmpty {
+            let header = result.totalMatchCount > result.matches.count
+                ? "共命中 \(result.totalMatchCount) 处（按时间顺序展示最早与最新共 \(result.matches.count) 处）："
+                : "共命中 \(result.totalMatchCount) 处："
+            let formattedEntries = result.matches.enumerated().map { idx, hit in
+                "[\(idx + 1)] 第 \(hit.pageIndex + 1) 页 第 \(hit.lineNumber) 行\n\(hit.contextSnippet)"
+            }
+            return joinCompleteBlocks(
+                header: header,
+                blocks: formattedEntries,
+                totalCount: result.totalMatchCount,
+                charBudget: 2_450
+            )
         }
-        return lines.joined(separator: "\n---\n")
+
+        if !regex {
+            let fallbackExcerpts = recallBM25Fallback(
+                query: trimmed,
+                pages: context.pages,
+                causalLimit: context.causalLimit
+            )
+            if !fallbackExcerpts.isEmpty {
+                let blocks = fallbackExcerpts.enumerated().map { idx, item in
+                    "[BM25相关段落 \(idx + 1)]\n\(item.text)"
+                }
+                return joinCompleteBlocks(
+                    header: "字面精确匹配「\(trimmed)」未命中，已自动切换关联段落检索：",
+                    blocks: blocks,
+                    totalCount: blocks.count,
+                    charBudget: 2_450
+                )
+            }
+        }
+
+        return "在当前锚点之前的正文中未找到「\(trimmed)」（建议改用更简短的核心人名、地名或物件名重试）。"
+    }
+
+    private static func joinCompleteBlocks(
+        header: String,
+        blocks: [String],
+        totalCount: Int,
+        charBudget: Int
+    ) -> String {
+        guard !blocks.isEmpty else { return header }
+        var kept: [String] = []
+        var usedChars = header.count + 1
+        let separator = "\n---\n"
+        for block in blocks {
+            let cost = (kept.isEmpty ? 0 : separator.count) + block.count
+            if !kept.isEmpty && usedChars + cost > charBudget {
+                break
+            }
+            kept.append(block)
+            usedChars += cost
+        }
+        var output = header + "\n" + kept.joined(separator: separator)
+        if kept.count < blocks.count {
+            output += "\n（输出预算已满，已完整展示 \(kept.count) 条，全书共命中 \(totalCount) 处；如需缩小范围请使用更具体的关键词。）"
+        }
+        return output
+    }
+
+    private static func recallBM25Fallback(
+        query: String,
+        pages: [String],
+        causalLimit: Int?
+    ) -> [ManuscriptIndex.Excerpt] {
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "|｜/、，,"))
+        let splitTerms = query
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let queryTerms = splitTerms.count > 1 ? splitTerms : [query]
+
+        var causalPrefix = ""
+        var offset = 0
+        for page in pages {
+            let pageLen = (page as NSString).length
+            if let limit = causalLimit {
+                if offset >= limit { break }
+                if offset + pageLen > limit {
+                    let take = max(0, limit - offset)
+                    causalPrefix += (page as NSString).substring(to: take)
+                    break
+                }
+            }
+            causalPrefix += page
+            offset += pageLen
+        }
+        guard !causalPrefix.isEmpty else { return [] }
+
+        return ManuscriptIndex.recallHistoricalExcerpts(
+            fullManuscript: causalPrefix,
+            activeWindowText: "",
+            queryTerms: queryTerms,
+            instructionText: query,
+            causalLimit: nil,
+            maxResults: 5,
+            maxTokens: 900
+        )
     }
 
     private static func executeReadEntity(
@@ -155,16 +251,74 @@ enum NarrativeReadTools {
             return "未提供实体 ID 或名称。"
         }
 
-        let matchedPage: EntityPage? = state.entityPages[needle]
-            ?? state.entityPages.values.first { page in
-                page.name.caseInsensitiveCompare(needle) == .orderedSame
-                    || page.aliases.contains { $0.caseInsensitiveCompare(needle) == .orderedSame }
-            }
-
-        guard let page = matchedPage else {
-            return "未找到与「\(needle)」匹配的实体档案页。"
+        if let exactByID = state.entityPages[needle] {
+            return renderEntityPage(exactByID, section: section, state: state)
         }
 
+        let allPages = state.entityPages.values.sorted { lhs, rhs in
+            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            return lhs.id < rhs.id
+        }
+        let normalizedNeedle = NarrativeEntityResolver.normalizeName(needle)
+
+        let exactNormalizedHits = allPages.filter { page in
+            let nameMatch = NarrativeEntityResolver.normalizeName(page.name) == normalizedNeedle
+            let aliasMatch = page.aliases.contains {
+                NarrativeEntityResolver.normalizeName($0) == normalizedNeedle
+            }
+            let keywordMatch = page.triggerKeywords.contains {
+                NarrativeEntityResolver.normalizeName($0) == normalizedNeedle
+            }
+            return nameMatch || aliasMatch || keywordMatch
+        }
+        if !exactNormalizedHits.isEmpty {
+            return exactNormalizedHits.prefix(3)
+                .map { renderEntityPage($0, section: section, state: state) }
+                .joined(separator: "\n\n---\n\n")
+        }
+
+        if normalizedNeedle.count >= 2 {
+            let fuzzyHits = allPages.filter { page in
+                let haystacks = [page.name] + page.aliases + page.triggerKeywords
+                return haystacks.contains { raw in
+                    let norm = NarrativeEntityResolver.normalizeName(raw)
+                    guard norm.count >= 2 else { return false }
+                    return norm.contains(normalizedNeedle) || normalizedNeedle.contains(norm)
+                }
+            }
+            if !fuzzyHits.isEmpty {
+                if fuzzyHits.count <= 3 {
+                    return fuzzyHits
+                        .map { renderEntityPage($0, section: section, state: state) }
+                        .joined(separator: "\n\n---\n\n")
+                }
+                let candidates = fuzzyHits.prefix(10).map {
+                    "- \($0.name)（\($0.kind.displayName)，ID: \($0.id)）"
+                }
+                return "「\(needle)」匹配到多个档案，请改用以下更精确的实体 ID 或全名查询：\n"
+                    + candidates.joined(separator: "\n")
+            }
+        }
+
+        let relatedBlocks = searchEventsAndThreads(matching: needle, state: state)
+        if !relatedBlocks.isEmpty {
+            return "未找到与「\(needle)」直接匹配的实体档案，但在剧情事件与伏笔中检索到关联条目：\n\n"
+                + relatedBlocks.joined(separator: "\n\n")
+        }
+
+        let available = allPages.prefix(12).map { "- \($0.name)（\($0.kind.displayName)，ID: \($0.id)）" }
+        if available.isEmpty {
+            return "未找到与「\(needle)」匹配的实体档案页，当前世界书尚未建立任何档案。"
+        }
+        return "未找到与「\(needle)」匹配的实体档案、事件或伏笔。当前可查阅档案示例（共 \(allPages.count) 项）：\n"
+            + available.joined(separator: "\n")
+    }
+
+    private static func renderEntityPage(
+        _ page: EntityPage,
+        section: String?,
+        state: MaterializedNarrativeState
+    ) -> String {
         let fullMarkdown = page.renderedMarkdown(
             resolvedFacts: state.facts(for: page.id),
             beliefs: state.beliefs(for: page.id),
@@ -182,6 +336,36 @@ enum NarrativeReadTools {
         return fullMarkdown
     }
 
+    private static func searchEventsAndThreads(
+        matching needle: String,
+        state: MaterializedNarrativeState
+    ) -> [String] {
+        var sections: [String] = []
+        let eventHits = state.sortedEpisodicEvents().filter { event in
+            [event.title, event.arcTitle, event.scene, event.cause, event.development, event.outcome]
+                .contains { !$0.isEmpty && $0.localizedCaseInsensitiveContains(needle) }
+        }
+        if !eventHits.isEmpty {
+            let lines = eventHits.prefix(4).map { "- \($0.formattedSummaryLine)" }
+            sections.append("【匹配关键事件】\n" + lines.joined(separator: "\n"))
+        }
+
+        let threadHits = state.threads.values
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .filter { thread in
+                thread.goal.localizedCaseInsensitiveContains(needle)
+                    || thread.activationCue.localizedCaseInsensitiveContains(needle)
+            }
+        if !threadHits.isEmpty {
+            let lines = threadHits.prefix(4).map {
+                let cue = $0.activationCue.isEmpty ? "" : "（线索：\($0.activationCue)）"
+                return "- [\($0.state.displayName)] \($0.goal)\(cue)"
+            }
+            sections.append("【匹配伏笔】\n" + lines.joined(separator: "\n"))
+        }
+        return sections
+    }
+
     private static func parseArguments(_ raw: String) -> [String: Any] {
         guard let data = raw.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -191,6 +375,11 @@ enum NarrativeReadTools {
 
     private static func boundedOutput(_ text: String, maxChars: Int) -> String {
         guard text.count > maxChars else { return text }
-        return String(text.prefix(maxChars)) + "\n…（结果已截断）"
+        let prefixSlice = String(text.prefix(maxChars))
+        if let newlineRange = prefixSlice.range(of: "\n", options: .backwards),
+           prefixSlice.distance(from: prefixSlice.startIndex, to: newlineRange.lowerBound) >= maxChars / 2 {
+            return String(prefixSlice[..<newlineRange.lowerBound]) + "\n…（结果已按整行边界截断）"
+        }
+        return prefixSlice + "\n…（结果已截断）"
     }
 }

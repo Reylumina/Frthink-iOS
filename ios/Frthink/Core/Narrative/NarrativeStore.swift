@@ -691,15 +691,6 @@ struct NarrativeStore {
         }
     }
 
-    func deleteWorkspace(projectID: String) throws {
-        try NarrativeProjectLock.withLock(for: projectID) {
-            let dir = narrativeDirectory(projectID)
-            if FileManager.default.fileExists(atPath: dir.path) {
-                try FileManager.default.removeItem(at: dir)
-            }
-        }
-    }
-
     private func readDecoded<T: Decodable>(_ url: URL, decoder: JSONDecoder) -> T? {
         guard case .loaded(let data) = fileStore.readEncryptedResult(url) else {
             return nil

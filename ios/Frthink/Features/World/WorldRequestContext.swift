@@ -33,7 +33,9 @@ struct WorldRequestContext {
         return Self(client: client, provider: provider)
     }
 
-    /// 世界任务统一的请求参数：输出预算至少 4096，截断按 `failOnLength` 处理。
+    static let structuredTaskTemperature: Double = 0.2
+
+    /// 世界任务统一的请求参数：输出预算至少 4096，固定低温采样，截断按 `failOnLength` 处理。
     ///
     /// 统一调用此处，确保 `maxTokens` 满足大批量 JSON 结构输出需求。
     static func request(
@@ -46,7 +48,7 @@ struct WorldRequestContext {
             model: provider.resolvedModel,
             messages: messages,
             stream: false,
-            temperature: provider.temperature,
+            temperature: Self.structuredTaskTemperature,
             maxTokens: max(provider.maxTokens, 4_096),
             thinking: thinking,
             failOnLength: failOnLength
