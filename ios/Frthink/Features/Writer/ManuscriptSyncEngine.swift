@@ -582,10 +582,11 @@ enum ManuscriptSyncEngine {
             workspace.threads[threadID] = thread
         }
 
-        workspace.entityPages[targetID]?.currentFactIDs = workspace.activeFacts.values
+        let targetFactIDs = workspace.activeFacts.values
             .filter { $0.entityID == targetID && !$0.isRetracted }
             .map(\.id)
             .sorted()
+        workspace.entityPages[targetID]?.currentFactIDs = targetFactIDs
         if workspace.activePOVCharacterID == sourceID {
             workspace.activePOVCharacterID = targetID
         }
