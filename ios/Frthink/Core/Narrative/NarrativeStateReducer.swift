@@ -493,8 +493,28 @@ enum NarrativeStateReducer {
         affectedEntityIDs: inout Set<String>,
         to state: inout MaterializedNarrativeState
     ) {
-        for event in events where !event.entityID.isEmpty && !event.attribute.isEmpty {
-            guard state.entityPages[event.entityID] != nil else { continue }
+        for rawEvent in events where !rawEvent.entityID.isEmpty && !rawEvent.attribute.isEmpty {
+            guard state.entityPages[rawEvent.entityID] != nil else { continue }
+            var event = rawEvent
+            if event.isRetracted {
+                if state.activeFacts[event.slotKey] == nil,
+                   event.authority < .authorDirective,
+                   let canonicalAttr = WorldFactEvent.canonicalAttribute(
+                       event.attribute,
+                       entityKind: state.entityPages[event.entityID]?.kind
+                   ),
+                   state.activeFacts["\(event.entityID)\u{1F}\(canonicalAttr)"] != nil {
+                    event.attribute = canonicalAttr
+                }
+            } else if event.authority < .authorDirective {
+                guard let canonicalAttr = WorldFactEvent.canonicalAttribute(
+                    event.attribute,
+                    entityKind: state.entityPages[event.entityID]?.kind
+                ) else {
+                    continue
+                }
+                event.attribute = canonicalAttr
+            }
             state.factHistory.append(event)
             affectedEntityIDs.insert(event.entityID)
 

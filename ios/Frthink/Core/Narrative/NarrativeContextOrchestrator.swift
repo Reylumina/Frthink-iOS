@@ -366,7 +366,7 @@ enum NarrativeContextOrchestrator {
         switch page.kind {
         case .character:
             identityLabel = "身份"
-            summaryLabel = "性格与处境"
+            summaryLabel = "性格与背景"
             boundaryLabel = "底线"
         case .location:
             identityLabel = "定位"
@@ -468,13 +468,23 @@ enum NarrativeContextOrchestrator {
         return String(joined.prefix(maxLength)) + "…"
     }
 
-    private static func localizedFactAttribute(_ raw: String) -> String {
+    static func localizedFactAttribute(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = trimmed.lowercased()
         if lower.hasPrefix("relation:") {
             let target = String(trimmed.dropFirst("relation:".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return target.isEmpty ? "关系" : "与\(target)关系"
+        }
+        if lower.hasPrefix("possession:") {
+            let target = String(trimmed.dropFirst("possession:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return target.isEmpty ? "持有" : "持有·\(target)"
+        }
+        if lower.hasPrefix("condition:") {
+            let target = String(trimmed.dropFirst("condition:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return target.isEmpty ? "状态" : "状态·\(target)"
         }
         switch lower {
         case "location": return "位置"
@@ -499,7 +509,7 @@ enum NarrativeContextOrchestrator {
 
     /// 若当前处于某角色的 POV 视角且该角色在特定主题上处于盲区/误认（`!knowsSecret`），
     /// 必须在送入模型前硬裁剪对应的全知客观事实，避免提示词泄密引发“知识的诅咒”。
-    private static func isFactMaskedByPOVBlindSpot(
+    static func isFactMaskedByPOVBlindSpot(
         _ fact: WorldFactEvent,
         page: EntityPage,
         povBlindSpots: [EpistemicBelief]

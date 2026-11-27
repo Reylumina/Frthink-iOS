@@ -158,6 +158,75 @@ enum NarrativeEntityResolver {
         return out
     }
 
+    /// 按完整句子顺序裁剪长度，避免抽取或展示时跳掉中间句造成断章取义。
+    static func trimToSentenceBoundary(_ text: String, maxLength: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxLength, maxLength > 0 else { return trimmed }
+        let sentences = splitSentences(trimmed)
+        guard !sentences.isEmpty else { return String(trimmed.prefix(maxLength)) }
+
+        var kept: [String] = []
+        var used = 0
+        for sentence in sentences {
+            let cost = kept.isEmpty ? sentence.count : (sentence.count + 1)
+            if used + cost > maxLength {
+                break
+            }
+            kept.append(sentence)
+            used += cost
+        }
+        if !kept.isEmpty {
+            return joinParagraph(kept)
+        }
+        let first = sentences[0]
+        let slice = String(first.prefix(maxLength))
+        let softBreaks: Set<Character> = ["，", ",", "；", ";", "、", "：", ":"]
+        if let breakIdx = slice.lastIndex(where: { softBreaks.contains($0) }),
+           slice.distance(from: slice.startIndex, to: breakIdx) >= maxLength / 2 {
+            return String(slice[..<breakIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return slice
+    }
+
+    /// 清除字段自身重复句，并剔除已在对照字段中完整出现的句子（防止身份、性格、声线互抄）。
+    static func deduplicateCrossFieldText(
+        primary: String,
+        referenceTexts: [String]
+    ) -> String {
+        let cleanPrimary = primary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPrimary.isEmpty else { return "" }
+        let refKeys = referenceTexts
+            .map { comparisonKey($0) }
+            .filter { !$0.isEmpty }
+        var seen = Set<String>()
+        var kept: [String] = []
+        for sentence in splitSentences(cleanPrimary) {
+            let key = comparisonKey(sentence)
+            guard !key.isEmpty else { continue }
+            let coveredByRef = refKeys.contains { $0.contains(key) }
+            guard !coveredByRef, seen.insert(key).inserted else { continue }
+            kept.append(sentence)
+        }
+        guard !kept.isEmpty else { return "" }
+        return joinParagraph(kept)
+    }
+
+    /// 判断实体档案是否存在句内重复或跨字段（identity / summary / voiceProfile）重复句。
+    static func hasDuplicateSentencesAcrossFields(in page: EntityPage) -> Bool {
+        var seen = Set<String>()
+        let fields = [page.identity, page.summary, page.voiceProfile]
+        for field in fields {
+            for sentence in splitSentences(field) {
+                let key = comparisonKey(sentence)
+                guard !key.isEmpty else { continue }
+                if !seen.insert(key).inserted {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     // MARK: - 请求级 Short-ID 映射
 
     struct ExtractionIDMapping: Hashable {
@@ -167,15 +236,21 @@ enum NarrativeEntityResolver {
         var eventRealToShort: [String: String]
         var threadShortToReal: [String: String]
         var threadRealToShort: [String: String]
+        var factShortToReal: [String: String] = [:]
+        var factRealToShort: [String: String] = [:]
 
         var isEmpty: Bool {
-            entityShortToReal.isEmpty && eventShortToReal.isEmpty && threadShortToReal.isEmpty
+            entityShortToReal.isEmpty
+                && eventShortToReal.isEmpty
+                && threadShortToReal.isEmpty
+                && factShortToReal.isEmpty
         }
 
         static func build(
             entities: [EntityPage],
             events: [EpisodicEvent] = [],
-            threads: [ProspectiveThread] = []
+            threads: [ProspectiveThread] = [],
+            facts: [WorldFactEvent] = []
         ) -> ExtractionIDMapping {
             var eShortToReal: [String: String] = [:]
             var eRealToShort: [String: String] = [:]
@@ -201,13 +276,23 @@ enum NarrativeEntityResolver {
                 tRealToShort[thread.id] = short
             }
 
+            var fShortToReal: [String: String] = [:]
+            var fRealToShort: [String: String] = [:]
+            for (idx, fact) in facts.enumerated() where !fact.id.isEmpty {
+                let short = "F\(idx + 1)"
+                fShortToReal[short] = fact.id
+                fRealToShort[fact.id] = short
+            }
+
             return ExtractionIDMapping(
                 entityShortToReal: eShortToReal,
                 entityRealToShort: eRealToShort,
                 eventShortToReal: evShortToReal,
                 eventRealToShort: evRealToShort,
                 threadShortToReal: tShortToReal,
-                threadRealToShort: tRealToShort
+                threadRealToShort: tRealToShort,
+                factShortToReal: fShortToReal,
+                factRealToShort: fRealToShort
             )
         }
     }

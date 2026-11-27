@@ -1598,7 +1598,7 @@ extension SelfCheck {
             )
             let promptText = messages.map(\.content).joined(separator: "\n")
             try expect(
-                StoryChoicePlanner.recommendedTemperature == 0.75
+                StoryChoicePlanner.recommendedTemperature == 0.5
                     && promptText.contains("禁止主角在城楼对峙结束前撤退")
                     && promptText.contains("交出半封密信"),
                 "分支推演提示词必须完整携带写作规则与当前未回收伏笔"
@@ -4096,7 +4096,7 @@ extension SelfCheck {
                     && overlapChunks[0].leadingContext.isEmpty
                     && !overlapChunks[1].leadingContext.isEmpty
                     && seg1.contains(overlapChunks[1].leadingContext),
-                "同步切片应保持 text 无缝拼接且续段携带来自上段末尾的只读前情"
+                "同步切片应保持 text 连续拼接且续段携带来自上段末尾的只读前情"
             )
 
             let dedupeRaw = """
@@ -4271,7 +4271,7 @@ extension SelfCheck {
                 "阶段 2 应只产出事件/认知/伏笔/场拍卡并精确绑定实体，不得再创建实体或零散事实"
             )
 
-            // 3. 写作上下文应注入人物性格与处境，且关键事件按顺时序展示最多 6 条
+            // 3. 写作上下文应注入人物性格与背景，且关键事件按顺时序展示最多 6 条
             var eventsMap: [String: EpisodicEvent] = [:]
             for idx in 1...6 {
                 let evtID = "evt_seq_\(idx)"
@@ -4297,13 +4297,13 @@ extension SelfCheck {
             let idx1 = cone.block.range(of: "事件1")?.lowerBound
             let idx6 = cone.block.range(of: "事件6")?.lowerBound
             try expect(
-                cone.block.contains("性格与处境：")
+                cone.block.contains("性格与背景：")
                     && cone.block.contains("外冷内热，行事慎密")
                     && cone.block.contains("事件6")
                     && idx1 != nil
                     && idx6 != nil
                     && idx1! < idx6!,
-                "写作上下文必须注入人物性格与处境摘要，并按时间升序保留最多 6 条相关关键事件"
+                "写作上下文必须注入人物性格与背景摘要，并按时间升序保留最多 6 条相关关键事件"
             )
 
             return "两阶段全书同步 + 人物摘要注入 + 顺时序事件视野 ok"
@@ -4444,7 +4444,7 @@ extension SelfCheck {
                     && noToolsMerged.contains("位置：茶室")
                     && noToolsMerged.contains("与沈清秋关系：高度警惕")
                     && sceneCardCount == 1
-                    && !noToolsMerged.contains("性格与处境：\(longSummary)")
+                    && !noToolsMerged.contains("性格与背景：\(longSummary)")
                     && noToolsMerged.contains("核心性格冷静克制")
                     && noToolsMerged.contains("屏息躲在茶楼暗格后")
                     && idxPrefetch != nil && idxStyle != nil && idxBody != nil && idxRule != nil && idxBeat != nil && idxInstr != nil
@@ -4676,6 +4676,309 @@ extension SelfCheck {
             )
 
             return "抽取端 20 实体上限 + grounding + 事件相关性排序 + 工具加固 ok"
+        }
+
+        // 验证世界更新去重/规范槽位时间线覆写、ACTOR changed 门控、终态整理不叠加剧情线，以及角色扮演走向重构。
+        check("narrative.worldUpdateHygieneAndRoleplayChoices") {
+            let t0 = Date(timeIntervalSince1970: 1_796_500_000)
+
+            // 1. 属性同义归一、同一 slotKey 时间线覆写与瞬时动作拦截
+            try expect(
+                WorldFactEvent.canonicalAttribute("当前位置", entityKind: .character) == "location"
+                    && WorldFactEvent.canonicalAttribute("所在", entityKind: .character) == "location"
+                    && WorldFactEvent.canonicalAttribute("短期目标", entityKind: .character) == "goal"
+                    && WorldFactEvent.canonicalAttribute("眼下状态", entityKind: .character) == "status"
+                    && WorldFactEvent.canonicalAttribute("对沈清秋", entityKind: .character) == "relation:沈清秋"
+                    && WorldFactEvent.canonicalAttribute("归属") == WorldFactEvent.StandardAttribute.owner
+                    && WorldFactEvent.canonicalAttribute("行动", entityKind: .character) == nil
+                    && WorldFactEvent.canonicalAttribute("action", entityKind: .character) == nil,
+                "属性规范化应归一中英文同义键并拦截瞬时动作"
+            )
+
+            let lin = EntityPage(
+                id: "c_lin",
+                kind: .character,
+                name: "林昭",
+                summary: "外冷内热，谨慎克制",
+                identity: "巡夜捕快",
+                voiceProfile: "言简意赅，较少寒暄",
+                hardBoundaries: ["绝不背叛师门"],
+                updatedAt: t0
+            )
+            let shen = EntityPage(
+                id: "c_shen",
+                kind: .character,
+                name: "沈清秋",
+                summary: "城府较深，说话留三分余地",
+                identity: "茶室掌柜",
+                updatedAt: t0.addingTimeInterval(5)
+            )
+            let oldLocFact = WorldFactEvent(
+                id: "f_loc_1",
+                entityID: lin.id,
+                attribute: "当前位置",
+                value: "老码头",
+                nodeID: "n1",
+                createdAt: t0
+            )
+            let newLocFact = WorldFactEvent(
+                id: "f_loc_2",
+                entityID: lin.id,
+                attribute: "location",
+                value: "城西茶室",
+                nodeID: "n2",
+                createdAt: t0.addingTimeInterval(10)
+            )
+            let transientActionFact = WorldFactEvent(
+                id: "f_action_bad",
+                entityID: lin.id,
+                attribute: "当前行动",
+                value: "伸手端起茶杯抿了一口",
+                nodeID: "n2",
+                createdAt: t0.addingTimeInterval(10)
+            )
+            let existingEvent = EpisodicEvent(
+                id: "evt_teahouse",
+                title: "茶室叙旧",
+                arcTitle: "雾港线",
+                scene: "城西茶室",
+                participantEntityIDs: [lin.id, shen.id],
+                cause: "雨夜相约歇脚。",
+                development: "两人核对近日账目。",
+                status: .ongoing,
+                nodeID: "n1",
+                updatedAt: t0
+            )
+
+            var state = MaterializedNarrativeState(
+                atNodeID: "n2",
+                pathNodeIDs: ["root", "n1", "n2"],
+                entityPages: [lin.id: lin, shen.id: shen],
+                episodicEvents: [existingEvent.id: existingEvent]
+            )
+            NarrativeStateReducer.apply(
+                delta: PlotNodeDelta(factEvents: [oldLocFact]),
+                nodeID: "n1",
+                to: &state
+            )
+            NarrativeStateReducer.apply(
+                delta: PlotNodeDelta(factEvents: [newLocFact, transientActionFact]),
+                nodeID: "n2",
+                to: &state
+            )
+            let linFactsAfterMove = state.facts(for: lin.id)
+            try expect(
+                linFactsAfterMove.count == 1
+                    && linFactsAfterMove.first?.attribute == "location"
+                    && linFactsAfterMove.first?.value == "城西茶室",
+                "同义属性应在时间线上互相覆盖，且瞬时行动不得写入设定与近况"
+            )
+
+            // 1b. 旧存档遗留的瞬时脏事实应可通过 isRetracted 撤回，不被 canonicalAttribute 误拦截
+            let legacyActionFact = WorldFactEvent(
+                id: "f_legacy_action",
+                entityID: lin.id,
+                attribute: "行动",
+                value: "推门入室",
+                nodeID: "n_legacy",
+                authority: .canonProseQuote,
+                createdAt: t0
+            )
+            var legacyState = MaterializedNarrativeState(
+                atNodeID: "n_legacy",
+                pathNodeIDs: ["root", "n_legacy"],
+                entityPages: [lin.id: lin],
+                activeFacts: [legacyActionFact.slotKey: legacyActionFact]
+            )
+            let retractLegacyAction = WorldFactEvent(
+                id: "f_legacy_retract",
+                entityID: lin.id,
+                attribute: "行动",
+                value: "推门入室",
+                nodeID: "n_legacy_clean",
+                authority: .canonProseQuote,
+                supersedesEventID: legacyActionFact.id,
+                isRetracted: true,
+                createdAt: t0.addingTimeInterval(5)
+            )
+            NarrativeStateReducer.apply(
+                delta: PlotNodeDelta(factEvents: [retractLegacyAction]),
+                nodeID: "n_legacy_clean",
+                to: &legacyState
+            )
+            try expect(
+                legacyState.facts(for: lin.id).isEmpty,
+                "旧存档遗留的瞬时脏事实应可被撤回事件清除"
+            )
+
+            // 2. 完整现状投喂 + ACTOR changed 门控 + 快照替换去重 + negated_fact_ids 撤回
+            let goalFact = WorldFactEvent(
+                id: "f_goal_1",
+                entityID: lin.id,
+                attribute: "goal",
+                value: "去老码头查铜牌",
+                nodeID: "n1",
+                createdAt: t0
+            )
+            let factsByEntity = [lin.id: (state.facts(for: lin.id) + [goalFact])]
+            let extractPayload = NarrativeEntityExtractor.buildExtractionPayload(
+                manuscriptTail: "茶室内灯影摇曳，林昭放下了查铜牌的念头，只静静听沈清秋说话。",
+                existingPages: [lin, shen],
+                existingFactsByEntity: factsByEntity,
+                includeFacts: true
+            )
+            let extractUserPrompt = extractPayload.messages.map(\.content).joined(separator: "\n")
+            let linShort = extractPayload.mapping.entityRealToShort[lin.id] ?? ""
+            let goalShort = extractPayload.mapping.factRealToShort[goalFact.id] ?? ""
+            try expect(
+                extractUserPrompt.contains("外冷内热，谨慎克制")
+                    && extractUserPrompt.contains("言简意赅，较少寒暄")
+                    && extractUserPrompt.contains("\(goalShort)[goal]=去老码头查铜牌"),
+                "实体抽取提示词应完整展示现有性格、说话风格与带短编号的当前近况"
+            )
+
+            let unchangedJSON = """
+            {"entities":[{"id":"\(linShort)","changed":false,"kind":"character","name":"林昭"}],"facts":[],"negated_fact_ids":[]}
+            """
+            let unchangedRes = try NarrativeEntityExtractor.parseEntitiesAndFacts(
+                from: unchangedJSON,
+                excerpt: "茶室内灯影摇曳，林昭静静坐着。",
+                nodeID: "n3",
+                existingPages: [lin],
+                existingFactsByEntity: factsByEntity,
+                idMapping: extractPayload.mapping,
+                now: t0.addingTimeInterval(20)
+            )
+            try expect(unchangedRes.upserts.isEmpty, "changed=false 时不应改写或叠加既有实体档案")
+
+            let snapshotUpdateJSON = """
+            {"entities":[{"id":"\(linShort)","changed":true,"kind":"character","name":"林昭","identity":"巡夜捕快","summary":"巡夜捕快。性格外冷内热，经历风波后更显沉稳，不再执着旧案。","voice_profile":"言简意赅，较少寒暄。"}],"facts":[],"negated_fact_ids":["\(goalShort)"]}
+            """
+            let snapshotRes = try NarrativeEntityExtractor.parseEntitiesAndFacts(
+                from: snapshotUpdateJSON,
+                excerpt: "茶室内灯影摇曳，林昭放下旧案，沉稳坐定。",
+                nodeID: "n3",
+                existingPages: [lin],
+                existingFactsByEntity: factsByEntity,
+                idMapping: extractPayload.mapping,
+                now: t0.addingTimeInterval(25)
+            )
+            let updatedLin = snapshotRes.upserts.first { $0.id == lin.id }
+            try expect(
+                updatedLin != nil
+                    && !(updatedLin?.summary.contains("谨慎克制") ?? true)
+                    && !(updatedLin?.summary.contains("巡夜捕快") ?? true)
+                    && (updatedLin?.summary.contains("不再执着旧案") ?? false)
+                    && snapshotRes.factEvents.contains(where: { $0.isRetracted && $0.attribute == "goal" }),
+                "changed=true 应替换为整合后的最新快照、剔除与身份重复的句子，并按 negated_fact_ids 撤回过时近况"
+            )
+
+            // 3. 实时冷同步 negated_fact_ids + 拦截瞬时动作
+            let liveDeltaPayload = NarrativeDeltaExtractor.buildExtractionPayload(
+                excerpt: "林昭收起名帖，不再去老码头查铜牌，转身推门走了出去。",
+                knownEntities: [lin],
+                existingFactsByEntity: factsByEntity,
+                activeThreads: [],
+                activeEvents: []
+            )
+            let liveGoalShort = liveDeltaPayload.mapping.factRealToShort[goalFact.id] ?? ""
+            let liveDeltaJSON = """
+            {"new_entities":[],"facts":[{"entity_id":"E1","attribute":"action","value":"转身推门走了出去","quote":"转身推门走了出去"}],"negated_fact_ids":["\(liveGoalShort)"],"beliefs":[],"threads":[],"events":[]}
+            """
+            let liveParsed = try NarrativeDeltaExtractor.parseDelta(
+                from: liveDeltaJSON,
+                excerpt: "林昭收起名帖，不再去老码头查铜牌，转身推门走了出去。",
+                nodeID: "n_live",
+                knownEntities: [lin],
+                existingFactsByEntity: factsByEntity,
+                idMapping: liveDeltaPayload.mapping,
+                now: t0.addingTimeInterval(30)
+            )
+            try expect(
+                liveParsed.delta.factEvents.count == 1
+                    && liveParsed.delta.factEvents[0].isRetracted
+                    && liveParsed.delta.factEvents[0].attribute == "goal",
+                "冷同步应拦截 action 瞬时动作并保留 negated_fact_ids 撤回事件"
+            )
+
+            // 4. 终态实体整理 Pass：清理重复与过期近况，且严格不触碰 episodicEvents
+            let bloatedLin = EntityPage(
+                id: lin.id,
+                kind: .character,
+                name: "林昭",
+                summary: "巡夜捕快。性格外冷内热。性格外冷内热。",
+                identity: "巡夜捕快",
+                voiceProfile: "性格外冷内热。说话简短。",
+                updatedAt: t0
+            )
+            let consolidationCandidates = NarrativeEntityExtractor.entitiesNeedingConsolidation(
+                pages: [bloatedLin, shen],
+                factsByEntity: factsByEntity,
+                touchCounts: [bloatedLin.id: 1, shen.id: 1]
+            )
+            let consolPayload = NarrativeEntityExtractor.buildConsolidationPayload(
+                pages: consolidationCandidates,
+                factsByEntity: factsByEntity
+            )
+            let consolLinShort = consolPayload.mapping.entityRealToShort[bloatedLin.id] ?? ""
+            let consolGoalShort = consolPayload.mapping.factRealToShort[goalFact.id] ?? ""
+            let consolJSON = """
+            {"entities":[{"id":"\(consolLinShort)","changed":true,"identity":"巡夜捕快","summary":"巡夜捕快。性格外冷内热。","voice_profile":"说话简短。"}],"negated_fact_ids":["\(consolGoalShort)"]}
+            """
+            let consolDelta = try NarrativeEntityExtractor.parseConsolidationResult(
+                from: consolJSON,
+                targetPages: consolidationCandidates,
+                factsByEntity: factsByEntity,
+                idMapping: consolPayload.mapping,
+                nodeID: "n_consol",
+                now: t0.addingTimeInterval(40)
+            )
+            try expect(
+                consolidationCandidates.contains(where: { $0.id == bloatedLin.id })
+                    && consolDelta.episodicEvents.isEmpty
+                    && consolDelta.removedEpisodicEventIDs.isEmpty
+                    && consolDelta.entityPageReplacements.first?.summary == "性格外冷内热。"
+                    && consolDelta.entityPageReplacements.first?.voiceProfile == "说话简短。"
+                    && consolDelta.factEvents.contains(where: { $0.isRetracted && $0.attribute == "goal" }),
+                "终态整理 Pass 应清理跨字段重复、撤回过时近况，且绝不叠加或修改剧情线"
+            )
+
+            // 5. 剧情走向重构：接入全局预设、在场人设与 POV 盲区，去除博弈阴谋诱导词
+            var choiceState = state
+            choiceState.epistemicBeliefs = [
+                "b_pov_secret": EpistemicBelief(
+                    characterID: lin.id,
+                    topic: "茶室密信",
+                    believedTruth: "尚不知沈清秋暗藏调令",
+                    knowsSecret: false,
+                    updatedAtNodeID: "n2"
+                )
+            ]
+            let planningMessages = StoryChoicePlanner.buildPlanningMessages(
+                state: choiceState,
+                manuscriptTail: "雨声渐缓，林昭把空茶盏推到桌边，问沈清秋这两日店铺可还安稳。",
+                desiredCount: 3,
+                context: StoryChoicePlanningContext(
+                    globalPreset: "风格为温馨市井日常，严禁把普通街坊对话写成权谋算计。",
+                    aiFlavorRules: "对话自然松弛，少用悬疑感叹。",
+                    povCharacterID: lin.id
+                )
+            )
+            let planningSystem = planningMessages.first?.content ?? ""
+            let planningAll = planningMessages.map(\.content).joined(separator: "\n")
+            try expect(
+                planningAll.contains("温馨市井日常")
+                    && planningAll.contains("严禁把普通街坊对话写成权谋算计")
+                    && planningAll.contains("外冷内热，谨慎克制")
+                    && planningAll.contains("言简意赅，较少寒暄")
+                    && planningAll.contains("绝不背叛师门")
+                    && planningAll.contains("尚不知沈清秋暗藏调令")
+                    && !planningSystem.contains("冲突焦点")
+                    && !planningSystem.contains("风险、悬念"),
+                "剧情走向应完整继承全局预设、在场人物人设与 POV 盲区，并移除强造冲突与风险诱导"
+            )
+
+            return "世界更新规范覆写 + 终态防叠加整理 + 角色扮演剧情走向 ok"
         }
     }
 

@@ -265,6 +265,7 @@ struct WorldFactEvent: Identifiable, Codable, Hashable {
         static let goal = "goal"
         static let personality = "personality"
         static let status = "status"
+        static let owner = "owner"
     }
 
     var id: String
@@ -279,6 +280,143 @@ struct WorldFactEvent: Identifiable, Codable, Hashable {
     var createdAt: Date
 
     var slotKey: String { "\(entityID)\u{1F}\(attribute)" }
+
+    /// 规范化动态事实属性槽位：拦截瞬时动作/流水账字段，并将中英文同义属性归一至稳定键名以实现时间线覆写。
+    static func canonicalAttribute(
+        _ raw: String,
+        entityKind: EntityKind? = nil
+    ) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalizedColon = trimmed.replacingOccurrences(of: "：", with: ":")
+
+        func stripTimeModifiers(_ s: String) -> String {
+            let prefixes = [
+                "当前", "目前", "最新", "眼下", "现在", "近期", "短期", "阶段性", "临时",
+                "current_", "current ", "latest_", "latest ", "recent_", "recent ",
+            ]
+            var result = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            var matched = true
+            while matched {
+                matched = false
+                let lower = result.lowercased()
+                for prefix in prefixes where lower.hasPrefix(prefix) && result.count > prefix.count {
+                    result = String(result.dropFirst(prefix.count))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    matched = true
+                    break
+                }
+            }
+            return result
+        }
+
+        let blockedTransientTokens: Set<String> = [
+            "action", "actions", "behavior", "behaviour", "event", "events",
+            "dialogue", "speech", "utterance", "quote", "action_log",
+            "行动", "动作", "行为", "举动", "台词", "对话", "言语", "事件", "经过", "情节", "剧情", "反应",
+        ]
+
+        let headLower = stripTimeModifiers(normalizedColon).lowercased()
+        if blockedTransientTokens.contains(headLower) || blockedTransientTokens.contains(trimmed.lowercased()) {
+            return nil
+        }
+
+        if let colonIndex = normalizedColon.firstIndex(of: ":") {
+            let prefixRaw = String(normalizedColon[..<colonIndex])
+            let bodyRaw = String(normalizedColon[normalizedColon.index(after: colonIndex)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let prefixLower = stripTimeModifiers(prefixRaw).lowercased()
+            if blockedTransientTokens.contains(prefixLower) {
+                return nil
+            }
+            switch prefixLower {
+            case "relation", "relationship", "关系", "人际", "人际关系":
+                return bodyRaw.isEmpty ? StandardAttribute.relation : "relation:\(bodyRaw)"
+            case "possession", "item", "inventory", "holding", "持有", "持有物", "携带", "随身", "道具":
+                return bodyRaw.isEmpty ? StandardAttribute.possession : "possession:\(bodyRaw)"
+            case "condition", "health", "injury", "wound", "mood", "伤势", "情绪", "身体", "身体状态", "心境":
+                return bodyRaw.isEmpty ? StandardAttribute.condition : "condition:\(bodyRaw)"
+            case "custom", "自定义":
+                return bodyRaw.isEmpty ? trimmed : "custom:\(bodyRaw)"
+            case "memory", "往事":
+                return bodyRaw.isEmpty ? trimmed : "memory:\(bodyRaw)"
+            default:
+                break
+            }
+        }
+
+        if normalizedColon.hasPrefix("与"), normalizedColon.hasSuffix("关系"), normalizedColon.count >= 4 {
+            let target = String(normalizedColon.dropFirst().dropLast(2))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !target.isEmpty {
+                return "relation:\(target)"
+            }
+        }
+        if normalizedColon.hasPrefix("对"), !normalizedColon.contains(":"), normalizedColon.count >= 3 {
+            let target = String(normalizedColon.dropFirst())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !target.isEmpty && target.count <= 16 {
+                return "relation:\(target)"
+            }
+        }
+
+        let cleanKey = stripTimeModifiers(normalizedColon).lowercased()
+        switch cleanKey {
+        case "location", "place", "whereabouts", "position",
+             "位置", "地点", "所在", "所在地", "所在位置", "去向", "身处", "方位":
+            return StandardAttribute.location
+        case "goal", "objective", "target", "aim", "intention", "plan",
+             "目标", "目的", "意图", "打算", "计划", "心念", "心念目标", "诉求":
+            return StandardAttribute.goal
+        case "status", "state", "situation", "circumstance",
+             "状态", "现状", "处境", "近况", "境况", "眼下状态", "局势":
+            return StandardAttribute.status
+        case "condition", "health", "injury", "wound", "mood", "emotion",
+             "伤势", "身体", "身体状态", "健康", "情绪", "心境", "伤情", "精神状态":
+            return StandardAttribute.condition
+        case "possession", "possessions", "item", "items", "inventory", "equipment", "holding", "carried",
+             "持有", "持有物", "携带", "随身", "随身物品", "道具", "物品", "武器", "装备":
+            return StandardAttribute.possession
+        case "owner", "holder", "ownership",
+             "归属", "持有者", "所属", "主人", "所有权":
+            return StandardAttribute.owner
+        case "layout", "structure",
+             "格局", "布局", "构造", "结构", "空间布局":
+            return "layout"
+        case "atmosphere", "ambience", "vibe",
+             "氛围", "环境", "气息", "气氛":
+            return "atmosphere"
+        case "access", "entrance", "restriction",
+             "准入", "出入", "限制", "入口", "通行":
+            return "access"
+        case "capability", "ability", "use", "usage", "function", "effect",
+             "用途", "功能", "功用", "能力", "效果", "作用":
+            return "capability"
+        case "cost", "price", "side_effect", "drawback",
+             "代价", "消耗", "副作用", "损耗", "限制条件":
+            return "cost"
+        case "rule", "rules", "law", "principle",
+             "规则", "铁律", "法则", "机制":
+            return "rule"
+        case "faction", "organization", "sect",
+             "势力", "阵营", "宗门", "组织":
+            return "faction"
+        case "history", "origin", "background",
+             "历史", "渊源", "由来", "背景":
+            return "history"
+        case "exception", "exceptions", "weakness",
+             "例外", "破例", "弱点":
+            return "exception"
+        case "relation", "relationship",
+             "关系", "人际", "人际关系":
+            return StandardAttribute.relation
+        case "lore", "设定", "世界观":
+            return StandardAttribute.lore
+        default:
+            _ = entityKind
+            return trimmed
+        }
+    }
 
     init(
         id: String = UUID().uuidString,
@@ -485,7 +623,7 @@ enum EntityKind: String, Codable, Hashable {
 
     var summaryLabel: String {
         switch self {
-        case .character: return "性格与处境"
+        case .character: return "性格与背景"
         case .location: return "布局与氛围"
         case .artifact: return "外观与用途"
         case .lore: return "词条内容"

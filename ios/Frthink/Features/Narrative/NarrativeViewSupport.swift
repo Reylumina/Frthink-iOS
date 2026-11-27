@@ -101,12 +101,18 @@ enum NarrativeViewSupport {
         let workspace = session.ensureNarrativeWorkspace(
             settingsCorpusLibraries: store.settings.corpusLibraries
         )
-        let existingPages = Array(workspace.currentState().entityPages.values)
+        let currentState = workspace.currentState()
+        let existingPages = Array(currentState.entityPages.values)
+        let existingFactsByEntity = Dictionary(
+            grouping: currentState.activeFacts.values.filter { !$0.isRetracted },
+            by: \.entityID
+        )
         let excerpt = PromptComposer.codePointTail(trimmed, limit: 6_000)
 
         let extractionPayload = NarrativeEntityExtractor.buildExtractionPayload(
             manuscriptTail: excerpt,
             existingPages: existingPages,
+            existingFactsByEntity: existingFactsByEntity,
             targetKind: targetKind
         )
         let request = LLMRequest(
@@ -276,20 +282,31 @@ enum NarrativeViewSupport {
     /// 将内部英文属性槽位转换为自然可读的中文标签，去除工具感。
     static func humanFactLabel(for attribute: String) -> String {
         let trimmed = attribute.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("relation:") {
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("relation:") {
             let target = String(trimmed.dropFirst("relation:".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return target.isEmpty ? "关系" : "对\(target)"
         }
-        if trimmed.hasPrefix("custom:") {
+        if lower.hasPrefix("possession:") {
+            let target = String(trimmed.dropFirst("possession:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return target.isEmpty ? "持有" : "持有·\(target)"
+        }
+        if lower.hasPrefix("condition:") {
+            let target = String(trimmed.dropFirst("condition:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return target.isEmpty ? "近况" : "近况·\(target)"
+        }
+        if lower.hasPrefix("custom:") {
             let name = String(trimmed.dropFirst("custom:".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             return name.isEmpty ? "补充设定" : name
         }
-        if trimmed.hasPrefix("memory:") {
+        if lower.hasPrefix("memory:") {
             return "往事"
         }
-        switch trimmed.lowercased() {
+        switch lower {
         case "location": return "所在"
         case "possession": return "持有"
         case "condition": return "近况"

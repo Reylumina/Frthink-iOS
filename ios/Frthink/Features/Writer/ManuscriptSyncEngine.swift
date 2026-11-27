@@ -201,6 +201,7 @@ enum ManuscriptSyncEngine {
         var totalEventsUpdated = 0
         var totalThreadsUpdated = 0
         var newlyCreatedEntityIDs: [String] = []
+        var entityTouchCounts: [String: Int] = [:]
         let pageSize = max(1, FileStore.bodyPageSize)
 
         for (index, chunk) in chunks.enumerated() {
@@ -212,6 +213,10 @@ enum ManuscriptSyncEngine {
             let stateBefore = workspace.currentState()
             let knownEntitiesBefore = stateBefore.entityPages.values.sorted { $0.id < $1.id }
             let existingEntityIDs = Set(knownEntitiesBefore.map(\.id))
+            let stage1FactsByEntity = Dictionary(
+                grouping: stateBefore.activeFacts.values.filter { !$0.isRetracted },
+                by: \.entityID
+            )
 
             let nodeID = "sync_\(UUID().uuidString)"
             let pageIndex = max(0, chunk.utf16Start / pageSize)
@@ -231,6 +236,7 @@ enum ManuscriptSyncEngine {
                 manuscriptTail: chunk.text,
                 leadingContext: chunk.leadingContext,
                 existingPages: knownEntitiesBefore,
+                existingFactsByEntity: stage1FactsByEntity,
                 includeFacts: true
             )
             let stage1Request = LLMRequest(
@@ -248,8 +254,13 @@ enum ManuscriptSyncEngine {
             var workingWorkspace = session.ensureNarrativeWorkspace(
                 settingsCorpusLibraries: store.settings.corpusLibraries
             )
-            let latestKnownBeforeStage1 = workingWorkspace.currentState().entityPages.values
+            let latestStateBeforeStage1 = workingWorkspace.currentState()
+            let latestKnownBeforeStage1 = latestStateBeforeStage1.entityPages.values
                 .sorted { $0.id < $1.id }
+            let latestFactsBeforeStage1 = Dictionary(
+                grouping: latestStateBeforeStage1.activeFacts.values.filter { !$0.isRetracted },
+                by: \.entityID
+            )
             let stage1Result = try NarrativeEntityExtractor.parseEntitiesAndFacts(
                 from: rawStage1,
                 excerpt: chunk.text,
@@ -257,6 +268,7 @@ enum ManuscriptSyncEngine {
                 pageIndex: pageIndex,
                 baseUTF16Offset: chunk.utf16Start,
                 existingPages: latestKnownBeforeStage1,
+                existingFactsByEntity: latestFactsBeforeStage1,
                 idMapping: stage1Payload.mapping
             )
             let stage1Delta = PlotNodeDelta(
@@ -379,6 +391,12 @@ enum ManuscriptSyncEngine {
             )
             session.noteNarrativeWorkspaceUpdated(finalWorkspace)
 
+            for upsert in stage1Result.upserts where !upsert.id.isEmpty {
+                entityTouchCounts[upsert.id, default: 0] += 1
+            }
+            for fact in stage1Result.factEvents where !fact.entityID.isEmpty {
+                entityTouchCounts[fact.entityID, default: 0] += 1
+            }
             let newIDsThisChunk = stage1Result.upserts
                 .filter { !existingEntityIDs.contains($0.id) }
                 .map(\.id)
@@ -420,6 +438,19 @@ enum ManuscriptSyncEngine {
             store: store
         )
         totalEntitiesAdded = max(0, totalEntitiesAdded - removedDuplicates)
+
+        await consolidateTouchedEntitiesIfNeeded(
+            touchCounts: entityTouchCounts,
+            client: client,
+            provider: provider,
+            session: session,
+            store: store,
+            completedChunks: chunks.count,
+            totalEntitiesAdded: totalEntitiesAdded,
+            totalEventsUpdated: totalEventsUpdated,
+            totalThreadsUpdated: totalThreadsUpdated,
+            onProgress: onProgress
+        )
 
         var tailWorkspace = session.ensureNarrativeWorkspace(
             settingsCorpusLibraries: store.settings.corpusLibraries
@@ -517,6 +548,93 @@ enum ManuscriptSyncEngine {
             }
         }
         return removedCount
+    }
+
+    /// 条件触发终态实体整理 Pass：仅清理被反复改写或近况膨胀实体的跨字段重复与过时近况，
+    /// 以独立可撤销的 `PlotNode` 落盘，且 `episodicEvents` 恒为空，绝不叠加或改写剧情线。
+    private static func consolidateTouchedEntitiesIfNeeded(
+        touchCounts: [String: Int],
+        client: any LLMClient,
+        provider: ProviderSetting,
+        session: ProjectSession,
+        store: AppStore,
+        completedChunks: Int,
+        totalEntitiesAdded: Int,
+        totalEventsUpdated: Int,
+        totalThreadsUpdated: Int,
+        onProgress: (@MainActor @Sendable (ManuscriptSyncProgress) -> Void)?
+    ) async {
+        guard !Task.isCancelled else { return }
+        let workspaceSnapshot = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let stateSnapshot = workspaceSnapshot.currentState()
+        let factsByEntity = Dictionary(
+            grouping: stateSnapshot.activeFacts.values.filter { !$0.isRetracted },
+            by: \.entityID
+        )
+        let targets = NarrativeEntityExtractor.entitiesNeedingConsolidation(
+            pages: Array(stateSnapshot.entityPages.values),
+            factsByEntity: factsByEntity,
+            touchCounts: touchCounts,
+            limit: 12
+        )
+        guard !targets.isEmpty else { return }
+
+        onProgress?(
+            ManuscriptSyncProgress(
+                completedChunks: completedChunks,
+                totalChunks: max(completedChunks, 1),
+                entitiesAdded: totalEntitiesAdded,
+                eventsUpdated: totalEventsUpdated,
+                threadsUpdated: totalThreadsUpdated,
+                stageLabel: "整理档案"
+            )
+        )
+
+        let payload = NarrativeEntityExtractor.buildConsolidationPayload(
+            pages: targets,
+            factsByEntity: factsByEntity
+        )
+        let request = LLMRequest(
+            model: provider.resolvedModel,
+            messages: payload.messages,
+            stream: false,
+            temperature: 0.1,
+            maxTokens: max(provider.maxTokens, 4_096),
+            thinking: false,
+            failOnLength: true
+        )
+        let nodeID = "consolidate_\(UUID().uuidString)"
+        guard let raw = try? await client.complete(request),
+              !Task.isCancelled,
+              let consolidationDelta = try? NarrativeEntityExtractor.parseConsolidationResult(
+                  from: raw,
+                  targetPages: targets,
+                  factsByEntity: factsByEntity,
+                  idMapping: payload.mapping,
+                  nodeID: nodeID
+              ),
+              !consolidationDelta.isEmpty else {
+            return
+        }
+
+        var latestWorkspace = session.ensureNarrativeWorkspace(
+            settingsCorpusLibraries: store.settings.corpusLibraries
+        )
+        let headID = latestWorkspace.storyGraph.headNodeID
+        let branchLabel = latestWorkspace.storyGraph.nodes[headID]?.branchLabel ?? "主线"
+        let node = PlotNode(
+            id: nodeID,
+            parentID: headID,
+            branchLabel: branchLabel,
+            summary: "整理档案与近况",
+            delta: consolidationDelta
+        )
+        if (try? latestWorkspace.storyGraph.appendNode(node)) != nil {
+            latestWorkspace.applyLedgerDelta(consolidationDelta, sourceNodeID: nodeID)
+            session.noteNarrativeWorkspaceUpdated(latestWorkspace)
+        }
     }
 
     private static func mergeDuplicateEntity(

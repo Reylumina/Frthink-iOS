@@ -84,7 +84,7 @@ Frthink Loom 在保留原版创作流、提示词体系与 `.frthink` 存档兼�
 ### 编译
 
 ```bash
-git clone -b feat/narrative-engine https://github.com/Reylumina/Frthink-iOS.git
+git clone -b loom https://github.com/Reylumina/Frthink-iOS.git
 cd Frthink-iOS
 
 xcodebuild -project ios/Frthink.xcodeproj -scheme Frthink \

@@ -83,6 +83,7 @@ enum NarrativeDeltaExtractor {
         excerpt: String,
         leadingContext: String = "",
         knownEntities: [EntityPage],
+        existingFactsByEntity: [String: [WorldFactEvent]] = [:],
         activeThreads: [ProspectiveThread],
         activeEvents: [EpisodicEvent] = []
     ) -> (messages: [LLMMessage], mapping: NarrativeEntityResolver.ExtractionIDMapping) {
@@ -96,33 +97,40 @@ enum NarrativeDeltaExtractor {
             limit: 12
         )
         let sortedThreads = activeThreads.sorted { $0.id < $1.id }
+        let relevantFacts = NarrativeEntityExtractor.collectRelevantFacts(
+            for: prioritizedEntities,
+            existingFactsByEntity: existingFactsByEntity,
+            perEntityLimit: 6
+        )
         let mapping = NarrativeEntityResolver.ExtractionIDMapping.build(
             entities: prioritizedEntities,
             events: prioritizedEvents,
-            threads: sortedThreads
+            threads: sortedThreads,
+            facts: relevantFacts
         )
 
         let systemPrompt = """
         你是冷静、只记录已发生事实的叙事状态抽取器。
-        给定一段刚刚采纳落盘的小说正文，以及带短编号（如 E1、EV1、T1）的已知实体、进行中事件与未决伏笔列表，请只抽取「本段新增正文」里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
-        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"events":[{"id":"","title":"","arc":"","scene":"","participants":[""],"cause":"","development":"","outcome":"","status":"ongoing|resolved","quote":""}],"scene_card":"","scene_transition":{"shifted":false,"previous_layer":"canon_ongoing|canon_closed|subjective_insert","time_anchor":"","neutral_bridge":""}}
+        给定一段刚刚采纳落盘的小说正文，以及带短编号（如 E1、F1、EV1、T1）的已知实体与活跃近况、进行中事件、未决伏笔列表，请只抽取「本段新增正文」里「已经明确发生并写出来的」状态变化，返回一个严格 JSON 对象：
+        {"new_entities":[{"name":"","kind":"character|location|artifact|lore","identity":"","aliases":[""],"trigger_keywords":[""],"quote":""}],"facts":[{"entity_id":"","attribute":"","value":"","quote":"","retracted":false}],"negated_fact_ids":[""],"beliefs":[{"character_id":"","topic":"","believed_truth":"","knows_secret":false,"quote":""}],"threads":[{"thread_id":"","action":"plant|ready|enacted|satisfied|invalidated|update","goal":"","activation_cue":"","recurrence":"once|recurring","related_entity_ids":[""],"quote":""}],"events":[{"id":"","title":"","arc":"","scene":"","participants":[""],"cause":"","development":"","outcome":"","status":"ongoing|resolved","quote":""}],"scene_card":"","scene_transition":{"shifted":false,"previous_layer":"canon_ongoing|canon_closed|subjective_insert","time_anchor":"","neutral_bridge":""}}
         硬性约束：
-        1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的事实、角色已知/未知信息变化、关键事件与伏笔状态迁移。
+        1. 严禁输出 todo、next_steps、未来剧情计划或创作建议，只记录已经发生的持久化状态事实、角色已知/未知信息变化、关键事件与伏笔状态迁移。
         2. 引用已知实体时，`facts.entity_id`、`beliefs.character_id`、`events.participants` 与 `threads.related_entity_ids` 必须优先填写已知实体短编号（如 `"E1"`）；若引用本次 `new_entities` 中刚新建的实体，请填写 `"NEW:实体名"`（如 `"NEW:沈清秋"`）；延续已有进行中事件请填写事件短编号（如 `"EV1"`），推进已有伏笔请填写伏笔短编号（如 `"T1"`）。
         3. new_entities 仅收录本段新出场、不在已知实体列表内且正文有明确专名的实体，严格区分四类：`character`（人物）、`location`（物理地点）、`artifact`（可持有物件）、`lore`（世界观体系、势力、规则或历史概念；`trigger_keywords` 填正文中能带出该词条的关键词，不要把戏外作者写作规范归入 `lore`）。
         4. 禁止把无归属泛称或临时职务称谓（如「师父」「掌柜」「小二」「侍卫」「黑衣人」「少年」「老者」「大人」「路人」）单独建为实体，也不要把这类泛称写入任何实体的 aliases，避免不同角色张冠李戴。
         5. 每条 new_entities、facts 和 events 都尽量附上正文逐字短引用 quote；无法从原文找到依据时宁可留空也不要编造。
         6. beliefs 仅在正文明确写出关键秘密、隐瞒或戏剧性信息差且能附上原文逐字短引用 quote 时才记录，禁止臆测常规认知状态。
-        7. facts 的 `attribute` 按实体类型选用：`character` 用 location、possession、condition、goal、status，人际关系按对象写成 `relation:<对象名>`（如 `relation:沈清秋`），避免不同对象互相覆盖；`location` 用 layout、atmosphere、access、status；`artifact` 用 owner、location、capability、cost、status；`lore` 用 rule、faction、history、exception、status。
+        7. facts 的 `attribute` 严格选用规范英文键：`character` 用 `location`、`possession`（或 `possession:<物件>`）、`condition`、`goal`、`status`、`relation:<对象名>`；`location` 用 `layout`、`atmosphere`、`access`、`status`；`artifact` 用 `owner`、`location`、`capability`、`cost`、`status`；`lore` 用 `rule`、`faction`、`history`、`exception`、`status`。严禁把推门、倒茶、质问等瞬时动作（action）、修辞比喻或单句试探话术写入 facts。
         8. events 仅在正文发生、推进或完结实质性剧情事件时填写；同一场景的连续推进必须复用「进行中关键事件」的短编号（只补充新增的 development / outcome，不要重开碎片事件）；完结时将 status 设为 resolved。
         9. threads 推进或收束时优先复用已知伏笔短编号；若一次性伏笔（once）在本段正文已经彻底兑现或解答，直接输出 action 为 satisfied。
         10. 若本段没有任何需要记录的状态变化，对应数组留空即可。
         11. scene_transition 仅在明确发生场次边界切换（时间跳跃、地点转移、叙事视角切分或上一冲突完结）时置 shifted 为 true，同一场戏连续对话动作保持 false；time_anchor 必须保留明确时间点与停留时长线索；neutral_bridge 用 1 句客观中性事实概括前情结果（剥离感官与情绪渲染）；若本段属于主观心理或回忆插曲而未实际改变物理世界，将 previous_layer 设为 subjective_insert 且不得向 facts 写入客观变更。
+        12. 若本段正文明确推翻、完成或使下方某条已知实体「当前近况」（如 `F1`）过时失效，请将对应短编号填入 `negated_fact_ids`（如 `["F1"]`）。
         """
 
         var lines: [String] = []
         if !prioritizedEntities.isEmpty {
-            lines.append("【已知实体（优先填写短编号 E1/E2…）】")
+            lines.append("【已知实体与当前近况（优先填写短编号 E1/F1…）】")
             for entity in prioritizedEntities {
                 let shortID = mapping.entityRealToShort[entity.id] ?? entity.id
                 let aliasText = entity.aliases.isEmpty
@@ -134,11 +142,26 @@ enum NarrativeDeltaExtractor {
                 let cleanAnchor = anchorSource
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: "\n", with: "；")
-                let clippedAnchor = cleanAnchor.count > 36
-                    ? String(cleanAnchor.prefix(36)) + "…"
+                let clippedAnchor = cleanAnchor.count > 40
+                    ? String(cleanAnchor.prefix(40)) + "…"
                     : cleanAnchor
                 let anchorSuffix = clippedAnchor.isEmpty ? "" : "：\(clippedAnchor)"
                 lines.append("- \(shortID) | \(entity.name)\(aliasText) [\(entity.kind.rawValue)]\(anchorSuffix)")
+
+                let entityFacts = (existingFactsByEntity[entity.id] ?? [])
+                    .filter { !$0.isRetracted }
+                    .sorted { lhs, rhs in
+                        if lhs.attribute != rhs.attribute { return lhs.attribute < rhs.attribute }
+                        return lhs.id < rhs.id
+                    }
+                    .prefix(6)
+                if !entityFacts.isEmpty {
+                    let factTokens = entityFacts.map { fact in
+                        let fShort = mapping.factRealToShort[fact.id] ?? fact.id
+                        return "\(fShort)[\(fact.attribute)]=\(fact.value)"
+                    }
+                    lines.append("  当前近况：" + factTokens.joined(separator: "；"))
+                }
             }
         }
         if !sortedThreads.isEmpty {
@@ -435,6 +458,7 @@ enum NarrativeDeltaExtractor {
         pageIndex: Int = 0,
         baseUTF16Offset: Int = 0,
         knownEntities: [EntityPage] = [],
+        existingFactsByEntity: [String: [WorldFactEvent]] = [:],
         activeEvents: [EpisodicEvent] = [],
         idMapping: NarrativeEntityResolver.ExtractionIDMapping? = nil,
         now: Date = Date()
@@ -459,7 +483,9 @@ enum NarrativeDeltaExtractor {
 
         let allowedTopKeys: Set<String> = [
             "new_entities", "newEntities",
-            "facts", "fact_events", "beliefs", "epistemic_beliefs",
+            "facts", "fact_events",
+            "negated_fact_ids", "negatedFactIDs", "retracted_fact_ids",
+            "beliefs", "epistemic_beliefs",
             "threads", "thread_events",
             "events", "episodic_events", "episodicEvents",
             "scene_card", "sceneCard",
@@ -493,7 +519,7 @@ enum NarrativeDeltaExtractor {
             || !(idMapping?.isEmpty ?? true)
 
         var ungroundedCount = 0
-        let factEvents = parseFactsArray(
+        var factEvents = parseFactsArray(
             from: object,
             excerpt: excerpt,
             nodeID: nodeID,
@@ -506,6 +532,14 @@ enum NarrativeDeltaExtractor {
             now: now,
             ungroundedCount: &ungroundedCount
         )
+        let negatedFacts = NarrativeEntityExtractor.parseNegatedFacts(
+            from: object,
+            nodeID: nodeID,
+            existingFactsByEntity: existingFactsByEntity,
+            idMapping: idMapping,
+            now: now
+        )
+        factEvents.append(contentsOf: negatedFacts)
         let epistemicBeliefs = parseBeliefsArray(
             from: object,
             excerpt: excerpt,
@@ -598,6 +632,7 @@ enum NarrativeDeltaExtractor {
             }
 
             let resolvedEntityID: String
+            let resolvedEntityKind: EntityKind?
             if shouldResolveEntities {
                 switch entityLookup.resolve(
                     rawID: rawEntityID,
@@ -606,12 +641,21 @@ enum NarrativeDeltaExtractor {
                 ) {
                 case .matched(let page):
                     resolvedEntityID = page.id
+                    resolvedEntityKind = page.kind
                 case .ambiguous, .notFound:
                     ungroundedCount += 1
                     continue
                 }
             } else {
                 resolvedEntityID = rawEntityID
+                resolvedEntityKind = nil
+            }
+
+            guard let canonicalAttr = WorldFactEvent.canonicalAttribute(
+                attribute,
+                entityKind: resolvedEntityKind
+            ) else {
+                continue
             }
 
             let quote = NarrativeJSONScanner.firstNonEmptyString(item, keys: ["quote", "evidence"])
@@ -629,9 +673,9 @@ enum NarrativeDeltaExtractor {
                 }
                 factEvents.append(
                     WorldFactEvent(
-                        id: "\(nodeID)_fact_\(idx)_\(SummaryKey.sha256Hex("\(resolvedEntityID):\(attribute):\(value)").prefix(8))",
+                        id: "\(nodeID)_fact_\(idx)_\(SummaryKey.sha256Hex("\(resolvedEntityID):\(canonicalAttr):\(value)").prefix(8))",
                         entityID: resolvedEntityID,
-                        attribute: attribute,
+                        attribute: canonicalAttr,
                         value: value,
                         nodeID: nodeID,
                         authority: .inferredByAI,
@@ -644,9 +688,9 @@ enum NarrativeDeltaExtractor {
             }
             factEvents.append(
                 WorldFactEvent(
-                    id: "\(nodeID)_fact_\(idx)_\(SummaryKey.sha256Hex("\(resolvedEntityID):\(attribute):\(value)").prefix(8))",
+                    id: "\(nodeID)_fact_\(idx)_\(SummaryKey.sha256Hex("\(resolvedEntityID):\(canonicalAttr):\(value)").prefix(8))",
                     entityID: resolvedEntityID,
-                    attribute: attribute,
+                    attribute: canonicalAttr,
                     value: value,
                     nodeID: nodeID,
                     authority: .canonProseQuote,

@@ -292,10 +292,28 @@ enum NarrativeCommitCoordinator {
             tailSource = session.manuscript
         }
         let tail = PromptComposer.codePointTail(tailSource, limit: 2_500)
+        let enabledUniverses = store.settings.enabledUniverseEntries(
+            for: session.payload.enabledUniverseEntryIDs
+        )
+        var effectiveStyle = workspace.preservedStyle
+        if !store.settings.corpusEnabled {
+            effectiveStyle.centroidExemplar = nil
+            effectiveStyle.exemplars = []
+        }
+        let planningContext = StoryChoicePlanningContext(
+            globalPreset: store.settings.globalPreset,
+            aiFlavorRules: store.settings.aiFlavorRules,
+            skills: store.settings.skills,
+            universes: enabledUniverses,
+            preservedStyle: effectiveStyle,
+            povCharacterID: workspace.activePOVCharacterID,
+            recentDialogue: Array(session.payload.messages.suffix(4))
+        )
         let messages = StoryChoicePlanner.buildPlanningMessages(
             state: state,
             manuscriptTail: tail,
-            desiredCount: desiredCount
+            desiredCount: desiredCount,
+            context: planningContext
         )
         let request = LLMRequest(
             model: provider.resolvedModel,
@@ -400,6 +418,10 @@ enum NarrativeCommitCoordinator {
         }
         let currentState = currentWorkspace.currentState()
         let knownEntities = currentState.entityPages.values.sorted { $0.id < $1.id }
+        let existingFactsByEntity = Dictionary(
+            grouping: currentState.activeFacts.values.filter { !$0.isRetracted },
+            by: \.entityID
+        )
         let activeThreads = currentState.threads.values
             .filter { !$0.state.isTerminal }
             .sorted { $0.id < $1.id }
@@ -416,6 +438,7 @@ enum NarrativeCommitCoordinator {
             excerpt: excerpt,
             leadingContext: leadingContext,
             knownEntities: knownEntities,
+            existingFactsByEntity: existingFactsByEntity,
             activeThreads: activeThreads,
             activeEvents: activeEvents
         )
@@ -439,6 +462,10 @@ enum NarrativeCommitCoordinator {
         }
         let latestState = latestWorkspace.currentState()
         let latestKnownEntities = latestState.entityPages.values.sorted { $0.id < $1.id }
+        let latestFactsByEntity = Dictionary(
+            grouping: latestState.activeFacts.values.filter { !$0.isRetracted },
+            by: \.entityID
+        )
         let latestActiveEvents = latestState.sortedEpisodicEvents()
             .filter { $0.status == .ongoing }
         let extraction = try NarrativeDeltaExtractor.parseDelta(
@@ -448,6 +475,7 @@ enum NarrativeCommitCoordinator {
             pageIndex: pageIndex,
             baseUTF16Offset: baseUTF16Offset,
             knownEntities: latestKnownEntities,
+            existingFactsByEntity: latestFactsByEntity,
             activeEvents: latestActiveEvents,
             idMapping: extractionPayload.mapping
         )

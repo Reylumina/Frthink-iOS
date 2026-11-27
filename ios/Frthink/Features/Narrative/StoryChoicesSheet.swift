@@ -85,7 +85,7 @@ struct StoryChoicesSheet: View {
                 .foregroundStyle(.primary)
 
             if !choice.tensionHook.isEmpty {
-                Text("看点：\(choice.tensionHook)")
+                Text(choice.tensionHook)
                     .font(Theme.labelSmall)
                     .foregroundStyle(.secondary)
             }
@@ -133,10 +133,7 @@ struct StoryChoicesSheet: View {
     }
 
     private func formattedInstruction(_ choice: StoryChoice) -> String {
-        if choice.tensionHook.isEmpty {
-            return "\(choice.title)：\(choice.direction)"
-        }
-        return "\(choice.title)：\(choice.direction)（\(choice.tensionHook)）"
+        choice.direction
     }
 
     private func loadChoices() async {
