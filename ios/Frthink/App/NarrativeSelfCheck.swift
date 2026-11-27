@@ -4994,7 +4994,7 @@ extension SelfCheck {
                 project: projectID,
                 target: "zh",
                 sourceHash: "h1",
-                segment: "原文",
+                segment: 0,
                 payload: "译文"
             )
             let dirtyPayload = ProjectPayload(
