@@ -55,6 +55,7 @@ struct LibraryProjectRow: View {
     let onRename: () -> Void
     let onSynopsis: () -> Void
     let onBranches: () -> Void
+    let onReset: () -> Void
     let onTrash: () -> Void
 
     var body: some View {
@@ -138,6 +139,9 @@ struct LibraryProjectRow: View {
                 Label("分支（\(branchCount)）", systemImage: "arrow.triangle.branch")
             }
             Divider()
+            Button(role: .destructive) { onReset() } label: {
+                Label("重置本书", systemImage: "arrow.counterclockwise")
+            }
             Button(role: .destructive) { onTrash() } label: {
                 Label("移入回收站", systemImage: "trash")
             }

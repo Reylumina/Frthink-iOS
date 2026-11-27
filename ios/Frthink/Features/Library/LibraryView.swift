@@ -20,6 +20,7 @@ struct LibraryView: View {
 
     @State private var editTarget: LibraryEditTarget?
     @State private var branchTarget: Project?
+    @State private var pendingReset: Project?
     @State private var showTrashOnLaunch = false
     @State private var didApplyLaunch = false
 
@@ -80,6 +81,23 @@ struct LibraryView: View {
         .sheet(item: $branchTarget) { project in
             LibraryBranchesSheet(store: store, project: project, onOpen: onOpen)
         }
+        .alert(
+            pendingReset.map { "重置「\($0.shelfTitle)」？" } ?? "重置本书？",
+            isPresented: Binding(
+                get: { pendingReset != nil },
+                set: { if !$0 { pendingReset = nil } }
+            )
+        ) {
+            Button("重置", role: .destructive) {
+                if let project = pendingReset {
+                    store.resetBookState(project)
+                }
+                pendingReset = nil
+            }
+            Button("取消", role: .cancel) { pendingReset = nil }
+        } message: {
+            Text("保留正文与章节，清空档案、剧情、规则与对话。")
+        }
         .navigationDestination(isPresented: $showTrashOnLaunch) {
             LibraryTrashView(store: store)
         }
@@ -115,6 +133,7 @@ struct LibraryView: View {
                         onRename: { editTarget = .rename(project) },
                         onSynopsis: { editTarget = .synopsis(project) },
                         onBranches: { branchTarget = project },
+                        onReset: { pendingReset = project },
                         onTrash: { trash(project) }
                     )
                 }

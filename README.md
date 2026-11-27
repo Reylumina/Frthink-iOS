@@ -91,7 +91,7 @@ xcodebuild -project ios/Frthink.xcodeproj -scheme Frthink \
   -destination 'generic/platform=iOS Simulator' build
 ```
 
-GitHub Actions 工作流（[`.github/workflows/ios.yml`](.github/workflows/ios.yml)）可直接构建未签名安装包 `Frthink-unsigned.ipa`，通过 AltStore、SideStore、Sideloadly 或 TrollStore 安装至设备。
+GitHub Actions 工作流（[`.github/workflows/ios.yml`](.github/workflows/ios.yml)）可直接构建未签名安装包 `fr_loom-unsigned.ipa`，通过 AltStore、SideStore、Sideloadly 或 TrollStore 安装至设备。
 
 ## 署名
 

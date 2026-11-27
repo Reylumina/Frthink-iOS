@@ -4980,6 +4980,77 @@ extension SelfCheck {
 
             return "世界更新规范覆写 + 终态防叠加整理 + 角色扮演剧情走向 ok"
         }
+
+        // 验证重置本书状态仅清空设定、剧情、规则与对话，完整保留正文、章节与译文。
+        check("narrative.resetBookStatePreservesManuscript") {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("frthink-reset-book-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let files = FileStore(root: root)
+            let projectID = "reset-book-\(UUID().uuidString)"
+            let chapter = Chapter(title: "第一章", location: 0)
+            let sampleTranslation = TranslationSegment(
+                owner: "u1",
+                project: projectID,
+                target: "zh",
+                sourceHash: "h1",
+                segment: "原文",
+                payload: "译文"
+            )
+            let dirtyPayload = ProjectPayload(
+                manuscript: "第一章 雨夜。\n\n林昭推门而入。",
+                chapters: [chapter],
+                messages: [ChatMessage(role: .user, variants: ["续写"])],
+                world: WorldBook(
+                    styleTemplate: "旧仿写模板",
+                    longTermRules: "旧规则",
+                    characters: [CharacterCard(name: "林昭")]
+                ),
+                continuationAnchor: 5,
+                assistantSupplement: "旧补充",
+                sceneBoundaryOffset: 4,
+                composerDraft: "草稿",
+                requestSnapshots: [RequestSnapshot(modelId: "m1")]
+            )
+            let session = ProjectSession(
+                project: Project(id: projectID, title: "重置测试"),
+                payload: dirtyPayload,
+                source: "Source text",
+                translations: [sampleTranslation],
+                store: files
+            )
+            let sampleEntity = EntityPage(id: "e_lin", kind: .character, name: "林昭", summary: "谨慎")
+            _ = try session.commitNarrativeDelta(
+                PlotNodeDelta(
+                    directiveAdds: [AuthorDirective(verbatimRule: "旧逐字规则", scope: .global)],
+                    entityPageUpserts: [sampleEntity]
+                ),
+                summary: "初始化设定"
+            )
+
+            session.resetBookState()
+
+            let resetState = session.ensureNarrativeWorkspace().currentState()
+            try expect(
+                session.manuscript == "第一章 雨夜。\n\n林昭推门而入。"
+                    && session.payload.chapters == [chapter]
+                    && session.sourceText == "Source text"
+                    && session.translations == [sampleTranslation]
+                    && resetState.entityPages.isEmpty
+                    && resetState.directiveLedger.directives.isEmpty
+                    && resetState.activeFacts.isEmpty
+                    && session.payload.messages.isEmpty
+                    && session.payload.world.characters.isEmpty
+                    && session.payload.world.styleTemplate.isEmpty
+                    && session.payload.requestSnapshots.isEmpty
+                    && session.payload.continuationAnchor == nil
+                    && session.payload.sceneBoundaryOffset == nil
+                    && session.payload.composerDraft.isEmpty
+                    && session.payload.assistantSupplement.isEmpty,
+                "重置本书应保留正文、章节与译文，并彻底清空档案、剧情、规则、世界书与对话状态"
+            )
+            return "重置本书状态（保留正文）ok"
+        }
     }
 
     private enum UnexpectedStoreStateError: Error {

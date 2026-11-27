@@ -1468,6 +1468,43 @@ final class ProjectSession {
         scheduleSave()
     }
 
+    /// 重置本书状态：保留正文、章节与译文，清空档案、剧情、规则、世界书、对话记录与定位锚点。
+    func resetBookState(now: Date = Date()) {
+        guard !isReadOnly else { return }
+        narrativeSaveTask?.cancel()
+        narrativeSaveTask = nil
+        narrativeSaveGeneration &+= 1
+        narrativeSaveInFlight = false
+        narrativeSaveQueued = false
+        resumeNarrativeSaveWaiters()
+
+        try? store.narrative.resetWorkspace(projectID: project.id)
+        narrativeWorkspace = NarrativeWorkspace(storyGraph: StoryGraph.makeInitial(now: now))
+        lastSavedNarrativeWorkspace = nil
+        incrementalBM25 = ManuscriptIndex.IncrementalBM25Index()
+
+        payload.world = WorldBook()
+        payload.messages = []
+        payload.deletedChatMessageIDs = []
+        payload.composerDraft = ""
+        payload.requestSnapshots = []
+        payload.continuationAnchor = nil
+        payload.sceneBoundaryOffset = nil
+        payload.bodyAppendReceipts = []
+        payload.lastBodyAppendUndo = nil
+        payload.generatingMessageID = nil
+        payload.interruptedMessageIDs = nil
+        payload.assistantSupplement = ""
+        payload.readerOffset = 0
+        payload.readerBookmarkOffset = 0
+        UserDefaults.standard.removeObject(forKey: ReaderStorageKey.position(project.id))
+        UserDefaults.standard.removeObject(forKey: ReaderStorageKey.bookmark(project.id))
+
+        narrativeRevision &+= 1
+        try? saveNarrativeWorkspaceNow()
+        saveNow()
+    }
+
     /// 在光标处插入文本（续写结果「插入到正文」用）。
     ///
     /// 每次插入都记一条凭据，供 `undoLastBodyAppend()` 撤销。原版用

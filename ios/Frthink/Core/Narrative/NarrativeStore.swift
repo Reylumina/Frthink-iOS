@@ -253,6 +253,17 @@ struct NarrativeStore {
         FileManager.default.fileExists(atPath: manifestURL(projectID).path)
     }
 
+    /// 清除指定书目的叙事工作区磁盘目录并递增写令牌，防止旧后台写入回流。
+    func resetWorkspace(projectID: String) throws {
+        try NarrativeProjectLock.withLock(for: projectID) {
+            NarrativeProjectLock.advanceWriteToken(for: projectID)
+            let dir = narrativeDirectory(projectID)
+            if FileManager.default.fileExists(atPath: dir.path) {
+                try FileManager.default.removeItem(at: dir)
+            }
+        }
+    }
+
     /// 加载工作区状态：读取基线图谱并重放增量 WAL、加载独立检查点缓存；核心结构损坏返回 `.corrupted`。
     func loadWorkspaceState(projectID: String) -> LoadState {
         NarrativeProjectLock.withLock(for: projectID) {

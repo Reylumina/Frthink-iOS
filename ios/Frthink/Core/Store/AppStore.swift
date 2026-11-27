@@ -341,6 +341,15 @@ final class AppStore {
         reload()
     }
 
+    /// 重置指定书目的设定、剧情、规则与对话状态，正文、章节与译文保持不变。
+    func resetBookState(_ project: Project) {
+        cancelWorldTask(for: project.id)
+        let session = openSession(for: project)
+        session.resetBookState()
+        touch(project)
+        toast = "已重置「\(project.shelfTitle)」"
+    }
+
     private func persistProject(_ project: Project) {
         do {
             try fileStore.saveProject(project)
