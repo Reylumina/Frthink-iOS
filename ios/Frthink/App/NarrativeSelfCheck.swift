@@ -3928,8 +3928,8 @@ extension SelfCheck {
                 id: "lore_qingyun",
                 kind: .lore,
                 name: "青云宗",
-                identity: "修真宗门",
                 summary: "以剑入道",
+                identity: "修真宗门",
                 updatedAt: t0
             )
             let ongoingEvent = EpisodicEvent(
@@ -4133,8 +4133,8 @@ extension SelfCheck {
                 id: "char_lin",
                 kind: .character,
                 name: "林昭",
-                identity: "雾港旧书店掌柜",
                 summary: "外冷内热，行事慎密",
+                identity: "雾港旧书店掌柜",
                 voiceProfile: "言简意赅，少用虚词",
                 hardBoundaries: ["绝不在外人面前暴露左手旧伤"],
                 updatedAt: t0
@@ -4317,8 +4317,8 @@ extension SelfCheck {
                 id: "auto_character_deadbeef",
                 kind: .character,
                 name: "林昭",
-                identity: "旧书店掌柜",
                 summary: longSummary,
+                identity: "旧书店掌柜",
                 voiceProfile: "短句寡言",
                 updatedAt: t0
             )
@@ -4326,8 +4326,8 @@ extension SelfCheck {
                 id: "auto_character_cafe0001",
                 kind: .character,
                 name: "沈清秋",
-                identity: "南疆密使",
                 summary: "城府极深，擅借刀杀人",
+                identity: "南疆密使",
                 updatedAt: t0
             )
             let p0 = "第一章：老码头青石阶下压着半截铜钥匙。\n"
