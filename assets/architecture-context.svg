@@ -24,10 +24,10 @@
 
   <rect x="38" y="60" width="628" height="68" class="tier0"/>
   <text x="54" y="83" class="title">Tier 0 · 冻结静态前缀（System · 跨轮次字节恒定）</text>
-  <text x="54" y="105" class="desc">系统指令、常驻世界观、共享世界书、文风静态模板、质心样本与只读工具定义</text>
+  <text x="54" y="105" class="desc">系统指令、常驻世界观、共享世界书、文风静态模板与只读工具定义</text>
 
   <rect x="38" y="140" width="628" height="68" class="tier1"/>
-  <text x="54" y="163" class="title">Tier 1 · 非破坏性滑窗对话流（ReFold · 128K+ 阈值 64K）</text>
+  <text x="54" y="163" class="title">Tier 1 · 非破坏性滑窗对话流（ReFold · 128K+ 上限 12K）</text>
   <text x="54" y="185" class="desc">保留近期完整对话与工具记录；超窗早期对话折叠为单条区间边界，重复工具输出自动去重</text>
 
   <rect x="38" y="220" width="628" height="72" class="tier2"/>
