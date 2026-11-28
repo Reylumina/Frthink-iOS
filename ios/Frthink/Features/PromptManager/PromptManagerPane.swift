@@ -225,17 +225,15 @@ struct PromptManagerPane: View {
                 )
             }
 
-            Button("填入示例") {
-                store.settings.aiFlavorRules = Self.flavorRulesSample
+            Button("恢复默认") {
+                store.settings.aiFlavorRules = AppSettings.defaultAIFlavorRules
                 store.saveSettings()
-                store.toast = "已填入示例"
+                store.toast = "已恢复默认规则"
             }
         } header: {
             AppSectionHeader(title: "预设与规则")
         }
     }
-
-    private static let flavorRulesSample = "减少模板化转折、空泛总结和机械分段；只修改未锁定正文。"
 
     private func filledLabel(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未填写" : "已填写"

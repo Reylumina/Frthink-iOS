@@ -63,9 +63,9 @@ struct ManuscriptTextEditor: UIViewRepresentable {
         view.textColor = UIColor.label
         view.textContainerInset = UIEdgeInsets(
             top: Theme.Spacing.l,
-            left: Theme.Spacing.l,
+            left: Theme.Layout.readingMargin,
             bottom: Theme.Spacing.xl,
-            right: Theme.Spacing.l
+            right: Theme.Layout.readingMargin
         )
         view.textContainer.lineFragmentPadding = 0
         view.alwaysBounceVertical = true

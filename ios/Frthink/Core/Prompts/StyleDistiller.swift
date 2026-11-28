@@ -80,7 +80,7 @@ enum StyleDistiller {
         var technique: String
     }
 
-    /// 从全书按写作进度等距抽取最多 `maxCount` 段成段原著候选节选，交由后续语义语域标注识别风格属性。
+    /// 从全书按写作进度等距抽取最多 `maxCount` 段成段原著候选节选，避开明显偏离全书对白占比的纯问答片段。
     static func selectExemplarPassages(from text: String, maxCount: Int = 5) -> [String] {
         let sentenceEnds = CharacterSet(charactersIn: "。！？!?")
         func isQualified(_ chunk: String) -> Bool {
@@ -96,18 +96,34 @@ enum StyleDistiller {
         guard chunks.count > maxCount else { return Array(chunks.prefix(maxCount)) }
         guard maxCount > 1 else { return [chunks[0]] }
 
+        let bookDialogueRatio = analyzeFingerprint(text).dialogueRatio
+        let dialogueCeiling = max(0.55, bookDialogueRatio + 0.25)
+
         var selected: [String] = []
         var usedIndices: Set<Int> = []
         for slot in 0..<maxCount {
-            let idx = (slot * (chunks.count - 1)) / (maxCount - 1)
-            if usedIndices.insert(idx).inserted {
-                selected.append(chunks[idx])
+            let center = (slot * (chunks.count - 1)) / (maxCount - 1)
+            let searchRange = max(0, center - 1)...min(chunks.count - 1, center + 1)
+            let bestIdx = searchRange
+                .filter { !usedIndices.contains($0) }
+                .min { lhs, rhs in
+                    let lRatio = analyzeFingerprint(chunks[lhs]).dialogueRatio
+                    let rRatio = analyzeFingerprint(chunks[rhs]).dialogueRatio
+                    let lPenalty = lRatio > dialogueCeiling ? (lRatio - dialogueCeiling) * 2.0 : 0.0
+                    let rPenalty = rRatio > dialogueCeiling ? (rRatio - dialogueCeiling) * 2.0 : 0.0
+                    let lDist = abs(lRatio - bookDialogueRatio) + lPenalty
+                    let rDist = abs(rRatio - bookDialogueRatio) + rPenalty
+                    if abs(lDist - rDist) > 0.01 { return lDist < rDist }
+                    return abs(lhs - center) < abs(rhs - center)
+                } ?? center
+            if usedIndices.insert(bestIdx).inserted {
+                selected.append(chunks[bestIdx])
             }
         }
         return selected
     }
 
-    /// 构造深度蒸馏请求（总览全书前中后样章，按模型输入预算均衡采样）。
+    /// 构造文风提炼请求，结合样章与语言统计生成简短仿写规范。
     static func distillMessages(
         sampleText: String,
         fingerprint: LinguisticFingerprint,
@@ -115,30 +131,21 @@ enum StyleDistiller {
         inputBudget: Int
     ) -> [LLMMessage] {
         let system = """
-        请细读给定的全书代表性样章，参考篇幅与句长统计，整合一份可直接指导续写的中文仿写模板，使后续行文自然凝练、贴合原著神韵且远离模板化套路。
-        只写可迁移的写法，不复述人物与事件，不照搬原句；用精炼、克制的书面语撰写，不要解释分析过程，不要写空泛赞美或学术腔。
+        根据给定样章与语言统计，提炼一份可直接执行的中文仿写规范（450 字以内）。
+        只写可迁移的写法与节奏，不复述人物剧情，不照搬原句，不写赞美或泛泛的去 AI 味套话。
 
-        请用清晰的中文小标题覆盖以下六个方面，每个小标题单独成行，下面用简洁凝练的短句分条说明（不要使用 > 引用块、+ 号、--- 分割线、代码块或多余的 ** 加粗）：
+        按以下三个小标题分块（小标题单独成行，下方用短句分条，不用 >、+、---、代码块或 **）：
 
-        叙事视角与结构
-        明确人称、限知边界与视角切换节点，以及单段内部的起承转合与行气贯通。
+        节奏与对白基线
+        结合统计说明本书的叙述与对白比例、句长节律及段落密度，以及对白与动作、环境的穿插方式。
 
-        因果推进与节奏
-        概括事件因果的隐显脉络、信息铺垫与延迟揭晓，以及长短句错落与段落疏密对张力的调节。
+        核心笔法
+        概括视角边界、用词质感、感官与心理分寸、转场与段尾留白（最多 5 条，样章未体现的直接省略）。
 
-        句式用词与意象
-        结合篇幅统计概括句长分布与断句节律、动词与名词质感、意象取材方向，以及动作、感官、心理描写的分寸与情绪外化手法。
+        本书应避开的写法
+        仅依据原著笔触列出不超过 5 条与之相悖的具体写法，证据不足则省略。
 
-        对白与人物推进
-        概括对话标签取舍与省笔、人物语气留白与言外之意，以及借对白推进关系与暗流的手法。
-
-        场景转场与段落收束
-        概括时空转场的过渡媒介，以及段尾与节末如何收束留白、保留余韵，避免强行议论升华。
-
-        应避免的写法
-        只依据原著笔触指出与之相悖的模板化表达，证据不足的特征不猜测。
-
-        若已有仿写模板非空，在其基础上融合补充新的有效特征，保留原有可用规则。
+        只概括全书常态，允许随场景自然浮动。已有仿写模板非空时，在其基础上融合去重并保持精炼。
         """
 
         let existingNote = existingTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -170,19 +177,20 @@ enum StyleDistiller {
         }
 
         let maxSegments = max(1, min(chunks.count, tokenBudget / 820))
+        let targetDialogueRatio = analyzeFingerprint(text).dialogueRatio
         func styleRichnessScore(_ chunk: String) -> Double {
             let count = max(1, chunk.count)
-            let quoteCount = chunk.filter { $0 == "“" || $0 == "「" }.count
             let sentEndCount = chunk.filter { "。！？!?".contains($0) }.count
             let commaCount = chunk.filter { "，；、".contains($0) }.count
             let paraCount = chunk.split(whereSeparator: \.isNewline).filter {
                 !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }.count
-            // 兼顾对白与叙述混合、句式错落度与分段密度，避免挑中纯干瘪流水账或过短碎片。
-            let dialogueBonus = quoteCount > 0 ? min(12.0, Double(quoteCount) * 2.5) : 0.0
+            let chunkDialogueRatio = analyzeFingerprint(chunk).dialogueRatio
+            // 优先选对白占比接近全书的片段。
+            let dialogueAlignment = (1.0 - min(1.0, abs(chunkDialogueRatio - targetDialogueRatio) * 2.0)) * 10.0
             let lengthFactor = min(1.0, Double(count) / 350.0)
             let paceScore = Double(sentEndCount) * 1.4 + Double(commaCount) * 0.35 + Double(paraCount) * 0.8
-            return (paceScore + dialogueBonus) * lengthFactor
+            return (paceScore + dialogueAlignment) * lengthFactor
         }
 
         var selectedIndices: [Int] = []
@@ -211,14 +219,13 @@ enum StyleDistiller {
         var parts: [String] = []
         var usedTokens = 0
         for idx in selectedIndices {
-            let pct = Int((Double(idx + 1) / Double(chunks.count) * 100.0).rounded())
-            let block = "[全书约 \(pct)% 处]\n\(chunks[idx])"
+            let block = chunks[idx]
             let cost = TokenEstimator.estimate(block)
             if !parts.isEmpty && usedTokens + cost > tokenBudget { break }
             parts.append(block)
             usedTokens += cost
         }
-        return parts.joined(separator: "\n\n")
+        return parts.joined(separator: "\n\n---\n\n")
     }
 
     /// 为抽取的原著节选反推结构化语域标签与纯写作技法指令（MUSE §3.3：区分语域与内容，严禁包含原著人名/地名/剧情）。
@@ -331,23 +338,27 @@ enum StyleDistiller {
         guard !picked.isEmpty else { return (nil, []) }
 
         let sections = picked.enumerated().map { idx, item in
-            """
-            <style_reference index="\(idx + 1)" do_not_continue="true">
-            技法要求：\(item.technique)
+            let safeTechnique = item.technique
+                .replacingOccurrences(of: "\"", with: "'")
+                .replacingOccurrences(of: "\r\n", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return """
+            <style_reference index="\(idx + 1)" technique="\(safeTechnique)" do_not_continue="true">
             \(item.entry.text)
             </style_reference>
             """
         }
         let body = """
         <style_reference_only do_not_continue="true">
-        以下节选仅用于效仿句式节奏与用词质感；不要照搬样本的对话密度，严禁将其视为前文结尾，严禁续写其中的人物或剧情。
+        以下节选仅作句式与用词示范，忽略标签包装，不续写其中人物或剧情。
         \(sections.joined(separator: "\n\n"))
         </style_reference_only>
         """
         let block = PromptBlock(
             key: "corpus:style-reference",
             category: .worldbook,
-            title: "文风参考样本（仅仿笔法）",
+            title: "文风范例（仅仿笔法）",
             body: body
         )
         return (block, Set(picked.map(\.entry.entryID)))
@@ -471,7 +482,8 @@ enum StyleDistiller {
 
         let explicitDialogueRequest = ["对话", "对白", "交谈", "争吵", "质问", "谈话"]
             .contains { keywordSource.contains($0) }
-        if !explicitDialogueRequest && (textFP.dialogueRatio > 0.65 || profile.dialogueDensity == "高") && overlapCount == 0 {
+        let dialogueCap = max(0.50, queryFingerprint.dialogueRatio + 0.20)
+        if !explicitDialogueRequest && (textFP.dialogueRatio > dialogueCap || profile.dialogueDensity == "高") && overlapCount == 0 {
             return nil
         }
 

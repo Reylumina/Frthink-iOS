@@ -18,12 +18,12 @@ enum ReFoldManager {
     ) -> Int {
         let safeBudget = max(1_024, effectiveInputBudget)
         if modelContextWindow >= 500_000 {
-            return min(safeBudget, 120_000)
+            return min(safeBudget, 16_000)
         }
         if modelContextWindow >= 128_000 {
-            return min(safeBudget, 64_000)
+            return min(safeBudget, 12_000)
         }
-        return min(safeBudget, 12_000)
+        return min(safeBudget, 6_000)
     }
 
     static func apply(

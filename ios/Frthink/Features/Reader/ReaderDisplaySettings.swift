@@ -159,8 +159,8 @@ struct ReaderDisplaySettingsSheet: View {
     }
 
     private func restoreDefaults() {
-        fontSize = 18
-        lineHeight = 1.2
+        fontSize = 17
+        lineHeight = WriterTypography.lineHeight
     }
 }
 

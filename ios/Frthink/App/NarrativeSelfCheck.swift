@@ -1080,6 +1080,7 @@ extension SelfCheck {
             var settings = AppSettings()
             settings.globalPreset = "保持悬疑氛围。"
             settings.skills = Skill.defaults
+            settings.corpusEnabled = true
 
             let turn1 = NarrativeContextOrchestrator.compose(
                 workspace: workspace,
@@ -1107,12 +1108,14 @@ extension SelfCheck {
             try expect(
                 turn1.frozenSystemPrefix == turn2.frozenSystemPrefix
                     && turn1.frozenSystemPrefix.contains("短句推进，零多余修辞")
-                    && turn1.frozenSystemPrefix.contains("雨点砸在瓦面上"),
-                "连续两轮请求的冻结系统前缀必须字节完全一致，并包含静态文风模板与全书质心样本"
+                    && !turn1.frozenSystemPrefix.contains("雨点砸在瓦面上"),
+                "连续两轮请求的冻结系统前缀必须字节完全一致，仅放静态仿写规范，不把质心样本放入 Tier 0"
             )
+            let turn1TailAndUser = turn1.messages.dropFirst().map(\.content).joined(separator: "\n")
             let turn2TailAndUser = turn2.messages.dropFirst().map(\.content).joined(separator: "\n")
             try expect(
-                turn2TailAndUser.contains("动作场面一律使用短句，严禁直接抒情议论。")
+                turn1TailAndUser.contains("雨点砸在瓦面上")
+                    && turn2TailAndUser.contains("动作场面一律使用短句，严禁直接抒情议论。")
                     && turn2TailAndUser.contains("林昭")
                     && turn2TailAndUser.contains("沈默")
                     && turn2TailAndUser.contains("那就添炭")
@@ -5050,6 +5053,107 @@ extension SelfCheck {
                 "重置本书应保留正文、章节与译文，并彻底清空档案、剧情、规则、世界书与对话状态"
             )
             return "重置本书状态（保留正文）ok"
+        }
+
+        // 验证默认去 AI 味规则、Tier 0 缓存稳定性、短正文质心冷启动、样本包装清洗与优先级提示。
+        check("narrative.stylePipelineCoherenceAndAntiDialogueBias") {
+            let t0 = Date(timeIntervalSince1970: 1_797_000_000)
+            try expect(
+                ReFoldManager.adaptiveHorizonTokens(modelContextWindow: 128_000, effectiveInputBudget: 100_000) == 12_000
+                    && ReFoldManager.adaptiveHorizonTokens(modelContextWindow: 1_000_000, effectiveInputBudget: 100_000) == 16_000,
+                "ReFold 历史窗口上限应收紧以减少旧草稿对后续吐字的惯性干扰"
+            )
+
+            let centroid = CorpusEntry(
+                id: "c_cent_long",
+                source: "样本",
+                title: "全书质心",
+                text: "质心独家标记片段：风掠过青砖屋檐。"
+            )
+            let ws = NarrativeWorkspace(
+                storyGraph: StoryGraph.makeInitial(rootID: "root", now: t0),
+                preservedStyle: PreservedStyleDistillation(
+                    styleTemplate: "短句推进，动作承托对白。",
+                    centroidExemplar: centroid,
+                    exemplars: [centroid]
+                )
+            )
+            var settings = AppSettings()
+            try expect(
+                settings.aiFlavorRules == AppSettings.defaultAIFlavorRules
+                    && settings.aiFlavorRules.contains("去AI味约束")
+                    && !settings.aiFlavorRules.contains("多用短句"),
+                "默认去 AI 味规则应预置 5 条规范并去掉与断句规则冲突的短句引导"
+            )
+            settings.globalPreset = "保持冷静现实主义。"
+            settings.aiFlavorRules = "禁用空泛感官陈词。"
+            settings.corpusEnabled = true
+
+            let shortManuscript = "雨落石阶，林昭收拢伞面走入檐下。"
+            let shortPrompt = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: shortManuscript,
+                history: [],
+                userInstruction: "继续写林昭进屋",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailTier: .standard,
+                inputBudget: 24_000,
+                enableTools: false
+            )
+            let longManuscript = String(repeating: shortManuscript, count: 70)
+            let longPrompt = NarrativeContextOrchestrator.compose(
+                workspace: ws,
+                manuscript: longManuscript,
+                history: [],
+                userInstruction: "继续写林昭进屋",
+                settings: settings,
+                enabledUniverseEntryIDs: [],
+                tailTier: .standard,
+                inputBudget: 24_000,
+                enableTools: false
+            )
+            let shortTail = shortPrompt.messages.dropFirst().map(\.content).joined(separator: "\n")
+            let longTail = longPrompt.messages.dropFirst().map(\.content).joined(separator: "\n")
+
+            let fp = StyleDistiller.analyzeFingerprint(longManuscript)
+            let overviewSample = StyleDistiller.buildOverviewSample(from: longManuscript, tokenBudget: 600)
+            let distillText = StyleDistiller.distillMessages(
+                sampleText: longManuscript,
+                fingerprint: fp,
+                existingTemplate: "",
+                inputBudget: 12_000
+            ).map(\.content).joined(separator: "\n")
+            let refRendered = StyleDistiller.styleReferenceBlock(
+                from: [
+                    PromptAssembly.Corpus(
+                        libraryID: "l",
+                        libraryName: "样",
+                        entryID: "e1",
+                        entryName: "白描节奏",
+                        category: "仿写样本",
+                        text: "石阶湿滑，风从廊下穿过。"
+                    )
+                ],
+                maxSamples: 1
+            ).block?.rendered ?? ""
+
+            try expect(
+                shortPrompt.frozenSystemPrefix == longPrompt.frozenSystemPrefix
+                    && !longPrompt.frozenSystemPrefix.contains("质心独家标记片段")
+                    && shortTail.contains("质心独家标记片段")
+                    && !longTail.contains("质心独家标记片段")
+                    && longTail.contains("【规则优先级】")
+                    && longTail.contains("全局预设、启用技能与去 AI 味规则优先于单书仿写规范与文风范例")
+                    && !overviewSample.contains("[全书约")
+                    && refRendered.contains("technique=\"")
+                    && !refRendered.contains("技法要求：")
+                    && distillText.contains("节奏与对白基线")
+                    && distillText.contains("本书应避开的写法")
+                    && !distillText.contains("碎对话问答"),
+                "应保证 Tier 0 字节稳定、短正文尾段回落质心、去除样本包装污染并在尾部声明规则优先级"
+            )
+            return "默认去 AI 味规则 + Tier 0 稳态 + 样本去污染 + 优先级提示 ok"
         }
     }
 

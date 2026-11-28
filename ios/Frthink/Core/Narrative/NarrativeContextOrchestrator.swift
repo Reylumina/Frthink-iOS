@@ -81,24 +81,6 @@ enum NarrativeContextOrchestrator {
             )
         }
 
-        if let centroid = preservedStyle.centroidExemplar {
-            let centroidText = centroid.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !centroidText.isEmpty {
-                let rawTitle = centroid.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                let technique = rawTitle.isEmpty ? "保持全书主基调的句式节奏与叙述质感。" : rawTitle
-                let wrappedCentroid = """
-                <style_reference_only do_not_continue="true">
-                以下全书质心节选仅用于锚定整本作品的基准语感与文风质感，严禁续写其中人物或剧情：
-                <style_reference index="centroid" do_not_continue="true">
-                技法要求：\(technique)
-                \(centroidText)
-                </style_reference>
-                </style_reference_only>
-                """
-                sections.append(wrappedCentroid)
-            }
-        }
-
         let activeAlwaysLore = alwaysOnLorePages
             .filter { $0.enabled && $0.kind == .lore && $0.activationMode == .always }
             .sorted { lhs, rhs in
@@ -746,6 +728,7 @@ enum NarrativeContextOrchestrator {
         let alwaysOnLorePages = state.entityPages.values.filter {
             $0.enabled && $0.kind == .lore && $0.activationMode == .always
         }
+
         var effectiveStyle = workspace.preservedStyle
         if !settings.corpusEnabled {
             effectiveStyle.centroidExemplar = nil
@@ -771,6 +754,7 @@ enum NarrativeContextOrchestrator {
         let causalPrefix = tailSlice.causalPrefix
         let causalCutoff = tailSlice.causalCutoff
         let tailText = tailSlice.tailText
+
         let cleanInstruction = userInstruction?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let scanText = [cleanInstruction, tailText].filter { !$0.isEmpty }.joined(separator: "\n")
 
@@ -841,6 +825,15 @@ enum NarrativeContextOrchestrator {
         }
         let usedFallbackBM25 = prefetch.usedFallbackBM25
 
+        if !queryCone.block.isEmpty {
+            tailSections.append(queryCone.block)
+        }
+
+        if !tailText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            tailSections.append("【当前场次正文】\n" + tailText)
+        }
+
+        // 文风范例放在正文之后；正文不足时用全书质心补位。
         if settings.corpusEnabled {
             let centroidID = effectiveStyle.centroidExemplar?.id
             let sceneCandidateEntries = effectiveStyle.exemplars
@@ -867,15 +860,28 @@ enum NarrativeContextOrchestrator {
             )
             if let renderedStyle = sceneStyleRef.block?.rendered, !renderedStyle.isEmpty {
                 tailSections.append(renderedStyle)
+            } else if tailText.count < 1_000,
+                      let centroid = effectiveStyle.centroidExemplar,
+                      !centroid.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let centroidCorpus = PromptAssembly.Corpus(
+                    libraryID: "preserved-centroid",
+                    libraryName: "全书质心",
+                    entryID: centroid.id,
+                    entryName: centroid.title,
+                    category: "仿写样本",
+                    text: centroid.text
+                )
+                let centroidRef = StyleDistiller.styleReferenceBlock(
+                    from: [centroidCorpus],
+                    maxSamples: 1,
+                    tokenBudget: max(256, inputBudget / 6),
+                    instructionText: nil,
+                    queryText: nil
+                )
+                if let renderedCentroid = centroidRef.block?.rendered, !renderedCentroid.isEmpty {
+                    tailSections.append(renderedCentroid)
+                }
             }
-        }
-
-        if !queryCone.block.isEmpty {
-            tailSections.append(queryCone.block)
-        }
-
-        if !tailText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            tailSections.append("【当前场次正文】\n" + tailText)
         }
 
         let currentBranchID = workspace.storyGraph.nodes[workspace.storyGraph.headNodeID]?.branchLabel
@@ -885,6 +891,14 @@ enum NarrativeContextOrchestrator {
         )
         if !authorityRules.isEmpty {
             tailSections.append(authorityRules)
+        }
+
+        let priorityNotice = buildPriorityNotice(
+            globalPreset: settings.globalPreset,
+            aiFlavorRules: settings.aiFlavorRules
+        )
+        if !priorityNotice.isEmpty {
+            tailSections.append(priorityNotice)
         }
 
         if let cleanBeat = plannedBeat?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -918,6 +932,16 @@ enum NarrativeContextOrchestrator {
             usedFallbackBM25: usedFallbackBM25,
             estimatedInputTokens: TokenEstimator.estimate(messages: finalMessages)
         )
+    }
+
+    private static func buildPriorityNotice(
+        globalPreset: String,
+        aiFlavorRules: String
+    ) -> String {
+        let hasGlobalGuide = !globalPreset.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !aiFlavorRules.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasGlobalGuide else { return "" }
+        return "【规则优先级】\n- 全局预设、启用技能与去 AI 味规则优先于单书仿写规范与文风范例。"
     }
 
     /// 构建语境感知选区改写提示词：注入前后文衔接片段、在场实体约束、活跃规则与仿写基准（StoryLens）。

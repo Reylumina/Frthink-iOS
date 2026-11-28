@@ -571,7 +571,7 @@ struct WriterPane: View {
                     updateColumnWidth(width)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.horizontal, Theme.Layout.readingMargin)
                 .padding(.vertical, Theme.Spacing.m)
                 .onGeometryChange(for: CGFloat.self) { proxy in
                     proxy.size.height

@@ -14,8 +14,8 @@ struct ReaderPane: View {
 
     private let session: ProjectSession
 
-    @AppStorage(ReaderStorageKey.fontSize) private var fontSize: Double = 18
-    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = 1.2
+    @AppStorage(ReaderStorageKey.fontSize) private var fontSize: Double = 17
+    @AppStorage(ReaderStorageKey.lineHeight) private var lineHeight: Double = WriterTypography.lineHeight
     @AppStorage(ReaderStorageKey.mode) private var modeRaw = ReaderMode.source.rawValue
     @AppStorage private var bookmarkOffset: Int
     @AppStorage private var lastOffset: Int
@@ -360,7 +360,7 @@ struct ReaderPane: View {
             // 每行不超过 36 个汉字：正文栏封顶后居中（§2.3、§5.3）。
             .frame(maxWidth: bodyColumnMaxWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.horizontal, Theme.Layout.readingMargin)
             .padding(.vertical, Theme.Spacing.l)
         }
         .background(ReaderStyle.page(dark: false))

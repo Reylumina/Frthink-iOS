@@ -484,6 +484,15 @@ struct AppSettings: Codable {
     var globalPreset: String
     /// 去 AI 味规则（P05）。渲染成「用户确认的写作偏好：\n<内容>」。
     var aiFlavorRules: String
+    /// 出厂默认去 AI 味规则。
+    static let defaultAIFlavorRules: String = """
+    去AI味约束
+    1. 对话：正常交锋照常写，但别借人物的嘴硬塞背景，也不写一问一答的流水账。能靠动作、眼神或环境带出来的意思就别说破，人物开口要带着各自的心思、试探或敷衍。
+    2. 语感：不用“我的意思是”“哦，得了吧”这类翻译腔口头禅，少用被动句、长定语和一连串的“的/地”，多用连贯的动词和日常中文说法。
+    3. 数字与量词：除了必要的设定和账目，不使用“两秒”“半寸”这类生硬的精确数字；禁止反复使用“片刻、半晌、微微、两下、几步”这类现成模糊词，尽量靠具体动作和周围变化带出时间与距离。
+    4. 断句：不用“没停、没躲”“不退、不避”“快、准、狠”这类硬凑紧张感的碎句，句子长短跟着呼吸和情绪自然走，保持通顺连贯。
+    5. 心理：不写“他感到一阵复杂的情绪”“空气仿佛凝固了”“收获比预想的还多”这类跳出画面下结论的旁白，把心理落在具体的举动、感官细节或直觉反应上。
+    """
     /// 是否在末尾注入「尾段风格锚定」（保留该字段以兼容既有配置解码）。
     var reinforceStyleAtTail: Bool
     /// 采纳正文后是否在后台静默运行 Sleep-Time 状态与伏笔同步子 Agent。
@@ -562,7 +571,7 @@ struct AppSettings: Codable {
         universeEntries: [UniverseEntry] = [],
         enabledUniverseEntryIDs: [String] = [],
         theme: AppTheme = .system,
-        bodyFontSize: Double = 18,
+        bodyFontSize: Double = 17,
         defaultTemperature: Double = 0.2,
         defaultMaxTokens: Int = 30000,
         contextWindowTokens: Int = 0,
@@ -581,7 +590,7 @@ struct AppSettings: Codable {
         conversationSummaryThresholdPercent: Int = 95,
         excludeAssistantChatHistory: Bool = false,
         globalPreset: String = "",
-        aiFlavorRules: String = "",
+        aiFlavorRules: String = AppSettings.defaultAIFlavorRules,
         skills: [Skill]? = nil,
         corpusLibraries: [CorpusLibrary] = [],
         reinforceStyleAtTail: Bool = true,
@@ -669,7 +678,7 @@ struct AppSettings: Codable {
         enabledUniverseEntryIDs =
             (try? c.decode([String].self, forKey: .enabledUniverseEntryIDs)) ?? []
         theme = (try? c.decode(AppTheme.self, forKey: .theme)) ?? .system
-        bodyFontSize = (try? c.decode(Double.self, forKey: .bodyFontSize)) ?? 18
+        bodyFontSize = (try? c.decode(Double.self, forKey: .bodyFontSize)) ?? 17
         defaultTemperature = (try? c.decode(Double.self, forKey: .defaultTemperature)) ?? 0.2
         defaultMaxTokens = (try? c.decode(Int.self, forKey: .defaultMaxTokens)) ?? 30000
         contextWindowTokens =
@@ -699,7 +708,7 @@ struct AppSettings: Codable {
         excludeAssistantChatHistory =
             (try? c.decode(Bool.self, forKey: .excludeAssistantChatHistory)) ?? false
         globalPreset = (try? c.decode(String.self, forKey: .globalPreset)) ?? ""
-        aiFlavorRules = (try? c.decode(String.self, forKey: .aiFlavorRules)) ?? ""
+        aiFlavorRules = (try? c.decode(String.self, forKey: .aiFlavorRules)) ?? AppSettings.defaultAIFlavorRules
         skills = (try? c.decode([Skill].self, forKey: .skills)) ?? Skill.defaults
         corpusLibraries =
             (try? c.decode([CorpusLibrary].self, forKey: .corpusLibraries)) ?? []
